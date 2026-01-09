@@ -1,0 +1,16 @@
+{
+  "name": "pragma",
+  "version": "0.1.0",
+  "description": "Vibetrading for Claude Code",
+  "author": {
+    "name": "s0nderlabs",
+    "url": "https://github.com/s0nderlabs"
+  },
+  "repository": "https://github.com/s0nderlabs/pragma",
+  "license": "MIT",
+  "commands": "./commands/",
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}

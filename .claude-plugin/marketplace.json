@@ -1,0 +1,15 @@
+{
+  "name": "pragma-marketplace",
+  "owner": {
+    "name": "s0nderlabs",
+    "url": "https://github.com/s0nderlabs"
+  },
+  "plugins": [
+    {
+      "name": "pragma",
+      "source": "./",
+      "description": "Vibetrading for Claude Code",
+      "version": "0.1.0"
+    }
+  ]
+}

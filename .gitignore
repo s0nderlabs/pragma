@@ -29,3 +29,17 @@ TEST_*.md
 
 # MCP
 .playwright-mcp/
+
+# Swift
+.build/
+.swiftpm/
+Package.resolved
+*.xcodeproj/
+*.xcworkspace/
+
+# Binaries (keep .gitkeep)
+bin/*
+!bin/.gitkeep
+
+# pragma config (user-specific)
+~/.pragma/

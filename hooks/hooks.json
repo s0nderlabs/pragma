@@ -1,0 +1,41 @@
+{
+  "$schema": "https://claude.ai/schemas/hooks.json",
+  "hooks": [
+    {
+      "name": "validate-swap-execution",
+      "description": "Validates swap parameters before execution",
+      "trigger": {
+        "tool": "execute_swap",
+        "event": "before"
+      },
+      "action": {
+        "type": "log",
+        "message": "Executing swap with quote: ${params.quoteId}"
+      }
+    },
+    {
+      "name": "validate-transfer",
+      "description": "Validates transfer parameters",
+      "trigger": {
+        "tool": "transfer",
+        "event": "before"
+      },
+      "action": {
+        "type": "log",
+        "message": "Transferring ${params.amount} ${params.token} to ${params.to}"
+      }
+    },
+    {
+      "name": "log-transaction-result",
+      "description": "Logs transaction results for debugging",
+      "trigger": {
+        "tools": ["execute_swap", "transfer", "stake"],
+        "event": "after"
+      },
+      "action": {
+        "type": "log",
+        "message": "Transaction completed: ${result.txHash}"
+      }
+    }
+  ]
+}
