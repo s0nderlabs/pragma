@@ -1,0 +1,31 @@
+# Claude context (local only)
+.claude/
+CLAUDE.md
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+.next/
+
+# Environment
+.env
+.env.local
+*.local
+
+# IDE
+.vscode/
+.idea/
+.wake/
+
+# OS
+.DS_Store
+
+# Dev artifacts
+*_FIX*.md
+*_SUMMARY.md
+TEST_*.md
+
+# MCP
+.playwright-mcp/
