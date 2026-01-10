@@ -2,9 +2,10 @@
   "mcpServers": {
     "pragma": {
       "command": "node",
-      "args": ["./servers/pragma-mcp/dist/index.js"],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/servers/pragma-mcp/dist/index.js"],
       "env": {
-        "PRAGMA_CONFIG_PATH": "~/.pragma/config.json"
+        "PRAGMA_CONFIG_PATH": "~/.pragma/config.json",
+        "PRAGMA_SIGNER_PATH": "${CLAUDE_PLUGIN_ROOT}/bin/pragma-signer"
       }
     }
   }
