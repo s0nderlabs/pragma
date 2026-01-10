@@ -7,9 +7,5 @@
     "url": "https://github.com/s0nderlabs"
   },
   "repository": "https://github.com/s0nderlabs/pragma",
-  "license": "MIT",
-  "commands": "../commands/",
-  "skills": "../skills/",
-  "hooks": "../hooks/hooks.json",
-  "mcpServers": "../.mcp.json"
+  "license": "MIT"
 }
