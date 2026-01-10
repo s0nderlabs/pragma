@@ -37,52 +37,37 @@ xcode-select --install
 Then re-run /pragma:setup
 ```
 
-## Step 2: Find Plugin Root
+## Step 2: Install Dependencies
 
-Determine where pragma is installed:
 ```bash
-# If running from cloned repo
-PRAGMA_ROOT=$(pwd)
-
-# Check if we're in the pragma directory
-if [ -f "$PRAGMA_ROOT/.claude-plugin/plugin.json" ]; then
-  echo "Found pragma at: $PRAGMA_ROOT"
-else
-  echo "ERROR: Not in pragma directory. Navigate to the pragma repo first."
-fi
+cd ${CLAUDE_PLUGIN_ROOT}/servers/pragma-mcp && bun install
 ```
 
-## Step 3: Install Dependencies
+## Step 3: Build TypeScript MCP Server
 
 ```bash
-cd $PRAGMA_ROOT/servers/pragma-mcp && bun install
-```
-
-## Step 4: Build TypeScript MCP Server
-
-```bash
-cd $PRAGMA_ROOT/servers/pragma-mcp && bun run build
+cd ${CLAUDE_PLUGIN_ROOT}/servers/pragma-mcp && bun run build
 ```
 
 This compiles TypeScript to `dist/index.js`.
 
-## Step 5: Build Swift Binary
+## Step 4: Build Swift Binary
 
 ```bash
-cd $PRAGMA_ROOT/swift && swift build -c release
+cd ${CLAUDE_PLUGIN_ROOT}/swift && swift build -c release
 ```
 
 This builds `pragma-signer` which handles Touch ID and Keychain operations.
 
-## Step 6: Copy Binary
+## Step 5: Copy Binary
 
 ```bash
-mkdir -p $PRAGMA_ROOT/bin
-cp $PRAGMA_ROOT/swift/.build/release/pragma-signer $PRAGMA_ROOT/bin/
-chmod +x $PRAGMA_ROOT/bin/pragma-signer
+mkdir -p ${CLAUDE_PLUGIN_ROOT}/bin
+cp ${CLAUDE_PLUGIN_ROOT}/swift/.build/release/pragma-signer ${CLAUDE_PLUGIN_ROOT}/bin/
+chmod +x ${CLAUDE_PLUGIN_ROOT}/bin/pragma-signer
 ```
 
-## Step 7: Create Wallet
+## Step 6: Create Wallet
 
 Now use the `setup_wallet` MCP tool to create the smart account:
 
