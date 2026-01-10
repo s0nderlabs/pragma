@@ -9,10 +9,17 @@ export interface PragmaConfig {
   network: {
     chainId: number;
     rpc: string;
+    name?: string; // e.g., "monad", "base"
   };
   wallet?: {
     smartAccountAddress: Address;
     sessionKeyAddress: Address;
+    passkeyPublicKey: Hex; // Uncompressed P-256 public key (0x04...)
+    keyId?: string; // P-256 key ID for HybridDelegator
+  };
+  bundler?: {
+    url: string;
+    paymasterUrl?: string;
   };
   apis?: {
     monorail?: string;

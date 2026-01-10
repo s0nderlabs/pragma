@@ -27,6 +27,9 @@ dist/
 *_SUMMARY.md
 TEST_*.md
 
+# Dev scripts (not for production)
+dev/
+
 # MCP
 .playwright-mcp/
 
