@@ -54,7 +54,7 @@ This compiles TypeScript to `dist/index.js`.
 ## Step 4: Build Swift Binary
 
 ```bash
-cd ${CLAUDE_PLUGIN_ROOT}/swift && swift build -c release
+cd ${CLAUDE_PLUGIN_ROOT}/swift && swift package clean && swift build -c release
 ```
 
 This builds `pragma-signer` which handles Touch ID and Keychain operations.
