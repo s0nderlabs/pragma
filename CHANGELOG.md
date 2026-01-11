@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-01-11
+
+### Changed
+- Setup command now explicitly loads pragma-core skill after session restart (Step 5.1)
+- Ensures `allowed-tools` security restriction is active before any MCP tool usage
+
 ## [0.1.3] - 2026-01-11
 
 ### Changed

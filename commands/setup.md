@@ -20,8 +20,8 @@ Setup requires a session restart midway because MCP tools are only discovered at
 - Ends with: "Please restart and run `claude --continue`"
 
 **Phase 2 (Steps 5.1-7):** Wallet Setup (after `claude --continue`)
-- MCP tools now available
-- Check existing wallet, create if needed, verify skill activation
+- Load pragma-core skill first (activates security restrictions)
+- Check existing wallet, create if needed, verify setup
 
 This ensures the plugin is properly built and MCP tools are available for wallet operations.
 
@@ -106,7 +106,23 @@ This will resume setup with MCP tools available.
 
 When the user returns via `claude --continue`, proceed with wallet setup.
 
-## Step 5.1: Check Existing Wallet
+## Step 5.1: Load pragma-core Skill
+
+**IMPORTANT:** Before using any MCP tools, load the pragma-core skill first.
+
+Use the Skill tool to load `pragma:pragma-core`:
+```
+Skill(pragma:pragma-core)
+```
+
+This activates the `allowed-tools` restriction which:
+- Permits only pragma MCP tools
+- Blocks Bash access to prevent private key exposure
+- Ensures secure operation throughout setup
+
+**Do not proceed until the skill is loaded.**
+
+## Step 5.2: Check Existing Wallet
 
 MCP tools are now available. Check if a wallet already exists.
 
@@ -120,7 +136,7 @@ If `has_wallet` returns `initialized: true`:
 If `has_wallet` returns `initialized: false`:
 - Continue to Step 6 (create new wallet)
 
-## Step 6: Create Wallet
+## Step 6: Create Wallet (if needed)
 
 Use the `setup_wallet` MCP tool to create the smart account:
 
@@ -134,17 +150,16 @@ Example:
 User provides RPC URL -> Touch ID prompt -> Smart account deployed -> Ready to trade!
 ```
 
-## Step 7: Verify Skill Activation
+## Step 7: Verify Setup
 
-Test that pragma-core skill is active by checking balance:
+Test that everything is working by checking balance:
 
-1. Ask: "What's my balance?"
+1. Use `get_all_balances` MCP tool to fetch portfolio
 2. Verify:
-   - pragma-core skill should activate (check tool usage)
-   - `get_balance` or `get_all_balances` MCP tool should be called
-   - NO Bash commands should be used
+   - Balance is returned successfully
+   - Only MCP tools are used (Bash is blocked by pragma-core skill)
 
-If working correctly, you'll see your wallet balance via MCP tools.
+Show the user their wallet address and balances to confirm setup is complete.
 
 ## Success
 
