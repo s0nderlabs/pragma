@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-01-11
+
+### Added
+- `has_wallet` tool - Safe check for wallet initialization status
+- `has_providers` tool - Safe check for provider configuration
+- `pragma-core` skill with `allowed-tools` enforcement
+
+### Changed
+- Setup command now checks for existing wallet before creating new one
+- Setup command includes security notice about direct CLI access
+- Language made chain-agnostic (removed Monad-specific references)
+
+### Security
+- **CRITICAL:** Implemented `allowed-tools` restriction in pragma-core skill
+- Claude is now restricted to MCP tools only when pragma-core skill is active
+- Bash access blocked to prevent private key exposure via `pragma-signer get-session`
+- Bash access blocked to prevent API key exposure via `pragma-signer get-provider`
+
+### Removed
+- `trading` skill (merged into `pragma-core`)
+
 ## [0.1.1] - 2026-01-11
 
 ### Added

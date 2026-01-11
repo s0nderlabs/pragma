@@ -2,6 +2,8 @@
 // Registers all MCP tools with the server
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerHasWallet } from "./has-wallet.js";
+import { registerHasProviders } from "./has-providers.js";
 import { registerSetupWallet } from "./setup-wallet.js";
 import { registerGetBalance } from "./get-balance.js";
 import { registerGetAllBalances } from "./get-all-balances.js";
@@ -14,6 +16,10 @@ import { registerCheckSessionKeyBalance } from "./check-session-key-balance.js";
 import { registerFundSessionKey } from "./fund-session-key.js";
 
 export function registerTools(server: McpServer): void {
+  // Wallet checks (safe, read-only)
+  registerHasWallet(server);
+  registerHasProviders(server);
+
   // Wallet setup
   registerSetupWallet(server);
 
