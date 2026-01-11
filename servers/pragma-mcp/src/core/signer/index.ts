@@ -312,3 +312,76 @@ export function deriveAddressFromP256(publicKey: Hex): Hex {
     "Address derivation for P-256 passkeys is done through the smart account SDK"
   );
 }
+
+// ============================================================================
+// Provider Operations (Keychain)
+// ============================================================================
+
+/**
+ * Supported provider types
+ */
+export type ProviderType = "rpc" | "pimlico" | "monorail" | "0x";
+
+/**
+ * Store a provider value (API key or URL) in Keychain
+ * @param type - Provider type (rpc, pimlico, monorail)
+ * @param value - The value to store (URL or API key)
+ */
+export async function storeProvider(type: ProviderType, value: string): Promise<void> {
+  const response = await execSigner(["store-provider", type, value]);
+  handleResponse(response);
+}
+
+/**
+ * Get a provider value from Keychain
+ * @param type - Provider type (rpc, pimlico, monorail)
+ * @returns The stored value or null if not found
+ */
+export async function getProvider(type: ProviderType): Promise<string | null> {
+  try {
+    const response = await execSigner(["get-provider", type]);
+    const data = handleResponse<{ value: string }>(response, ["value"]);
+    return data.value;
+  } catch (error) {
+    // Key not found is not an error condition
+    if (error instanceof Error && error.message.includes("not found")) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Delete a provider from Keychain
+ * @param type - Provider type to delete
+ */
+export async function deleteProvider(type: ProviderType): Promise<void> {
+  const response = await execSigner(["delete-provider", type]);
+  handleResponse(response);
+}
+
+/**
+ * Check if a provider exists in Keychain
+ * @param type - Provider type to check
+ * @returns true if provider exists
+ */
+export async function hasProvider(type: ProviderType): Promise<boolean> {
+  const response = await execSigner(["has-provider", type]);
+  const data = handleResponse<{ exists: string }>(response, ["exists"]);
+  return data.exists === "true";
+}
+
+/**
+ * List all configured providers
+ * @returns Array of provider types that are configured
+ */
+export async function listProviders(): Promise<ProviderType[]> {
+  const response = await execSigner(["list-providers"]);
+  const data = handleResponse<{ providers: string }>(response, ["providers"]);
+
+  // Parse comma-separated list
+  if (!data.providers || data.providers === "") {
+    return [];
+  }
+  return data.providers.split(",") as ProviderType[];
+}

@@ -1,9 +1,12 @@
 {
   "name": "pragma",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vibetrading for Claude Code",
+  "category": "crypto",
+  "keywords": ["crypto", "trading", "defi", "wallet", "swap"],
   "author": {
     "name": "s0nderlabs",
+    "email": "s0nderlabs.hq@gmail.com",
     "url": "https://github.com/s0nderlabs"
   },
   "repository": "https://github.com/s0nderlabs/pragma",

@@ -19,14 +19,21 @@ export interface ChainConfig {
     decimals: number;
   };
   blockExplorer?: string;
-  // Token addresses (chain-specific)
+  // Token addresses (chain-specific, from Monorail verified tokens)
   tokens: {
-    weth?: Address; // Wrapped native token (WMON, WETH, etc.)
+    wmon?: Address; // Wrapped MON
+    weth?: Address; // Wrapped ETH (bridged)
   };
   // Protocol addresses (if different per chain)
   protocols?: {
     apriori?: Address; // Liquid staking
-    monorail?: string; // DEX aggregator API
+    monorailPathfinder?: string; // DEX aggregator quote API (pathfinder.monorail.xyz)
+    monorailDataApi?: string; // Token data API (api.monorail.xyz)
+  };
+  // DEX aggregator addresses
+  aggregators?: {
+    zeroX?: Address; // 0x Exchange Proxy (allowance holder)
+    monorail?: Address; // Monorail aggregator
   };
 }
 
@@ -47,11 +54,18 @@ export const SUPPORTED_CHAINS: Record<number, ChainConfig> = {
     },
     blockExplorer: "https://testnet.monadexplorer.com",
     tokens: {
-      weth: "0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701" as Address,
+      // Testnet uses same token addresses as mainnet
+      wmon: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a" as Address,
+      weth: "0xee8c0e9f1bffb4eb878d8f15f368a02a35481242" as Address,
     },
     protocols: {
       apriori: "0x0c65a0bc65a5d819235b71f554d210d3f80e0852" as Address,
-      monorail: "https://api.monorail.xyz",
+      monorailPathfinder: "https://pathfinder.monorail.xyz/v4",
+      monorailDataApi: "https://api.monorail.xyz/v2",
+    },
+    aggregators: {
+      zeroX: "0x0000000000001fF3684f28c67538d4D072C22734" as Address,
+      monorail: "0xA68A7F0601effDc65C64d9C47cA1b18D96B4352c" as Address,
     },
   },
   // Monad Mainnet
@@ -64,13 +78,20 @@ export const SUPPORTED_CHAINS: Record<number, ChainConfig> = {
       symbol: "MON",
       decimals: 18,
     },
-    blockExplorer: "https://monadexplorer.com",
+    blockExplorer: "https://monadvision.com",
     tokens: {
-      weth: "0x760AfE86e5de5fa0Ee542fc7B7B713e1c5425701" as Address, // TBD
+      // From Monorail verified tokens API
+      wmon: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a" as Address,
+      weth: "0xee8c0e9f1bffb4eb878d8f15f368a02a35481242" as Address,
     },
     protocols: {
-      apriori: "0x0c65a0bc65a5d819235b71f554d210d3f80e0852" as Address, // TBD
-      monorail: "https://api.monorail.xyz",
+      apriori: "0x0c65a0bc65a5d819235b71f554d210d3f80e0852" as Address,
+      monorailPathfinder: "https://pathfinder.monorail.xyz/v4",
+      monorailDataApi: "https://api.monorail.xyz/v2",
+    },
+    aggregators: {
+      zeroX: "0x0000000000001fF3684f28c67538d4D072C22734" as Address,
+      monorail: "0xA68A7F0601effDc65C64d9C47cA1b18D96B4352c" as Address,
     },
   },
   // Future chains can be added here:

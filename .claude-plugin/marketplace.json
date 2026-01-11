@@ -1,7 +1,10 @@
 {
   "name": "pragma-marketplace",
+  "version": "1.0.0",
+  "description": "Official pragma plugin marketplace",
   "owner": {
     "name": "s0nderlabs",
+    "email": "s0nderlabs.hq@gmail.com",
     "url": "https://github.com/s0nderlabs"
   },
   "plugins": [
@@ -9,7 +12,12 @@
       "name": "pragma",
       "source": "./",
       "description": "Vibetrading for Claude Code",
-      "version": "0.1.0"
+      "version": "0.1.1",
+      "author": {
+        "name": "s0nderlabs",
+        "email": "s0nderlabs.hq@gmail.com"
+      },
+      "category": "crypto"
     }
   ]
 }

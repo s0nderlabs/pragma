@@ -44,6 +44,9 @@ export interface TokenBalance {
   decimals: number;
 }
 
+// Aggregator types
+export type AggregatorName = "0x" | "monorail";
+
 // Quote types
 export interface SwapQuote {
   quoteId: string;
@@ -61,10 +64,15 @@ export interface SwapQuote {
   amountInWei: bigint;
   expectedOutput: string;
   expectedOutputWei: bigint;
+  minOutput: string;           // Min output after slippage (human readable)
+  minOutputWei: bigint;        // Min output after slippage (wei)
   priceImpact: number;
   route: string[];
   gasEstimate: bigint;
   expiresAt: number;
+  // Aggregator info
+  aggregator: AggregatorName;
+  aggregatorAddress: Address;  // Router address
 }
 
 // Execution types

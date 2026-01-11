@@ -4,6 +4,30 @@
 // Copyright (c) 2026 s0nderlabs
 
 import type { Address } from "viem";
+import { getDeleGatorEnvironment, ROOT_AUTHORITY } from "@metamask/delegation-toolkit";
+
+// Re-export ROOT_AUTHORITY for delegation building
+export { ROOT_AUTHORITY };
+
+// ============================================================================
+// DTK Environment
+// ============================================================================
+
+/**
+ * Chain ID used for DTK environment lookup
+ *
+ * DTK doesn't have Monad mainnet (143) in its registry yet.
+ * We use testnet chain ID (10143) to get the environment because:
+ * 1. All DTK contracts are deployed at the SAME CREATE2 addresses on both networks
+ * 2. The environment object only contains contract addresses, not chain-specific logic
+ */
+export const DTK_CHAIN_ID_FOR_ADDRESSES = 10143;
+
+/**
+ * Get DTK environment using the workaround chain ID
+ * Use this instead of calling getDeleGatorEnvironment(chainId) directly
+ */
+export const getDTKEnvironment = () => getDeleGatorEnvironment(DTK_CHAIN_ID_FOR_ADDRESSES);
 
 // Gas Thresholds (in wei - same across all chains)
 export const MIN_SESSION_KEY_BALANCE = BigInt("40000000000000000"); // 0.04 native

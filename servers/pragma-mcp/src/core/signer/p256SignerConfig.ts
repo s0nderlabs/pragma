@@ -3,7 +3,7 @@
 // Private keys NEVER leave the Keychain - only signatures cross the boundary
 // Copyright (c) 2026 s0nderlabs
 
-import type { Hex } from "viem";
+import type { Hex, Address } from "viem";
 import {
   keccak256,
   encodePacked,
@@ -15,6 +15,8 @@ import {
   hashTypedData,
   hashMessage,
 } from "viem";
+import { buildDelegationTypedData } from "../delegation/typedData.js";
+import type { Delegation } from "../delegation/types.js";
 import type { WebAuthnAccount } from "viem/account-abstraction";
 import type { SignableMessage } from "viem";
 import { signWithPasskey, getPasskeyPublicKey, parseP256PublicKey } from "./index.js";
@@ -180,7 +182,9 @@ function encodeDeleGatorSignature(
  */
 export function createStubSignature(keyId: string): Hex {
   const authenticatorData = createAuthenticatorData();
-  const keyIdHash = keccak256(encodePacked(["string"], [keyId])) as Hex;
+  // Use toHex(keyId) to match SDK's key registration format
+  const keyIdHex = toHex(keyId);
+  const keyIdHash = keccak256(encodePacked(["string"], [keyIdHex])) as Hex;
 
   // Use a fixed R and S value for the stub
   const rs = 57896044605178124381348723474703786764998477612067880171211129530534256022184n;
@@ -464,4 +468,81 @@ export async function getOrCreateKeyId(): Promise<string> {
   // Derive key ID from public key hash for determinism
   const keyIdHash = keccak256(publicKey);
   return `pragma-${keyIdHash.slice(2, 18)}`; // Use first 8 bytes of hash
+}
+
+// ============================================================================
+// Delegation Signing with P-256
+// ============================================================================
+
+/**
+ * Sign a delegation with P-256 passkey using WebAuthn wrapper
+ * Returns ABI-encoded signature compatible with HybridDeleGator's ERC-1271 verification
+ *
+ * This function:
+ * 1. Builds EIP-712 typed data for the delegation
+ * 2. Creates synthetic WebAuthn challenge from the typed data hash
+ * 3. Signs the WebAuthn message with Touch ID
+ * 4. Encodes the signature with full WebAuthn metadata
+ *
+ * @param delegation - The delegation to sign
+ * @param chainId - Chain ID for EIP-712 domain
+ * @param keyId - The key ID used for this passkey
+ * @param touchIdMessage - Custom message for Touch ID prompt
+ * @returns ABI-encoded signature for HybridDeleGator
+ */
+export async function signDelegationWithP256(
+  delegation: Delegation,
+  chainId: number,
+  keyId: string,
+  touchIdMessage?: string
+): Promise<Hex> {
+  // 1. Build EIP-712 typed data for delegation
+  const typedData = buildDelegationTypedData(delegation, chainId);
+
+  // 2. Hash the typed data (this becomes the WebAuthn challenge)
+  // Note: args is NOT included in signed typed data - it's a runtime parameter
+  const messageHash = hashTypedData({
+    domain: typedData.domain,
+    types: typedData.types,
+    primaryType: typedData.primaryType,
+    message: {
+      delegate: typedData.message.delegate,
+      delegator: typedData.message.delegator,
+      authority: typedData.message.authority,
+      caveats: typedData.message.caveats.map((c) => ({
+        enforcer: c.enforcer,
+        terms: c.terms,
+      })),
+      salt: BigInt(typedData.message.salt),
+    },
+  });
+
+  // 3. Create WebAuthn wrapper data
+  const authenticatorData = createAuthenticatorData();
+  const { prefix, suffix, full: clientDataJSON } = createClientDataJSON(messageHash);
+
+  // 4. Compute WebAuthn hash and sign with Touch ID
+  const webauthnHash = await computeWebAuthnHash(authenticatorData, clientDataJSON);
+  const rawSignature = await signWithPasskey(webauthnHash, touchIdMessage ?? "Sign delegation");
+
+  // 5. Parse and normalize signature (prevent malleability)
+  let { r, s } = parseRawSignature(rawSignature);
+  s = normalizeS(s);
+
+  // 6. Encode full DeleGator signature
+  // CRITICAL: The SDK uses toHex(keyId) when registering the key, so we must hash
+  // the hex-encoded keyId, not the raw string. This matches the SDK's encodeDeleGatorSignature.
+  const keyIdHex = toHex(keyId);
+  const keyIdHash = keccak256(encodePacked(["string"], [keyIdHex])) as Hex;
+
+  return encodeDeleGatorSignature(
+    keyIdHash,
+    r,
+    s,
+    authenticatorData,
+    true, // userVerified
+    prefix,
+    suffix,
+    1n // responseTypeLocation (position of "type" in clientDataJSON)
+  );
 }

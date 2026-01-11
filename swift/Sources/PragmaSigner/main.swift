@@ -55,6 +55,12 @@ enum Command: String {
     case getSession = "get-session"
     case deleteSession = "delete-session"
     case hasSession = "has-session"
+    // Provider commands
+    case storeProvider = "store-provider"
+    case getProvider = "get-provider"
+    case deleteProvider = "delete-provider"
+    case hasProvider = "has-provider"
+    case listProviders = "list-providers"
 }
 
 // MARK: - Command Handlers
@@ -152,6 +158,46 @@ func handleHasSession() {
     output(.success(["exists": exists ? "true" : "false"]))
 }
 
+// MARK: - Provider Handlers
+
+func handleStoreProvider(_ type: String, _ value: String) {
+    do {
+        try Keychain.storeProvider(type, value)
+        output(.success())
+    } catch {
+        output(.failure(error.localizedDescription))
+    }
+}
+
+func handleGetProvider(_ type: String) {
+    do {
+        let value = try Keychain.getProvider(type)
+        output(.success(["value": value]))
+    } catch {
+        output(.failure(error.localizedDescription))
+    }
+}
+
+func handleDeleteProvider(_ type: String) {
+    do {
+        try Keychain.deleteProvider(type)
+        output(.success())
+    } catch {
+        output(.failure(error.localizedDescription))
+    }
+}
+
+func handleHasProvider(_ type: String) {
+    let exists = Keychain.hasProvider(type)
+    output(.success(["exists": exists ? "true" : "false"]))
+}
+
+func handleListProviders() {
+    let providers = Keychain.listProviders()
+    // Return as comma-separated list for easy parsing
+    output(.success(["providers": providers.joined(separator: ",")]))
+}
+
 // MARK: - Hex String Extension
 
 extension Data {
@@ -180,15 +226,25 @@ func printUsage() {
     pragma-signer - Secure key management for pragma
 
     Usage:
-      pragma-signer create-passkey [-m <msg>]     Create P-256 key (Touch ID)
-      pragma-signer sign <hash> [-m <msg>]        Sign 32-byte hash with P-256 (Touch ID)
-      pragma-signer get-pubkey                    Get passkey public key (X,Y coords)
-      pragma-signer has-passkey                   Check if passkey exists
-      pragma-signer delete-passkey [-m <msg>]     Delete passkey (Touch ID)
-      pragma-signer store-session <hex>           Store session key in Keychain
-      pragma-signer get-session                   Get session key from Keychain
-      pragma-signer delete-session                Delete session key from Keychain
-      pragma-signer has-session                   Check if session key exists
+      Passkey Commands (P-256, Touch ID):
+        pragma-signer create-passkey [-m <msg>]     Create P-256 key (Touch ID)
+        pragma-signer sign <hash> [-m <msg>]        Sign 32-byte hash with P-256 (Touch ID)
+        pragma-signer get-pubkey                    Get passkey public key (X,Y coords)
+        pragma-signer has-passkey                   Check if passkey exists
+        pragma-signer delete-passkey [-m <msg>]     Delete passkey (Touch ID)
+
+      Session Key Commands (Keychain):
+        pragma-signer store-session <hex>           Store session key in Keychain
+        pragma-signer get-session                   Get session key from Keychain
+        pragma-signer delete-session                Delete session key from Keychain
+        pragma-signer has-session                   Check if session key exists
+
+      Provider Commands (Keychain, API keys):
+        pragma-signer store-provider <type> <value> Store provider (rpc/pimlico/monorail)
+        pragma-signer get-provider <type>           Get provider value
+        pragma-signer delete-provider <type>        Delete provider
+        pragma-signer has-provider <type>           Check if provider exists
+        pragma-signer list-providers                List configured providers
 
     Options:
       -m, --message <msg>   Custom Touch ID prompt message
@@ -196,20 +252,25 @@ func printUsage() {
     Security:
       Private keys NEVER leave the Keychain. Only signatures are returned.
       All signing operations require Touch ID authentication.
+      Provider values (API keys) are stored encrypted in Keychain.
 
     Output:
       All commands output JSON to stdout:
       {"success": true, "data": {...}}
       {"success": false, "error": "..."}
 
-    Signature format:
-      Returns R || S (64 bytes) as hex: 0x<r:32bytes><s:32bytes>
+    Provider Types:
+      rpc       - RPC endpoint URL (e.g., https://rpc.monad.xyz)
+      pimlico   - Pimlico API key for bundler/paymaster
+      monorail  - Monorail API key for DEX aggregator
 
     Examples:
       pragma-signer create-passkey
       pragma-signer create-passkey -m "Create wallet for trading"
       pragma-signer sign 0x<32-byte-hash> -m "Approve swap: 1 ETH -> 2000 USDC"
-      pragma-signer get-pubkey
+      pragma-signer store-provider rpc https://rpc.monad.xyz
+      pragma-signer store-provider pimlico pim_xxx123
+      pragma-signer list-providers
     """
     print(usage)
 }
@@ -287,6 +348,38 @@ func main() {
 
     case .hasSession:
         handleHasSession()
+
+    // Provider commands
+    case .storeProvider:
+        guard args.count >= 4 else {
+            output(.failure("Usage: store-provider <type> <value>"))
+            exit(1)
+        }
+        handleStoreProvider(args[2], args[3])
+
+    case .getProvider:
+        guard args.count >= 3 else {
+            output(.failure("Usage: get-provider <type>"))
+            exit(1)
+        }
+        handleGetProvider(args[2])
+
+    case .deleteProvider:
+        guard args.count >= 3 else {
+            output(.failure("Usage: delete-provider <type>"))
+            exit(1)
+        }
+        handleDeleteProvider(args[2])
+
+    case .hasProvider:
+        guard args.count >= 3 else {
+            output(.failure("Usage: has-provider <type>"))
+            exit(1)
+        }
+        handleHasProvider(args[2])
+
+    case .listProviders:
+        handleListProviders()
     }
 }
 

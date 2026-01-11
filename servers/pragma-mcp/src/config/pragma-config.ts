@@ -180,6 +180,11 @@ export async function updateConfigWithWallet(
 /**
  * Get bundler URL from config or environment
  * Falls back to Pimlico URL constructed from API key
+ *
+ * Priority:
+ * 1. config.bundler.url (explicit URL)
+ * 2. PIMLICO_API_KEY env var
+ * 3. Use getBundlerUrlAsync() for Keychain lookup
  */
 export function getBundlerUrl(config: PragmaConfig): string | null {
   // Check config first
@@ -193,6 +198,29 @@ export function getBundlerUrl(config: PragmaConfig): string | null {
     const chainConfig = getChainConfig(config.network.chainId);
     // Pimlico URL format: https://api.pimlico.io/v2/{chain}/rpc?apikey={key}
     return `https://api.pimlico.io/v2/${chainConfig.name}/rpc?apikey=${apiKey}`;
+  }
+
+  // Keychain check requires async - use getBundlerUrlAsync() instead
+  return null;
+}
+
+/**
+ * Get bundler URL with Keychain provider lookup (async)
+ * Use this when you need to check all sources including Keychain
+ */
+export async function getBundlerUrlAsync(config: PragmaConfig): Promise<string | null> {
+  // Check sync sources first
+  const syncResult = getBundlerUrl(config);
+  if (syncResult) {
+    return syncResult;
+  }
+
+  // Check Keychain for pimlico API key
+  const { getProvider } = await import("../core/signer/index.js");
+  const pimlicoKey = await getProvider("pimlico");
+  if (pimlicoKey) {
+    const chainConfig = getChainConfig(config.network.chainId);
+    return `https://api.pimlico.io/v2/${chainConfig.name}/rpc?apikey=${pimlicoKey}`;
   }
 
   return null;
