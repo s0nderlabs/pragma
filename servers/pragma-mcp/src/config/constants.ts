@@ -4,7 +4,7 @@
 // Copyright (c) 2026 s0nderlabs
 
 import type { Address } from "viem";
-import { getDeleGatorEnvironment, ROOT_AUTHORITY } from "@metamask/delegation-toolkit";
+import { getSmartAccountsEnvironment, ROOT_AUTHORITY } from "@metamask/smart-accounts-kit";
 
 // Re-export ROOT_AUTHORITY for delegation building
 export { ROOT_AUTHORITY };
@@ -25,9 +25,9 @@ export const DTK_CHAIN_ID_FOR_ADDRESSES = 10143;
 
 /**
  * Get DTK environment using the workaround chain ID
- * Use this instead of calling getDeleGatorEnvironment(chainId) directly
+ * Use this instead of calling getSmartAccountsEnvironment(chainId) directly
  */
-export const getDTKEnvironment = () => getDeleGatorEnvironment(DTK_CHAIN_ID_FOR_ADDRESSES);
+export const getDTKEnvironment = () => getSmartAccountsEnvironment(DTK_CHAIN_ID_FOR_ADDRESSES);
 
 // Gas Thresholds (in wei - same across all chains)
 export const MIN_SESSION_KEY_BALANCE = BigInt("40000000000000000"); // 0.04 native

@@ -4,7 +4,7 @@
 
 import type { Address, Hex } from "viem";
 import { hashTypedData, getAddress } from "viem";
-import type { Delegation } from "@metamask/delegation-toolkit";
+import type { Delegation } from "@metamask/smart-accounts-kit";
 import { DELEGATION_FRAMEWORK } from "../../config/constants.js";
 
 // EIP-712 typed data structure

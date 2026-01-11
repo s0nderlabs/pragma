@@ -9,7 +9,7 @@ import {
   createDelegation,
   type Delegation,
   type Caveats,
-} from "@metamask/delegation-toolkit";
+} from "@metamask/smart-accounts-kit";
 
 import { buildDelegationTypedData } from "./typedData.js";
 import {
@@ -62,6 +62,7 @@ export interface SwapDelegationContext {
   nonce: bigint;
   chainId: number;
   transactionData?: Hex; // For selector extraction
+  nativeValueAmount?: bigint; // For valueLte when swapping native tokens
 }
 
 /**
@@ -113,6 +114,7 @@ export type TransferDelegationContext = ERC20TransferDelegationContext;
  */
 export interface WrapDelegationContext {
   wmonAddress: Address;
+  amount: bigint; // Amount of MON to wrap (for valueLte enforcement)
   delegator: Address;
   sessionKey: Address;
   nonce: bigint;
@@ -356,6 +358,7 @@ export function createSwapDelegation(
     nonce,
     chainId,
     transactionData,
+    nativeValueAmount,
   } = context;
 
   // Expiry: 5 minutes from now
@@ -366,6 +369,9 @@ export function createSwapDelegation(
     ? (transactionData.slice(0, 10) as Hex)
     : MONORAIL_AGGREGATE_SELECTOR;
 
+  // valueLte: Allow native value if swapping native token (MON), otherwise 0
+  const valueLteConfig = { maxValue: nativeValueAmount ?? 0n };
+
   // Build scope based on aggregator
   // Monorail: Full calldata enforcement (destination at offset 132)
   // 0x: No calldata enforcement (different calldata structure, but still protected)
@@ -374,12 +380,14 @@ export function createSwapDelegation(
         type: "functionCall" as const,
         targets: [getAddress(aggregator)],
         selectors: [selector],
+        valueLte: valueLteConfig,
         // No allowedCalldata for 0x - different calldata structure
       }
     : {
         type: "functionCall" as const,
         targets: [getAddress(aggregator)],
         selectors: [selector],
+        valueLte: valueLteConfig,
         allowedCalldata: buildSwapEnforcement(destination), // Enforces destination (offset 132)
       };
 
@@ -581,6 +589,7 @@ export function createWrapDelegation(
 ): DelegationResult {
   const {
     wmonAddress,
+    amount,
     delegator,
     sessionKey,
     nonce,
@@ -592,10 +601,12 @@ export function createWrapDelegation(
 
   // NO allowedCalldata - deposit() has no parameters
   // Amount is sent via msg.value, not calldata
+  // valueLte: Allow sending up to the wrap amount as msg.value
   const scope = {
     type: "functionCall" as const,
     targets: [getAddress(wmonAddress)],
     selectors: [WMON_DEPOSIT_SELECTOR],
+    valueLte: { maxValue: amount },
   };
 
   // Build caveats (timestamp, nonce, limitedCalls: 1)

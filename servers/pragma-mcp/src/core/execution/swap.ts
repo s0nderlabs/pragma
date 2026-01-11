@@ -18,7 +18,7 @@ import {
   redeemDelegations,
   createExecution,
   ExecutionMode,
-} from "@metamask/delegation-toolkit";
+} from "@metamask/smart-accounts-kit";
 import type { ExecutionResult, SwapQuote } from "../../types/index.js";
 import type { SignedDelegation, DelegationBundle, Execution } from "../delegation/types.js";
 import {
@@ -245,6 +245,10 @@ export async function executeSwap(
     finalCalldata = patchResult.patchedCalldata;
   }
 
+  // For native token swaps, include value
+  // Use executionData.value if available (from 0x), otherwise calculate from quote
+  const swapValue = isNativeSwap ? (executionData.value || quote.amountInWei) : 0n;
+
   // Create swap delegation
   const swapDelegation = createSwapDelegation({
     aggregator: executionData.router,
@@ -255,11 +259,8 @@ export async function executeSwap(
     nonce,
     chainId,
     transactionData: finalCalldata, // For selector extraction
+    nativeValueAmount: swapValue, // For valueLte enforcement when swapping native tokens
   });
-
-  // For native token swaps, include value
-  // Use executionData.value if available (from 0x), otherwise calculate from quote
-  const swapValue = isNativeSwap ? (executionData.value || quote.amountInWei) : 0n;
 
   delegationBundles.push({
     delegation: swapDelegation.delegation as SignedDelegation,

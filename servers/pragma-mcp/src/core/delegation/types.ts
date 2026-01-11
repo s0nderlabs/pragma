@@ -3,7 +3,7 @@
 // Copyright (c) 2026 s0nderlabs
 
 import type { Address, Hex } from "viem";
-import type { Delegation } from "@metamask/delegation-toolkit";
+import type { Delegation } from "@metamask/smart-accounts-kit";
 
 // Re-export DTK's Delegation type for convenience
 export type { Delegation };

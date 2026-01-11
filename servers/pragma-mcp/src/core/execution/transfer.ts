@@ -18,7 +18,7 @@ import {
   redeemDelegations,
   createExecution,
   ExecutionMode,
-} from "@metamask/delegation-toolkit";
+} from "@metamask/smart-accounts-kit";
 import type { ExecutionResult } from "../../types/index.js";
 import type { SignedDelegation, DelegationBundle } from "../delegation/types.js";
 import {
