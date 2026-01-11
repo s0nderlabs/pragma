@@ -11,12 +11,19 @@ This command builds pragma from source and creates your wallet.
 
 Pragma requires macOS with Touch ID for secure key storage.
 
-## Important: Build vs Wallet Setup
+## Important: Two-Phase Setup
 
-- **Steps 1-5 (Build)**: ALWAYS run - installs dependencies and builds binaries
-- **Step 6 (Wallet Creation)**: Only if no wallet exists OR user wants to reset
+Setup requires a session restart midway because MCP tools are only discovered at session start.
 
-This ensures the plugin is properly built even if you already have a wallet from a previous installation.
+**Phase 1 (Steps 1-5):** Build
+- Installs dependencies, compiles TypeScript, builds Swift binary
+- Ends with: "Please restart and run `claude --continue`"
+
+**Phase 2 (Steps 5.1-7):** Wallet Setup (after `claude --continue`)
+- MCP tools now available
+- Check existing wallet, create if needed, verify skill activation
+
+This ensures the plugin is properly built and MCP tools are available for wallet operations.
 
 ## Step 1: Check Prerequisites
 
@@ -74,9 +81,34 @@ cp ${CLAUDE_PLUGIN_ROOT}/swift/.build/release/pragma-signer ${CLAUDE_PLUGIN_ROOT
 chmod +x ${CLAUDE_PLUGIN_ROOT}/bin/pragma-signer
 ```
 
+## STOP: Session Restart Required
+
+**Build is complete!** But MCP tools are not available yet.
+
+Claude Code caches available MCP tools at session start. Since the MCP server was just built, you need to restart the session for Claude to discover the new tools.
+
+**Tell the user:**
+```
+Build complete! The MCP server and Swift binary have been built successfully.
+
+To continue setup, please:
+1. Quit this session (Ctrl+C or type "exit")
+2. Run: claude --continue
+
+This will resume setup with MCP tools available.
+```
+
+**STOP HERE.** Do not proceed to Step 5.1 until the user has restarted and continued.
+
+---
+
+## After Session Restart (claude --continue)
+
+When the user returns via `claude --continue`, proceed with wallet setup.
+
 ## Step 5.1: Check Existing Wallet
 
-Now that MCP tools are available, check if a wallet already exists.
+MCP tools are now available. Check if a wallet already exists.
 
 Use the `has_wallet` MCP tool to check wallet status.
 
