@@ -69,12 +69,24 @@ function buildDeployParams(keyId: string, p256Owner: P256Owner): [Address, Hex[]
 }
 
 /**
+ * Options for creating a HybridDelegator handle
+ */
+export interface CreateHybridDelegatorOptions {
+  /** Custom message shown in Touch ID prompt */
+  touchIdMessage?: string;
+}
+
+/**
  * Create a handle for a HybridDelegator smart account
  * Uses native P-256 passkey for signing (via synthetic WebAuthn)
  * Private keys NEVER leave the Keychain
+ *
+ * @param config - Pragma configuration
+ * @param options - Optional settings including custom Touch ID message
  */
 export async function createHybridDelegatorHandle(
-  config: PragmaConfig
+  config: PragmaConfig,
+  options?: CreateHybridDelegatorOptions
 ): Promise<HybridDelegatorHandle> {
   const chain = buildViemChain(config.network.chainId, config.network.rpc);
   const publicClient = createPublicClient({
@@ -84,7 +96,8 @@ export async function createHybridDelegatorHandle(
 
   const keyId = await getOrCreateKeyId();
   const p256Owner = await getP256Owner(keyId);
-  const signerConfig = await createWebAuthnSignerConfig(keyId, "Sign transaction");
+  const touchIdMessage = options?.touchIdMessage ?? "Sign transaction";
+  const signerConfig = await createWebAuthnSignerConfig(keyId, touchIdMessage);
   const environment = getSmartAccountsEnvironment(config.network.chainId);
 
   const smartAccount = await toMetaMaskSmartAccount({

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-01-12
+
+### Changed
+- Touch ID prompts now show descriptive messages for session key funding (amount + method)
+- `/providers` command now prohibits API key entry in chat for security
+
+### Security
+- Provider management only shows status and provides terminal commands
+- Users must run `pragma-signer store-provider` directly instead of pasting keys in chat
+
 ## [0.1.6] - 2026-01-12
 
 ### Added

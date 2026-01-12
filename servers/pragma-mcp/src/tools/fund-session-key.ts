@@ -177,8 +177,12 @@ async function fundSessionKeyHandler(
 
     const fundingMethod = balanceCheck.balance < MIN_GAS_FOR_DELEGATION ? "userOp" : "delegation";
 
-    // Create handle for P-256 signing
-    const handle = await createHybridDelegatorHandle(config);
+    // Create descriptive Touch ID message
+    const fundingAmountFormatted = formatEther(fundingAmount);
+    const touchIdMessage = `Fund session key: ${fundingAmountFormatted} MON (${fundingMethod})`;
+
+    // Create handle for P-256 signing with custom Touch ID message
+    const handle = await createHybridDelegatorHandle(config, { touchIdMessage });
 
     // Fund session key via UserOp (triggers Touch ID)
     const result = await fundSessionKeyViaUserOp({

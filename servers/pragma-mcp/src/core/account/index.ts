@@ -4,6 +4,7 @@
 
 export {
   type HybridDelegatorHandle,
+  type CreateHybridDelegatorOptions,
   createHybridDelegatorHandle,
   deriveOwnerFromPasskey,
   isSmartAccountDeployed,

@@ -101,8 +101,8 @@ struct SecureEnclave {
         }
 
         // Store private key in Keychain
-        // Note: Cannot use biometric access control for unsigned CLI tools (-34018)
-        // Touch ID is enforced via LAContext before each operation instead
+        // Security: Each binary needs separate user approval to access
+        // Touch ID is enforced via LAContext before each operation
         let privateKeyQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

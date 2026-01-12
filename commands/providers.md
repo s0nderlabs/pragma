@@ -7,6 +7,12 @@ description: Manage API keys and provider configuration for pragma
 
 Manage the API keys and endpoints needed for pragma to function.
 
+## IMPORTANT: Security First
+
+**NEVER paste API keys or sensitive credentials in the chat.** Claude cannot and should not handle API keys directly in conversation.
+
+Instead, this command shows your current provider status and provides terminal commands you should run yourself.
+
 ## Provider Types
 
 | Type | Purpose | Example |
@@ -16,72 +22,77 @@ Manage the API keys and endpoints needed for pragma to function.
 | `monorail` | Monorail API key (DEX aggregator) | `mr_xxx...` |
 | `0x` | 0x API key (primary DEX aggregator) | `xxx-xxx-xxx...` |
 
-## Commands
+## Flow
 
-### List Providers
+### Step 1: Show Current Status
 
-Show which providers are configured:
+Call `listProviders()` from the signer module and display status:
 
-1. Call `listProviders()` from the signer module
-2. Display status for each provider type:
-   - rpc: ✅ Configured / ❌ Not configured
-   - pimlico: ✅ Configured / ❌ Not configured
-   - monorail: ✅ Configured / ❌ Not configured
+```
+Pragma Provider Status:
+├── RPC: ✅ Configured (https://rpc.monad.xyz)
+├── Pimlico: ✅ Configured (pim_xxx...xxx)
+├── Monorail: ❌ Not configured
+└── 0x: ✅ Configured (xxx...xxx)
+```
 
-### Add Provider
+For configured providers, mask API keys (show only first/last few characters).
+For RPC URLs, can show full URL.
 
-When user wants to add or update a provider:
+### Step 2: Provide Commands (DO NOT Ask for Keys)
 
-1. Identify which provider type they want to configure
-2. Get the value (URL or API key) from the user
-3. Store securely in Keychain via `storeProvider(type, value)`
-4. Confirm success
+After showing status, display the terminal commands the user should run:
 
-Example interactions:
-- "Add my RPC endpoint: https://rpc.monad.xyz" → Store as `rpc`
-- "Set Pimlico key: pim_abc123" → Store as `pimlico`
-- "Configure Monorail API key" → Ask for the key, then store as `monorail`
+```
+To add or update a provider, run one of these commands in your terminal:
 
-### Remove Provider
+  # Set RPC endpoint
+  pragma-signer store-provider rpc "YOUR_RPC_URL"
 
-When user wants to remove a provider:
+  # Set Pimlico API key
+  pragma-signer store-provider pimlico "YOUR_PIMLICO_KEY"
 
-1. Confirm which provider to remove
-2. Delete from Keychain via `deleteProvider(type)`
-3. Confirm removal
+  # Set Monorail API key
+  pragma-signer store-provider monorail "YOUR_MONORAIL_KEY"
 
-### Check Specific Provider
+  # Set 0x API key
+  pragma-signer store-provider 0x "YOUR_0X_KEY"
 
-When user asks about a specific provider:
+To remove a provider:
 
-1. Use `hasProvider(type)` to check if configured
-2. If configured, use `getProvider(type)` to show (masked for security)
-3. For RPC, can show full URL; for API keys, show only first/last few characters
+  pragma-signer delete-provider <type>
+
+Note: Values are stored encrypted in macOS Keychain.
+```
+
+## Rules
+
+1. **NEVER ask the user to paste API keys in the chat**
+2. **NEVER accept API keys provided in conversation messages**
+3. If user tries to paste a key, respond:
+   > "For security, please don't paste API keys in the chat. Run the command directly in your terminal instead."
+4. Only show current status and provide terminal commands
+5. After user runs commands, they can ask to check status again
 
 ## Security Notes
 
 - All provider values are stored encrypted in macOS Keychain
 - API keys are automatically accessible when macOS is unlocked
 - No Touch ID required for provider access (only for transaction signing)
-- Never display full API keys - mask middle characters
+- Keychain access is per-binary (only pragma-signer can read these values)
 
 ## Output Format
 
-When listing providers:
+When showing status:
 ```
 Pragma Provider Status:
 ├── RPC: ✅ https://rpc.monad.xyz
 ├── Pimlico: ✅ pim_xxx...xxx
 ├── Monorail: ❌ Not configured
 └── 0x: ✅ xxx...xxx
-```
 
-When adding:
-```
-✅ RPC endpoint saved to Keychain
-```
+To add/update providers, run in your terminal:
+  pragma-signer store-provider <type> "YOUR_VALUE"
 
-When removing:
-```
-✅ Pimlico API key removed from Keychain
+Types: rpc, pimlico, monorail, 0x
 ```
