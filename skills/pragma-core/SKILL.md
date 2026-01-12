@@ -6,6 +6,7 @@ allowed-tools:
   - mcp__pragma__has_providers
   - mcp__pragma__get_balance
   - mcp__pragma__get_all_balances
+  - mcp__pragma__list_verified_tokens
   - mcp__pragma__get_swap_quote
   - mcp__pragma__execute_swap
   - mcp__pragma__transfer
@@ -15,6 +16,7 @@ allowed-tools:
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
   - mcp__pragma__setup_wallet
+  - AskUserQuestion
   - Read
 ---
 
@@ -50,6 +52,7 @@ For swap, transfer, stake, wrap, unwrap:
 | Check | `has_providers` | Verify provider configuration |
 | Balance | `get_balance` | Single token balance |
 | Balance | `get_all_balances` | Full portfolio |
+| Discovery | `list_verified_tokens` | List tradeable tokens |
 | Trade | `get_swap_quote` | Quote before swap |
 | Trade | `execute_swap` | Execute swap (Touch ID) |
 | Transfer | `transfer` | Send tokens (Touch ID) |
@@ -65,40 +68,50 @@ For swap, transfer, stake, wrap, unwrap:
 ### Swaps
 1. `get_balance` (source token)
 2. `get_swap_quote`
-3. Show quote (amount, price impact, route)
-4. Wait for user confirmation
-5. `check_session_key_balance` (operationType: "swap")
-6. If needsFunding - `fund_session_key`
-7. `execute_swap`
-8. Report result with tx hash
+3. **Use `AskUserQuestion`:**
+   - Header: "Swap"
+   - Question: "Confirm swap of X TOKEN_A for ~Y TOKEN_B?"
+   - Options: ["Confirm swap", "Cancel"]
+   - Include price impact warning in description if > 1%
+4. If confirmed: `check_session_key_balance` (operationType: "swap")
+5. If needsFunding - `fund_session_key`
+6. `execute_swap`
+7. Report result with tx hash
 
 ### Transfers
 1. Validate address (0x, 42 chars)
 2. `get_balance` (token to send)
-3. Show details (amount, recipient)
-4. Wait for user confirmation
-5. `check_session_key_balance` (operationType: "transfer")
-6. If needsFunding - `fund_session_key`
-7. `transfer`
-8. Report result
+3. **Use `AskUserQuestion`:**
+   - Header: "Transfer"
+   - Question: "Send X TOKEN to 0x...recipient?"
+   - Options: ["Confirm transfer", "Cancel"]
+4. If confirmed: `check_session_key_balance` (operationType: "transfer")
+5. If needsFunding - `fund_session_key`
+6. `transfer`
+7. Report result
 
 ### Wrap/Unwrap
 1. `get_balance` (source token)
-2. Show details
-3. Wait for confirmation
-4. `check_session_key_balance` (operationType: "wrap"/"unwrap")
-5. If needsFunding - `fund_session_key`
-6. `wrap` or `unwrap`
-7. Report result
+2. **Use `AskUserQuestion`:**
+   - Header: "Wrap" / "Unwrap"
+   - Question: "Convert X MON to WMON?" or "Convert X WMON to MON?"
+   - Options: ["Confirm", "Cancel"]
+3. If confirmed: `check_session_key_balance` (operationType: "wrap"/"unwrap")
+4. If needsFunding - `fund_session_key`
+5. `wrap` or `unwrap`
+6. Report result
 
 ### Stake
 1. `get_balance` (native token)
-2. Explain staking implications
-3. Wait for confirmation
-4. `check_session_key_balance` (operationType: "stake")
-5. If needsFunding - `fund_session_key`
-6. `stake`
-7. Report result
+2. **Use `AskUserQuestion`:**
+   - Header: "Stake"
+   - Question: "Stake X MON to receive aprMON?"
+   - Options: ["Confirm stake", "Cancel"]
+   - Description: Include staking implications
+3. If confirmed: `check_session_key_balance` (operationType: "stake")
+4. If needsFunding - `fund_session_key`
+5. `stake`
+6. Report result
 
 ### Relative Amounts ("all", "half", "max", percentages)
 1. `get_balance` FIRST to get actual amount
@@ -107,18 +120,28 @@ For swap, transfer, stake, wrap, unwrap:
 
 ## Confirmation Rules
 
-**Always confirm**: Swaps, transfers, staking, wrap/unwrap
+**Use `AskUserQuestion` for all execution operations:**
+- Swaps, transfers, staking, wrap/unwrap
+- Header: Short category (e.g., "Swap", "Transfer")
+- Options: ["Confirm [action]", "Cancel"]
 
-**Show before confirming**:
+**Include in question/description:**
 - Amount and token
 - Recipient (transfers)
 - Price impact (swaps)
 - Expected output
 
-**Warn when**:
+**Include warnings in description when:**
 - Price impact > 1%
+- Unverified token (not in verified list) - **MUST show full contract address**
 - Transfer > 10% of balance
-- Low remaining balance
+- Low remaining balance after operation
+
+**Unverified token handling:**
+- If token is NOT in verified list, show FULL address in question
+- Example: "Swap 1 MON for ~11,785 MOTION (0xc72B5eb3...7777)?"
+- Description MUST include: "⚠️ MOTION is unverified. Verify this is the correct contract."
+- This helps users avoid swapping to copycat/scam tokens with same symbol
 
 ## Response Format
 

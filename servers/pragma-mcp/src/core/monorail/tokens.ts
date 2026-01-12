@@ -7,6 +7,10 @@
 import { type Address, getAddress } from "viem";
 import type { TokenInfo } from "../../config/tokens.js";
 import { getChainConfig } from "../../config/chains.js";
+import {
+  getVerifiedTokenBySymbol,
+  getVerifiedTokenByAddress,
+} from "../../config/verified-tokens.js";
 
 interface TokenCacheEntry {
   fetchedAt: number;
@@ -131,6 +135,70 @@ export async function fetchTokenFromMonorail(
 }
 
 /**
+ * Search tokens by symbol/name using Monorail /tokens?find= endpoint
+ * Used for Tier 3 resolution when token not in verified list
+ *
+ * @param query - Search query (symbol or partial name, min 2 chars)
+ * @param chainId - Chain ID
+ * @returns First matching token or null
+ */
+export async function searchTokenBySymbol(
+  query: string,
+  chainId: number
+): Promise<TokenInfo | null> {
+  if (query.length < 2) return null;
+
+  try {
+    const chainConfig = getChainConfig(chainId);
+    const dataApiUrl = chainConfig.protocols?.monorailDataApi;
+
+    if (!dataApiUrl) {
+      return null;
+    }
+
+    const url = `${dataApiUrl}/tokens?find=${encodeURIComponent(query)}`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`[Monorail] Token search failed: ${response.status}`);
+      return null;
+    }
+
+    const rawTokens = (await response.json()) as RawMonorailToken[];
+
+    // Return first exact symbol match, or first result if no exact match
+    const queryUpper = query.toUpperCase();
+    for (const raw of rawTokens) {
+      const parsed = parseMonorailToken(raw);
+      if (parsed && parsed.symbol?.toUpperCase() === queryUpper) {
+        return parsed;
+      }
+    }
+
+    // No exact match, return first valid result
+    for (const raw of rawTokens) {
+      const parsed = parseMonorailToken(raw);
+      if (parsed) return parsed;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn(
+      `[Monorail] Token search error:`,
+      error instanceof Error ? error.message : "Unknown error"
+    );
+    return null;
+  }
+}
+
+/**
  * Fetch verified token list from Monorail
  * Endpoint: GET {dataApiUrl}/tokens/category/verified
  */
@@ -189,9 +257,13 @@ export async function fetchVerifiedTokens(chainId: number): Promise<TokenInfo[]>
 
 /**
  * Resolve token symbol to address
- * Checks verified token list first, then falls back to Monorail API search
+ * Resolution order:
+ * 1. Static verified list (22 tokens, fast, no network)
+ * 2. Monorail verified tokens cache
+ * 3. Monorail /tokens?find= search (for unverified tokens)
+ * 4. Monorail /token/{address} fetch (for addresses)
  *
- * @param symbolOrAddress - Token symbol (e.g., "USDC") or address
+ * @param symbolOrAddress - Token symbol (e.g., "USDC", "LV") or address
  * @param chainId - Chain ID
  * @returns TokenInfo if found, null otherwise
  */
@@ -202,52 +274,42 @@ export async function resolveToken(
   const input = symbolOrAddress.trim();
   if (!input) return null;
 
-  // Special case: MON is native token
-  if (input.toUpperCase() === "MON") {
-    return {
-      address: "0x0000000000000000000000000000000000000000" as Address,
-      symbol: "MON",
-      name: "Monad",
-      decimals: 18,
-      kind: "native",
-    };
-  }
-
-  // Special case: WMON is wrapped native
-  if (input.toUpperCase() === "WMON") {
-    return {
-      address: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a" as Address,
-      symbol: "WMON",
-      name: "Wrapped Monad",
-      decimals: 18,
-      kind: "wrappedNative",
-    };
-  }
-
   // Check if it's an address
   if (input.startsWith("0x") && input.length === 42) {
     try {
       const address = getAddress(input as Address);
 
-      // First check cache
+      // 1. Check static verified list first
+      const fromStatic = getVerifiedTokenByAddress(address);
+      if (fromStatic) return fromStatic;
+
+      // 2. Check Monorail cache
       const cached = tokenCache?.tokens.find(
         (t) => t.address.toLowerCase() === address.toLowerCase()
       );
       if (cached) return cached;
 
-      // Fetch from Monorail
+      // 3. Fetch from Monorail API
       return await fetchTokenFromMonorail(address, chainId);
     } catch {
       return null;
     }
   }
 
-  // It's a symbol - search in verified tokens
+  // It's a symbol
+  // 1. Check static verified list first (fast, no network)
+  const fromStatic = getVerifiedTokenBySymbol(input);
+  if (fromStatic) return fromStatic;
+
+  // 2. Search in Monorail verified tokens (API with cache)
   const tokens = await fetchVerifiedTokens(chainId);
   const symbolUpper = input.toUpperCase();
 
   const found = tokens.find((t) => t.symbol?.toUpperCase() === symbolUpper);
-  return found ?? null;
+  if (found) return found;
+
+  // 3. Fallback: Search Monorail /tokens?find= for unverified tokens
+  return await searchTokenBySymbol(input, chainId);
 }
 
 /**

@@ -15,8 +15,12 @@ import {
   loadVerifiedTokens,
   type TokenInfo,
 } from "../config/tokens.js";
-import { fetchTokenFromMonorail } from "../core/monorail/tokens.js";
+import { fetchTokenFromMonorail, searchTokenBySymbol } from "../core/monorail/tokens.js";
 import { fetchTokenFromChain } from "../core/tokens/onchain.js";
+
+// Slippage constants
+const DEFAULT_SLIPPAGE_BPS = 500; // 5% default
+const MAX_SLIPPAGE_BPS = 5000; // 50% max allowed
 
 const GetSwapQuoteSchema = z.object({
   fromToken: z
@@ -28,6 +32,10 @@ const GetSwapQuoteSchema = z.object({
   amount: z
     .string()
     .describe("Amount to swap in human-readable format (e.g., '1.5' for 1.5 tokens)"),
+  slippageBps: z
+    .number()
+    .optional()
+    .describe("Slippage tolerance in basis points (100 = 1%, default 500 = 5%, max 5000 = 50%). IMPORTANT: For 0x aggregator, slippage is baked into the quote at this stage."),
 });
 
 interface QuoteResult {
@@ -40,6 +48,8 @@ interface QuoteResult {
     amountIn: string;
     expectedOutput: string;
     minOutput: string;
+    slippage: string;
+    slippageBps: number;
     priceImpact: string;
     route: string[];
     expiresIn: string;
@@ -67,10 +77,11 @@ const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000" as Add
 /**
  * Resolve token symbol or address to full token info
  * Uses multi-tier fallback (matching H2 pattern):
- * 1. Check hardcoded token list by symbol
- * 2. Check hardcoded token list by address
- * 3. Monorail Data API /token/{address}
- * 4. On-chain ERC20 lookup for unknown addresses
+ * 1. Check static verified list by symbol
+ * 2. Check static verified list by address
+ * 3. Monorail /tokens?find= search (for symbols not in list)
+ * 4. Monorail Data API /token/{address}
+ * 5. On-chain ERC20 lookup for unknown addresses
  *
  * NO hardcoded decimals fallback - if we can't resolve decimals, we fail
  */
@@ -80,21 +91,21 @@ async function resolveToken(
 ): Promise<TokenInfo | null> {
   const normalized = input.trim();
 
-  // Tier 1: Check hardcoded list by symbol (case-insensitive)
+  // Tier 1: Check static verified list by symbol (case-insensitive)
   const bySymbol = findTokenBySymbol(normalized);
   if (bySymbol) {
     return bySymbol;
   }
 
-  // Tier 2+: If input is an address, try multiple lookups
+  // If input is an address, try address-based lookups
   if (normalized.startsWith("0x") && normalized.length === 42) {
-    // Tier 2: Check hardcoded list by address
+    // Tier 2: Check static verified list by address
     const byAddress = findTokenByAddress(normalized);
     if (byAddress) {
       return byAddress;
     }
 
-    // Tier 3: Monorail Data API lookup
+    // Tier 3: Monorail Data API lookup by address
     const fromMonorail = await fetchTokenFromMonorail(normalized as Address, chainId);
     if (fromMonorail) {
       return fromMonorail;
@@ -108,6 +119,13 @@ async function resolveToken(
 
     // No fallback with hardcoded decimals - we need accurate decimals for swaps
     return null;
+  }
+
+  // It's a symbol not in verified list - search Monorail
+  // Tier 3: Monorail /tokens?find= search for unverified tokens
+  const fromSearch = await searchTokenBySymbol(normalized, chainId);
+  if (fromSearch) {
+    return fromSearch;
   }
 
   // Token not found
@@ -185,7 +203,16 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
       };
     }
 
-    // Step 4: Check balance (optional but helpful)
+    // Step 4: Validate and normalize slippage
+    let slippageBps = params.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
+    if (slippageBps > MAX_SLIPPAGE_BPS) {
+      slippageBps = MAX_SLIPPAGE_BPS;
+    }
+    if (slippageBps < 0) {
+      slippageBps = DEFAULT_SLIPPAGE_BPS;
+    }
+
+    // Step 5: Check balance (optional but helpful)
     let warning: string | undefined;
     try {
       const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
@@ -201,13 +228,14 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
       // Balance check is optional, continue
     }
 
-    // Step 5: Get quote from aggregator (0x primary, Monorail fallback)
+    // Step 6: Get quote from aggregator (0x primary, Monorail fallback)
+    // IMPORTANT: For 0x, slippage is baked into the quote calldata here
     const quoteResult = await getQuote({
       fromToken: fromToken.address,
       toToken: toToken.address,
       amount: amountWei,
       sender: walletAddress,
-      slippageBps: 500, // 5% default slippage for 0x
+      slippageBps, // User-specified or default 5%
       fromDecimals: fromToken.decimals,
       toDecimals: toToken.decimals,
       fromSymbol: fromToken.symbol,
@@ -216,7 +244,7 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
 
     const quote = quoteResult.quote;
 
-    // Step 6: Check token verification status (based on categories from Monorail)
+    // Step 7: Check token verification status (based on categories from Monorail)
     const fromTokenVerified = fromToken.categories?.includes("verified") ?? false;
     const toTokenVerified = toToken.categories?.includes("verified") ?? false;
 
@@ -246,7 +274,7 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
       );
     }
 
-    // Step 7: Format response
+    // Step 8: Format response
     const expiresIn = Math.max(0, Math.floor((quote.expiresAt - Date.now()) / 1000));
 
     return {
@@ -259,6 +287,8 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
         amountIn: `${quote.amountIn} ${fromToken.symbol}`,
         expectedOutput: `${quote.expectedOutput} ${toToken.symbol}`,
         minOutput: `${quote.minOutput} ${toToken.symbol}`,
+        slippage: `${(slippageBps / 100).toFixed(1)}%`,
+        slippageBps,
         priceImpact: `${quote.priceImpact.toFixed(2)}%`,
         route: quote.route,
         expiresIn: `${expiresIn} seconds`,

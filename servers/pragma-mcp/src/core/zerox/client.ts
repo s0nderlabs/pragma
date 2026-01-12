@@ -129,9 +129,9 @@ export async function getZeroXQuote(request: ZeroXQuoteRequest): Promise<SwapQuo
   url.searchParams.set("sellAmount", request.amount.toString());
   url.searchParams.set("taker", request.sender);
 
-  // Convert slippage from bps to decimal (500 bps = 0.05)
-  const slippageDecimal = (request.slippageBps / 10000).toString();
-  url.searchParams.set("slippagePercentage", slippageDecimal);
+  // 0x v2 API uses slippageBps directly (not slippagePercentage like v1)
+  // slippageBps: 100 = 1%, 500 = 5%, 1500 = 15%
+  url.searchParams.set("slippageBps", request.slippageBps.toString());
 
   // Fetch quote
   const response = await fetch(url.toString(), {

@@ -22,7 +22,7 @@ const ExecuteSwapSchema = z.object({
   slippageBps: z
     .number()
     .optional()
-    .describe("Max slippage in basis points (100 = 1%, default 500 = 5%, max 5000 = 50%)"),
+    .describe("Max slippage in basis points. NOTE: For 0x quotes (primary), slippage is already baked into the quote - this parameter only affects Monorail fallback quotes. Set slippage at quote time via get_swap_quote instead."),
 });
 
 interface ExecuteSwapResult {

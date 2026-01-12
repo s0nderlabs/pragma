@@ -1,10 +1,15 @@
 // Token Registry
-// Loads verified tokens from Monorail Data API with minimal fallback
+// Static verified list + Monorail Data API for extended tokens
 // Based on pragma-v2-stable/packages/core/src/monorail/tokens.ts (H2 pattern)
 // Copyright (c) 2026 s0nderlabs
 
 import { type Address, getAddress } from "viem";
 import { getChainConfig } from "./chains.js";
+import {
+  VERIFIED_TOKENS,
+  getVerifiedTokenBySymbol,
+  getVerifiedTokenByAddress,
+} from "./verified-tokens.js";
 
 // MARK: - Types
 
@@ -42,27 +47,9 @@ interface TokenCacheEntry {
 // Cache TTL: 5 minutes for memory cache
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-// Minimal fallback tokens (only used if Monorail API fails)
-// These addresses MUST match the actual Monad mainnet contracts
-const FALLBACK_TOKENS: TokenInfo[] = [
-  {
-    address: "0x0000000000000000000000000000000000000000" as Address,
-    symbol: "MON",
-    name: "Monad",
-    decimals: 18,
-    kind: "native",
-    categories: ["native", "verified"],
-  },
-  {
-    // WMON address from Monorail verified tokens API
-    address: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a" as Address,
-    symbol: "WMON",
-    name: "Wrapped MON",
-    decimals: 18,
-    kind: "wrappedNative",
-    categories: ["wrapper", "official", "verified"],
-  },
-];
+// Fallback tokens: Use static verified list (23 tokens)
+// These are used when Monorail API is unavailable
+const FALLBACK_TOKENS: TokenInfo[] = VERIFIED_TOKENS;
 
 // MARK: - Cache
 
@@ -214,17 +201,31 @@ export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> 
 
 /**
  * Find token by symbol (case-insensitive)
- * Uses cached tokens from last loadVerifiedTokens() call
+ * Resolution order:
+ * 1. Static verified list (fast, no network)
+ * 2. Monorail cache (if loaded)
  */
 export function findTokenBySymbol(symbol: string): TokenInfo | undefined {
+  // 1. Check static verified list first (fast, no network)
+  const fromStatic = getVerifiedTokenBySymbol(symbol);
+  if (fromStatic) return fromStatic;
+
+  // 2. Check Monorail cache
   return tokensBySymbol.get(symbol.toLowerCase());
 }
 
 /**
  * Find token by address
- * Uses cached tokens from last loadVerifiedTokens() call
+ * Resolution order:
+ * 1. Static verified list (fast, no network)
+ * 2. Monorail cache (if loaded)
  */
 export function findTokenByAddress(address: string): TokenInfo | undefined {
+  // 1. Check static verified list first
+  const fromStatic = getVerifiedTokenByAddress(address);
+  if (fromStatic) return fromStatic;
+
+  // 2. Check Monorail cache
   return tokensByAddress.get(address.toLowerCase());
 }
 

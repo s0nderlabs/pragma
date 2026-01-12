@@ -129,9 +129,16 @@ MCP tools are now available. Check if a wallet already exists.
 Use the `has_wallet` MCP tool to check wallet status.
 
 If `has_wallet` returns `initialized: true`:
-- Show: "Existing pragma wallet found. Keep existing wallet or reset?"
-- If user chooses **keep** - Skip Step 6, go to Step 7 (build is done, wallet already exists)
-- If user chooses **reset** - Continue to Step 6 (will create new wallet, old keys removed)
+- **Use `AskUserQuestion`:**
+  - Header: "Wallet"
+  - Question: "Existing pragma wallet found. Keep existing or create new?"
+  - Options:
+    - Label: "Keep existing wallet"
+      Description: "Continue with current wallet and keys"
+    - Label: "Reset and create new"
+      Description: "Delete existing keys and create fresh wallet"
+- If **"Keep existing wallet"** - Skip Step 6, go to Step 7 (wallet already exists)
+- If **"Reset and create new"** - Continue to Step 6 (will create new wallet)
 
 If `has_wallet` returns `initialized: false`:
 - Continue to Step 6 (create new wallet)

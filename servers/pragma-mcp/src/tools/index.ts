@@ -14,6 +14,7 @@ import { registerWrap, registerUnwrap } from "./wrap.js";
 import { registerStake } from "./stake.js";
 import { registerCheckSessionKeyBalance } from "./check-session-key-balance.js";
 import { registerFundSessionKey } from "./fund-session-key.js";
+import { registerListVerifiedTokens } from "./list-verified-tokens.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -26,6 +27,9 @@ export function registerTools(server: McpServer): void {
   // Balance checking
   registerGetBalance(server);
   registerGetAllBalances(server);
+
+  // Token discovery
+  registerListVerifiedTokens(server);
 
   // Session key management
   registerCheckSessionKeyBalance(server);
