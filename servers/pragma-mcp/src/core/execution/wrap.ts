@@ -24,9 +24,9 @@ import { createWrapDelegation, createUnwrapDelegation } from "../delegation/hybr
 import { getCurrentNonce } from "../delegation/nonce.js";
 import { getSessionKey, getSessionAccount } from "../session/keys.js";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
-import { loadConfig } from "../../config/pragma-config.js";
+import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain, getChainConfig } from "../../config/chains.js";
-import { getProvider } from "../signer/index.js";
+import { x402HttpOptions } from "../x402/client.js";
 import { DELEGATION_FRAMEWORK } from "../../config/constants.js";
 import {
   getMinBalanceForOperation,
@@ -107,12 +107,12 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
   }
 
   // Step 4: Get RPC and create clients
-  const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
+  const rpcUrl = await getRpcUrl(config);
   const chain = buildViemChain(chainId, rpcUrl);
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 5: Check MON balance
@@ -193,7 +193,7 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 11: Execute delegation
@@ -270,12 +270,12 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
   }
 
   // Step 4: Get RPC and create clients
-  const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
+  const rpcUrl = await getRpcUrl(config);
   const chain = buildViemChain(chainId, rpcUrl);
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 5: Check WMON balance
@@ -362,7 +362,7 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 11: Execute delegation

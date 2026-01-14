@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-14
+
+### Added
+- Flexible adapter system for BYOK mode - configure any provider via JSON adapters
+- x402 mode for pay-per-API-call convenience (no API keys needed)
+- `set_mode` tool to switch between BYOK and x402 modes
+- Path mappings support for data adapters
+- Parallel vs sequential execution guidance in pragma-core skill
+- Pre-flight gas estimation for batch operations
+
+### Changed
+- Removed hardcoded provider code (monorail, zerox folders deleted)
+- Provider config now uses `~/.pragma/providers/` adapter files
+- WMON balance now fetches from RPC (more accurate than data APIs)
+- Simplified aggregator module with direct re-exports
+- Tool messages use natural language instead of technical syntax
+
+### Fixed
+- Portfolio endpoint path mapping in x402 mode
+- WMON balance showing stale values
+- Config migration preserving providers field
+
+## [0.1.9] - 2026-01-13
+
+### Changed
+- Simplified config structure - removed redundant URL storage
+- Mode switching now only changes `config.mode` field (was rewriting all URLs)
+- URLs constructed at runtime based on mode (x402: hardcoded constant, BYOK: Keychain)
+- `setup_wallet` no longer requires `rpc` parameter (auto-detected from mode)
+
+### Security
+- **Fixed BYOK security flaw** - API URLs no longer stored in plain-text config
+- BYOK mode now reads exclusively from Keychain with no config fallback
+- Removed `passkeyPublicKey` from config (unused, was leaking cryptographic material)
+
+### Removed
+- `network.rpc` from config (constructed at runtime)
+- `bundler.url` from config (constructed at runtime)
+- `apis.quote` and `apis.data` from config (constructed at runtime)
+- `wallet.passkeyPublicKey` from config (not used operationally)
+
+## [0.1.8] - 2026-01-13
+
+### Added
+- **x402 Micropayment Protocol** - Pay per API call with USDC instead of managing API keys
+- New `x402` module (`core/x402/`) for transparent payment handling
+- USDC balance tracking in `check_session_key_balance` (auto-enabled in x402 mode)
+- USDC funding support in `fund_session_key` with `token="USDC"` parameter
+- Pre-operation USDC checks in swap tools with actionable error messages
+
+### Changed
+- `x402Fetch` wrapper replaces `fetch` in all API clients for automatic payment handling
+- `fund_session_key` now supports both MON (gas) and USDC (x402) funding
+- `check_session_key_balance` returns USDC balance info when in x402 mode
+- Session key funding now supports custom executions for ERC20 transfers
+
+### Security
+- EIP-3009 `transferWithAuthorization` for USDC payments (no spending approval needed)
+- Session key signs USDC payments (no Touch ID per API call)
+- USDC funding requires Touch ID confirmation via passkey delegation
+
 ## [0.1.7] - 2026-01-12
 
 ### Changed

@@ -10,10 +10,10 @@ import { loadVerifiedTokens, getAllTokens } from "../config/tokens.js";
 import { loadConfig } from "../config/pragma-config.js";
 
 const ListVerifiedTokensSchema = z.object({
-  includeMonorail: z
+  includeApi: z
     .boolean()
     .optional()
-    .describe("Include tokens from Monorail API in addition to static list (default: true)"),
+    .describe("Include tokens from Data API in addition to static list (default: true)"),
 });
 
 interface TokenEntry {
@@ -32,14 +32,14 @@ interface ListVerifiedTokensResult {
   counts: {
     total: number;
     staticList: number;
-    monorail: number;
+    fromApi: number;
   };
 }
 
 export function registerListVerifiedTokens(server: McpServer): void {
   server.tool(
     "list_verified_tokens",
-    "List all verified/trusted tokens available for trading. Use to discover tokens or answer 'what tokens can I trade?'. Returns 23+ tokens from static verified list plus any additional from Monorail API.",
+    "List all verified/trusted tokens available for trading. Use to discover tokens or answer 'what tokens can I trade?'. Returns 23+ tokens from static verified list plus any additional from Data API.",
     ListVerifiedTokensSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await listVerifiedTokensHandler(
@@ -55,10 +55,10 @@ export function registerListVerifiedTokens(server: McpServer): void {
 async function listVerifiedTokensHandler(
   params: z.infer<typeof ListVerifiedTokensSchema>
 ): Promise<ListVerifiedTokensResult> {
-  const includeMonorail = params.includeMonorail !== false;
+  const includeApi = params.includeApi !== false;
   const sources: string[] = ["static-verified-list"];
   const staticCount = VERIFIED_TOKENS.length;
-  let monorailCount = 0;
+  let apiCount = 0;
 
   // Start with static list (23 tokens)
   const tokenMap = new Map<string, TokenEntry>();
@@ -72,8 +72,8 @@ async function listVerifiedTokensHandler(
     });
   }
 
-  // Optionally add Monorail tokens
-  if (includeMonorail) {
+  // Optionally add API tokens
+  if (includeApi) {
     try {
       const config = await loadConfig();
       if (config?.network?.chainId) {
@@ -87,11 +87,11 @@ async function listVerifiedTokensHandler(
               decimals: token.decimals,
               categories: token.categories,
             });
-            monorailCount++;
+            apiCount++;
           }
         }
-        if (monorailCount > 0) {
-          sources.push("monorail-api");
+        if (apiCount > 0) {
+          sources.push("data-api");
         }
       }
     } catch {
@@ -112,13 +112,13 @@ async function listVerifiedTokensHandler(
 
   return {
     success: true,
-    message: `Found ${tokens.length} verified tokens (${staticCount} static + ${monorailCount} from API)`,
+    message: `Found ${tokens.length} verified tokens (${staticCount} static + ${apiCount} from API)`,
     tokens,
     sources,
     counts: {
       total: tokens.length,
       staticList: staticCount,
-      monorail: monorailCount,
+      fromApi: apiCount,
     },
   };
 }

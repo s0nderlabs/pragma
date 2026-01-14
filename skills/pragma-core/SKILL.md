@@ -38,11 +38,112 @@ When skill activates or user appears new:
 
 ## Before Execution Operations
 
+**MANDATORY: ALWAYS check session key balance before ANY transaction.**
+
 For swap, transfer, stake, wrap, unwrap:
+
+### Single Operation
 1. `get_balance` - Verify user has sufficient tokens
-2. `check_session_key_balance` - Verify session key has gas
-3. If session key low - `fund_session_key` (Touch ID)
+2. **`check_session_key_balance`** with `operationType` ← MANDATORY
+3. If `needsFunding`: `fund_session_key` → **WAIT for completion**
 4. Execute operation (Touch ID)
+
+### Multiple Operations (Parallel)
+1. Count total operations from user intent
+2. Get all quotes/balances in parallel
+3. **`check_session_key_balance`** with `estimatedOperations: N` ← MANDATORY
+4. If `needsFunding`: `fund_session_key` with `estimatedOperations: N`
+5. **WAIT** for funding to complete
+6. Execute all operations in parallel (single message, multiple tool calls)
+
+### Multiple Operations (Sequential)
+1. **`check_session_key_balance`** before first operation ← MANDATORY
+2. Fund if needed → WAIT
+3. Execute first operation
+4. For each subsequent operation:
+   - Check if more funding needed
+   - Fund if needed → WAIT
+   - Execute operation
+
+## Parallel vs Sequential Execution
+
+### When to Execute in PARALLEL
+
+Execute multiple tool calls simultaneously when operations are **independent**:
+
+| User Request | Execution | Why |
+|--------------|-----------|-----|
+| "swap 0.5 MON to USDC and 0.5 MON to AUSD" | Parallel quotes, parallel executions | No data dependency |
+| "show my NFTs and token balance" | Parallel calls | Read-only, no dependency |
+| "wrap 1 MON and stake 2 MON" | Parallel executions | Different operations |
+| Multiple getBalance for different tokens | Parallel calls | Independent reads |
+
+**Pattern for parallel execution:**
+1. Get all quotes in parallel (single message, multiple tool calls)
+2. Show combined confirmation to user
+3. Check session key balance for ALL operations combined
+4. Fund session key if needed (WAIT for completion)
+5. Execute all operations in parallel (single message, multiple tool calls)
+
+### When to Execute SEQUENTIALLY
+
+Execute one at a time when output is **input for next operation**:
+
+| User Request | Execution | Why |
+|--------------|-----------|-----|
+| "swap MON to USDC, then swap that USDC to DAK" | Sequential | Need first swap output amount |
+| "swap all my MON to USDC" | getBalance → swap | Need exact balance first |
+| "buy max NFTs I can afford" | getBalance → calculate → buy | Need balance to calculate |
+
+**Pattern for sequential execution:**
+1. Execute first operation
+2. Wait for result
+3. Use result to inform next operation
+4. Continue chain
+
+### CRITICAL: Session Key Funding Rule
+
+**fundSessionKey and execution tools must be SEQUENTIAL, never parallel.**
+
+The session key needs funds BEFORE it can pay gas for transactions.
+
+```
+✅ CORRECT:
+[fundSessionKey] → wait for result → [executeSwap, executeSwap]
+
+❌ WRONG (race condition):
+[fundSessionKey, executeSwap, executeSwap] in same batch
+```
+
+**NEVER call fundSessionKey and execution tools in the same tool call batch.**
+
+### Pre-Flight Gas Estimation
+
+Before executing multiple operations, calculate total gas needed:
+
+| Operation | Gas Cost (MON) |
+|-----------|---------------|
+| swap | 0.14 |
+| transfer | 0.04 |
+| wrap | 0.04 |
+| unwrap | 0.04 |
+| stake | 0.07 |
+| unstake | 0.075 |
+
+**Formula:** `total_gas = sum(operation_costs) + 0.02 MON buffer`
+
+**Example:** "swap to USDC and stake 1 MON"
+- Swap: 0.14 MON
+- Stake: 0.07 MON
+- Buffer: 0.02 MON
+- **Total: 0.23 MON needed**
+
+**Workflow:**
+1. Count operations from user intent
+2. `check_session_key_balance` with `estimatedOperations: N`
+3. If `needsFunding`: `fund_session_key` with `estimatedOperations: N`
+4. **WAIT** for funding to complete
+5. Then execute operations (parallel if independent)
 
 ## Tool Reference
 
@@ -168,6 +269,57 @@ Success!
 Tx: 0x123...
 Received: 0.999 TOKEN_B
 ```
+
+## Execution Examples
+
+### Example 1: Parallel Independent Swaps
+User: "swap 0.5 MON each to USDC and AUSD"
+
+**Analysis:** Two swaps, no dependency → PARALLEL
+
+**Execution:**
+1. [get_swap_quote MON→USDC, get_swap_quote MON→AUSD] (parallel)
+2. Show combined quote, get confirmation
+3. check_session_key_balance(estimatedOperations: 2)
+4. fund_session_key if needed → WAIT
+5. [execute_swap USDC, execute_swap AUSD] (parallel)
+
+### Example 2: Sequential Dependent Swaps
+User: "swap 1 MON to USDC, then swap that USDC to DAK"
+
+**Analysis:** Second swap depends on first output → SEQUENTIAL
+
+**Execution:**
+1. get_swap_quote MON→USDC
+2. Confirm first swap
+3. check_session_key_balance, fund if needed
+4. execute_swap → get actual USDC output
+5. get_swap_quote (using actual USDC amount)→DAK
+6. Confirm second swap
+7. execute_swap
+
+### Example 3: Mixed Operations
+User: "wrap 1 MON and stake 2 MON"
+
+**Analysis:** Independent operations → PARALLEL
+
+**Execution:**
+1. get_balance (verify has 3+ MON)
+2. check_session_key_balance(estimatedOperations: 2)
+3. fund_session_key if needed → WAIT
+4. [wrap, stake] (parallel)
+
+### Example 4: "All" Requires Balance First
+User: "swap all my CHOG to MON"
+
+**Analysis:** Need balance before swap → SEQUENTIAL (get_balance → swap)
+
+**Execution:**
+1. get_balance CHOG → get exact amount
+2. get_swap_quote with exact amount
+3. Confirm swap
+4. check_session_key_balance, fund if needed
+5. execute_swap
 
 ## Error Handling
 

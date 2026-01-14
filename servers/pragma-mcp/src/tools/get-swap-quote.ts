@@ -1,22 +1,24 @@
 // Get Swap Quote Tool
-// Fetches swap quote from 0x (primary) with Monorail fallback
+// Fetches swap quote from aggregator
 // Copyright (c) 2026 s0nderlabs
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createPublicClient, http, parseUnits, type Address } from "viem";
-import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
-import { getChainConfig, buildViemChain } from "../config/chains.js";
-import { getProvider } from "../core/signer/index.js";
+import { createPublicClient, http, parseUnits, type Address, type PublicClient } from "viem";
+import { x402HttpOptions, isX402Mode } from "../core/x402/client.js";
+import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
+import { buildViemChain } from "../config/chains.js";
 import { getQuote } from "../core/aggregator/index.js";
-import {
-  findTokenBySymbol,
-  findTokenByAddress,
-  loadVerifiedTokens,
-  type TokenInfo,
-} from "../config/tokens.js";
-import { fetchTokenFromMonorail, searchTokenBySymbol } from "../core/monorail/tokens.js";
+import { loadVerifiedTokens, type TokenInfo } from "../config/tokens.js";
+import { resolveToken as resolveTokenFromData } from "../core/data/client.js";
 import { fetchTokenFromChain } from "../core/tokens/onchain.js";
+import {
+  getUsdcBalance,
+  formatUsdcBalance,
+  LOW_BALANCE_WARNING,
+  isUsdcConfigured,
+  getMinRequiredForOperation,
+} from "../core/x402/usdc.js";
 
 // Slippage constants
 const DEFAULT_SLIPPAGE_BPS = 500; // 5% default
@@ -35,7 +37,7 @@ const GetSwapQuoteSchema = z.object({
   slippageBps: z
     .number()
     .optional()
-    .describe("Slippage tolerance in basis points (100 = 1%, default 500 = 5%, max 5000 = 50%). IMPORTANT: For 0x aggregator, slippage is baked into the quote at this stage."),
+    .describe("Slippage tolerance in basis points (100 = 1%, default 500 = 5%, max 5000 = 50%). Note: Some aggregators bake slippage into the quote at this stage."),
 });
 
 interface QuoteResult {
@@ -70,72 +72,78 @@ interface QuoteResult {
   error?: string;
 }
 
-// MARK: - Token Resolution
+// MARK: - Helpers
 
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 
 /**
  * Resolve token symbol or address to full token info
- * Uses multi-tier fallback (matching H2 pattern):
- * 1. Check static verified list by symbol
- * 2. Check static verified list by address
- * 3. Monorail /tokens?find= search (for symbols not in list)
- * 4. Monorail Data API /token/{address}
- * 5. On-chain ERC20 lookup for unknown addresses
- *
- * NO hardcoded decimals fallback - if we can't resolve decimals, we fail
  */
-async function resolveToken(
-  input: string,
-  chainId: number
-): Promise<TokenInfo | null> {
+async function resolveToken(input: string, chainId: number): Promise<TokenInfo | null> {
+  const fromData = await resolveTokenFromData(input, chainId);
+  if (fromData) return fromData;
+
   const normalized = input.trim();
-
-  // Tier 1: Check static verified list by symbol (case-insensitive)
-  const bySymbol = findTokenBySymbol(normalized);
-  if (bySymbol) {
-    return bySymbol;
-  }
-
-  // If input is an address, try address-based lookups
   if (normalized.startsWith("0x") && normalized.length === 42) {
-    // Tier 2: Check static verified list by address
-    const byAddress = findTokenByAddress(normalized);
-    if (byAddress) {
-      return byAddress;
-    }
-
-    // Tier 3: Monorail Data API lookup by address
-    const fromMonorail = await fetchTokenFromMonorail(normalized as Address, chainId);
-    if (fromMonorail) {
-      return fromMonorail;
-    }
-
-    // Tier 4: On-chain ERC20 lookup
-    const fromChain = await fetchTokenFromChain(normalized as Address, chainId);
-    if (fromChain) {
-      return fromChain;
-    }
-
-    // No fallback with hardcoded decimals - we need accurate decimals for swaps
-    return null;
+    return fetchTokenFromChain(normalized as Address, chainId);
   }
 
-  // It's a symbol not in verified list - search Monorail
-  // Tier 3: Monorail /tokens?find= search for unverified tokens
-  const fromSearch = await searchTokenBySymbol(normalized, chainId);
-  if (fromSearch) {
-    return fromSearch;
-  }
-
-  // Token not found
   return null;
+}
+
+/**
+ * Check x402 USDC balance and return any warning
+ */
+async function checkX402UsdcBalance(
+  sessionKeyAddress: Address,
+  chainId: number,
+  rpcUrl: string
+): Promise<{ error?: QuoteResult; warning?: string }> {
+  if (!(await isX402Mode()) || !isUsdcConfigured(chainId)) {
+    return {};
+  }
+
+  const chain = buildViemChain(chainId, rpcUrl);
+  const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
+  const usdcBalance = await getUsdcBalance(sessionKeyAddress, client as PublicClient, chainId);
+  const minRequired = getMinRequiredForOperation("quote");
+
+  if (usdcBalance < minRequired) {
+    return {
+      error: {
+        success: false,
+        message: "Insufficient USDC for x402 API calls",
+        error:
+          `Session key has ${formatUsdcBalance(usdcBalance)} but needs at least ` +
+          `${formatUsdcBalance(minRequired)}. Fund your session key with USDC to continue.`,
+      },
+    };
+  }
+
+  if (usdcBalance < LOW_BALANCE_WARNING) {
+    return {
+      warning: `x402 USDC balance low (${formatUsdcBalance(usdcBalance)}). Consider funding your session key with USDC.`,
+    };
+  }
+
+  return {};
+}
+
+/**
+ * Get token verification warning if unverified
+ */
+function getVerificationWarning(token: TokenInfo): string | null {
+  const verified = token.categories?.includes("verified") ?? false;
+  if (verified) return null;
+
+  const shortAddr = `${token.address.slice(0, 6)}...${token.address.slice(-4)}`;
+  return `Warning: ${token.symbol} (${shortAddr}) is not a verified token. Please verify the contract address before swapping.`;
 }
 
 export function registerGetSwapQuote(server: McpServer): void {
   server.tool(
     "get_swap_quote",
-    "Get a swap quote from DEX aggregator (0x primary, Monorail fallback). Returns expected output, price impact, and route. Quote is valid for ~5 minutes. Always show the quote to the user before executing.",
+    "Get a swap quote from DEX aggregator. Returns expected output, price impact, and route. Quote is valid for ~5 minutes. Always show the quote to the user before executing.",
     GetSwapQuoteSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await getSwapQuote(params as z.infer<typeof GetSwapQuoteSchema>);
@@ -152,11 +160,11 @@ export function registerGetSwapQuote(server: McpServer): void {
 }
 
 /**
- * Get swap quote from aggregator (0x primary, Monorail fallback)
+ * Get swap quote from aggregator
  */
 async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise<QuoteResult> {
   try {
-    // Step 1: Load config and verify wallet is set up
+    // Load config and verify wallet
     const config = await loadConfig();
     if (!config || !isWalletConfigured(config)) {
       return {
@@ -167,12 +175,17 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
     }
 
     const walletAddress = config.wallet!.smartAccountAddress as Address;
+    const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
     const chainId = config.network.chainId;
+    const rpcUrl = await getRpcUrl(config);
 
-    // Step 2: Load verified tokens from Monorail (populates cache)
+    // Check x402 USDC balance
+    const x402Check = await checkX402UsdcBalance(sessionKeyAddress, chainId, rpcUrl);
+    if (x402Check.error) return x402Check.error;
+
+    // Load verified tokens and resolve input tokens
     await loadVerifiedTokens(chainId);
 
-    // Step 3: Resolve tokens
     const fromToken = await resolveToken(params.fromToken, chainId);
     if (!fromToken) {
       return {
@@ -191,7 +204,7 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
       };
     }
 
-    // Step 3: Parse amount
+    // Parse amount
     let amountWei: bigint;
     try {
       amountWei = parseUnits(params.amount, fromToken.decimals);
@@ -203,39 +216,34 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
       };
     }
 
-    // Step 4: Validate and normalize slippage
-    let slippageBps = params.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
-    if (slippageBps > MAX_SLIPPAGE_BPS) {
-      slippageBps = MAX_SLIPPAGE_BPS;
-    }
-    if (slippageBps < 0) {
-      slippageBps = DEFAULT_SLIPPAGE_BPS;
-    }
+    // Normalize slippage
+    const slippageBps = Math.max(0, Math.min(params.slippageBps ?? DEFAULT_SLIPPAGE_BPS, MAX_SLIPPAGE_BPS));
 
-    // Step 5: Check balance (optional but helpful)
-    let warning: string | undefined;
+    // Check native balance if swapping native token
+    const warnings: string[] = [];
+    if (x402Check.warning) warnings.push(x402Check.warning);
+
     try {
-      const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
       const chain = buildViemChain(chainId, rpcUrl);
-      const client = createPublicClient({ chain, transport: http(rpcUrl) });
-
+      const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
       const balance = await client.getBalance({ address: walletAddress });
 
       if (fromToken.address === NATIVE_TOKEN_ADDRESS && balance < amountWei) {
-        warning = `Insufficient balance: you have ${(Number(balance) / 1e18).toFixed(4)} ${fromToken.symbol} but want to swap ${params.amount} ${fromToken.symbol}`;
+        warnings.push(
+          `Insufficient balance: you have ${(Number(balance) / 1e18).toFixed(4)} ${fromToken.symbol} but want to swap ${params.amount} ${fromToken.symbol}`
+        );
       }
     } catch {
-      // Balance check is optional, continue
+      // Balance check is optional
     }
 
-    // Step 6: Get quote from aggregator (0x primary, Monorail fallback)
-    // IMPORTANT: For 0x, slippage is baked into the quote calldata here
+    // Get quote from aggregator
     const quoteResult = await getQuote({
       fromToken: fromToken.address,
       toToken: toToken.address,
       amount: amountWei,
       sender: walletAddress,
-      slippageBps, // User-specified or default 5%
+      slippageBps,
       fromDecimals: fromToken.decimals,
       toDecimals: toToken.decimals,
       fromSymbol: fromToken.symbol,
@@ -243,38 +251,18 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
     });
 
     const quote = quoteResult.quote;
+    const fromVerified = fromToken.categories?.includes("verified") ?? false;
+    const toVerified = toToken.categories?.includes("verified") ?? false;
 
-    // Step 7: Check token verification status (based on categories from Monorail)
-    const fromTokenVerified = fromToken.categories?.includes("verified") ?? false;
-    const toTokenVerified = toToken.categories?.includes("verified") ?? false;
-
-    // Add warnings for unverified tokens
-    const warnings: string[] = [];
-    if (warning) {
-      warnings.push(warning);
-    }
-
-    if (!fromTokenVerified) {
-      warnings.push(
-        `Warning: ${fromToken.symbol} (${fromToken.address.slice(0, 6)}...${fromToken.address.slice(-4)}) ` +
-        `is not a verified token. Please verify the contract address before swapping.`
-      );
-    }
-    if (!toTokenVerified) {
-      warnings.push(
-        `Warning: ${toToken.symbol} (${toToken.address.slice(0, 6)}...${toToken.address.slice(-4)}) ` +
-        `is not a verified token. Please verify the contract address before swapping.`
-      );
-    }
-
-    // Add fallback warning if used
+    // Add verification warnings
+    const fromWarning = getVerificationWarning(fromToken);
+    const toWarning = getVerificationWarning(toToken);
+    if (fromWarning) warnings.push(fromWarning);
+    if (toWarning) warnings.push(toWarning);
     if (quoteResult.fallbackUsed) {
-      warnings.push(
-        `Note: Using Monorail (fallback) - ${quoteResult.fallbackReason || "0x unavailable"}`
-      );
+      warnings.push(`Note: Using fallback aggregator - ${quoteResult.fallbackReason || "Primary unavailable"}`);
     }
 
-    // Step 8: Format response
     const expiresIn = Math.max(0, Math.floor((quote.expiresAt - Date.now()) / 1000));
 
     return {
@@ -295,33 +283,17 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
         gasEstimate: `${quote.gasEstimate.toString()} gas`,
         aggregator: quote.aggregator,
         tokenVerification: {
-          fromToken: {
-            verified: fromTokenVerified,
-            status: fromTokenVerified ? "verified" : "unverified",
-          },
-          toToken: {
-            verified: toTokenVerified,
-            status: toTokenVerified ? "verified" : "unverified",
-          },
+          fromToken: { verified: fromVerified, status: fromVerified ? "verified" : "unverified" },
+          toToken: { verified: toVerified, status: toVerified ? "verified" : "unverified" },
         },
       },
       warning: warnings.length > 0 ? warnings.join(" | ") : undefined,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-
-    // Handle specific Monorail errors
-    if (errorMessage.includes("Monorail API error")) {
-      return {
-        success: false,
-        message: "Monorail API error",
-        error: errorMessage,
-      };
-    }
-
     return {
       success: false,
-      message: "Failed to get quote",
+      message: errorMessage.includes("API error") ? "Quote API error" : "Failed to get quote",
       error: errorMessage,
     };
   }

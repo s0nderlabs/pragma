@@ -1,17 +1,15 @@
 // Verified Tokens Registry
 // Static curated token list for fast lookup without network calls
-// Sources: Monorail API /tokens/category/verified (H2) + monad-contracts.json
+// Sources: Data API /tokens/category/verified + monad-contracts.json
 // Copyright (c) 2026 s0nderlabs
 
 import { type Address } from "viem";
 import type { TokenInfo } from "./tokens.js";
 
 /**
- * Mainnet Verified Tokens (23 tokens)
+ * Monad Verified Tokens (25 tokens)
  *
- * Composition:
- * - H2's 19 tokens from Monorail /tokens/category/verified
- * - 4 additional from monad-contracts.json top-contracts/verified-contracts
+ * Source: Data API /tokens/category/verified
  *
  * Categories:
  * - Native/Wrapped: MON, WMON
@@ -20,7 +18,7 @@ import type { TokenInfo } from "./tokens.js";
  * - Bridged: WETH, WBTC, wstETH, SOL
  * - Synthetic: suBTC, suETH
  * - Meme: CHOG, MCA, 143
- * - Other: UNIT, ANAGO, APR, earnAUSD, CHILLSA
+ * - Other: UNIT, ANAGO, APR, earnAUSD
  */
 export const VERIFIED_TOKENS: TokenInfo[] = [
   // === NATIVE & WRAPPED ===
@@ -245,7 +243,9 @@ export const VERIFIED_TOKENS: TokenInfo[] = [
 /**
  * Find verified token by symbol (case-insensitive)
  */
-export function getVerifiedTokenBySymbol(symbol: string): TokenInfo | undefined {
+export function getVerifiedTokenBySymbol(
+  symbol: string
+): TokenInfo | undefined {
   return VERIFIED_TOKENS.find(
     (t) => t.symbol.toLowerCase() === symbol.toLowerCase()
   );

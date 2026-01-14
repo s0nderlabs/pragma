@@ -16,6 +16,7 @@ import {
   MIN_SESSION_KEY_BALANCE,
   SESSION_KEY_FUNDING_AMOUNT,
 } from "../../config/constants.js";
+import { x402Fetch } from "../x402/client.js";
 
 // Re-export constants for convenience
 export { MIN_SESSION_KEY_BALANCE, SESSION_KEY_FUNDING_AMOUNT };
@@ -73,12 +74,24 @@ interface SignableUserOp {
   paymasterPostOpGasLimit?: bigint;
 }
 
+/**
+ * Custom execution for UserOp
+ * When provided, overrides the default native MON transfer
+ */
+export interface CustomExecution {
+  target: Address;
+  value: bigint;
+  callData: Hex;
+}
+
 export interface FundSessionKeyParams {
   handle: HybridDelegatorHandle;
   sessionKeyAddress: Address;
   publicClient: PublicClient;
   bundlerUrl: string;
   fundingAmount?: bigint;
+  /** Custom execution - overrides default native transfer */
+  customExecution?: CustomExecution;
 }
 
 export interface FundSessionKeyResult {
@@ -97,7 +110,7 @@ async function getGasPrice(bundlerUrl: string): Promise<{
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
 }> {
-  const response = await fetch(bundlerUrl, {
+  const response = await x402Fetch(bundlerUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -160,7 +173,7 @@ async function estimateUserOpGas(
   verificationGasLimit?: bigint;
   preVerificationGas?: bigint;
 }> {
-  const response = await fetch(bundlerUrl, {
+  const response = await x402Fetch(bundlerUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -230,7 +243,7 @@ async function sendUserOperation(
   userOp: Record<string, unknown>,
   entryPoint: Address
 ): Promise<Hex> {
-  const response = await fetch(bundlerUrl, {
+  const response = await x402Fetch(bundlerUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -272,7 +285,7 @@ async function waitForUserOperationReceipt(
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
-    const response = await fetch(bundlerUrl, {
+    const response = await x402Fetch(bundlerUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -335,22 +348,25 @@ export async function fundSessionKeyViaUserOp(
     publicClient,
     bundlerUrl,
     fundingAmount = SESSION_KEY_FUNDING_AMOUNT,
+    customExecution,
   } = params;
 
   // Get balance before funding
   const balanceBefore = await publicClient.getBalance({ address: sessionKeyAddress });
 
-  // Step 1: Build execute() calldata for native transfer to session key
+  // Step 1: Build execute() calldata
+  // If customExecution provided, use it (for ERC20 transfers like USDC)
+  // Otherwise, use default native MON transfer to session key
+  const execution = customExecution ?? {
+    target: sessionKeyAddress,
+    value: fundingAmount,
+    callData: "0x" as Hex, // Native transfer (no contract call)
+  };
+
   const callData = encodeFunctionData({
     abi: HYBRID_DELEGATOR_EXECUTE_ABI,
     functionName: "execute",
-    args: [
-      {
-        target: sessionKeyAddress,
-        value: fundingAmount,
-        callData: "0x" as Hex, // Native transfer (no contract call)
-      },
-    ],
+    args: [execution],
   });
 
   // Step 2: Get nonce from smart account

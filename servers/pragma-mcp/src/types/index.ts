@@ -4,26 +4,26 @@
 import type { Hex, Address } from "viem";
 
 // Config types
+// URLs are resolved at runtime based on mode:
+// - x402: Constructed from hardcoded constant (getX402BaseUrl())
+// - byok: Uses adapter system with user-configured providers
 export interface PragmaConfig {
-  mode: "diy" | "convenient";
+  mode: "byok" | "x402";
   network: {
     chainId: number;
-    rpc: string;
-    name?: string; // e.g., "monad", "base"
+    name: string; // e.g., "monad", "base"
   };
   wallet?: {
     smartAccountAddress: Address;
     sessionKeyAddress: Address;
-    passkeyPublicKey: Hex; // Uncompressed P-256 public key (0x04...)
-    keyId?: string; // P-256 key ID for HybridDelegator
+    keyId: string; // P-256 key ID for HybridDelegator
   };
-  bundler?: {
-    url: string;
-    paymasterUrl?: string;
-  };
-  apis?: {
-    monorail?: string;
-    hypersync?: string;
+  // BYOK mode only: maps service types to adapter names
+  // Arrays support fallback (try first, fall back to second on failure)
+  providers?: {
+    quote?: string[];   // Quote provider adapters
+    bundler?: string[]; // Bundler provider adapters
+    data?: string[];    // Data provider adapters
   };
 }
 
@@ -44,8 +44,8 @@ export interface TokenBalance {
   decimals: number;
 }
 
-// Aggregator types
-export type AggregatorName = "0x" | "monorail";
+// Aggregator types (provider-agnostic)
+export type AggregatorName = "pragma" | string;
 
 // Quote types
 export interface SwapQuote {

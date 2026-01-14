@@ -314,37 +314,44 @@ export function deriveAddressFromP256(publicKey: Hex): Hex {
 }
 
 // ============================================================================
-// Provider Operations (Keychain)
+// Provider Operations (Keychain) - BYOK Mode Only
 // ============================================================================
 
 /**
- * Supported provider types
- */
-export type ProviderType = "rpc" | "pimlico" | "monorail" | "0x";
-
-/**
  * Store a provider value (API key or URL) in Keychain
- * @param type - Provider type (rpc, pimlico, monorail)
+ * Used in BYOK mode when user provides their own API keys
+ *
+ * Provider names are user-defined (no restrictions).
+ * Example names: "my-quote-api", "backup-rpc", "custom-bundler"
+ *
+ * @param name - User-defined provider name (Keychain key identifier)
  * @param value - The value to store (URL or API key)
  */
-export async function storeProvider(type: ProviderType, value: string): Promise<void> {
-  const response = await execSigner(["store-provider", type, value]);
+export async function storeProvider(name: string, value: string): Promise<void> {
+  const response = await execSigner(["store-provider", name, value]);
   handleResponse(response);
 }
 
 /**
  * Get a provider value from Keychain
- * @param type - Provider type (rpc, pimlico, monorail)
+ * Used in BYOK mode when user provides their own API keys
+ *
+ * @param name - User-defined provider name
  * @returns The stored value or null if not found
  */
-export async function getProvider(type: ProviderType): Promise<string | null> {
+export async function getProvider(name: string): Promise<string | null> {
   try {
-    const response = await execSigner(["get-provider", type]);
+    const response = await execSigner(["get-provider", name]);
     const data = handleResponse<{ value: string }>(response, ["value"]);
     return data.value;
   } catch (error) {
     // Key not found is not an error condition
     if (error instanceof Error && error.message.includes("not found")) {
+      return null;
+    }
+    // Keychain access errors (e.g., -128 user canceled) should return null
+    // This allows fallback to config values in x402 mode
+    if (error instanceof Error && error.message.includes("Keychain error")) {
       return null;
     }
     throw error;
@@ -353,29 +360,29 @@ export async function getProvider(type: ProviderType): Promise<string | null> {
 
 /**
  * Delete a provider from Keychain
- * @param type - Provider type to delete
+ * @param name - User-defined provider name to delete
  */
-export async function deleteProvider(type: ProviderType): Promise<void> {
-  const response = await execSigner(["delete-provider", type]);
+export async function deleteProvider(name: string): Promise<void> {
+  const response = await execSigner(["delete-provider", name]);
   handleResponse(response);
 }
 
 /**
  * Check if a provider exists in Keychain
- * @param type - Provider type to check
+ * @param name - User-defined provider name to check
  * @returns true if provider exists
  */
-export async function hasProvider(type: ProviderType): Promise<boolean> {
-  const response = await execSigner(["has-provider", type]);
+export async function hasProvider(name: string): Promise<boolean> {
+  const response = await execSigner(["has-provider", name]);
   const data = handleResponse<{ exists: string }>(response, ["exists"]);
   return data.exists === "true";
 }
 
 /**
  * List all configured providers
- * @returns Array of provider types that are configured
+ * @returns Array of provider names that are configured
  */
-export async function listProviders(): Promise<ProviderType[]> {
+export async function listProviders(): Promise<string[]> {
   const response = await execSigner(["list-providers"]);
   const data = handleResponse<{ providers: string }>(response, ["providers"]);
 
@@ -383,5 +390,5 @@ export async function listProviders(): Promise<ProviderType[]> {
   if (!data.providers || data.providers === "") {
     return [];
   }
-  return data.providers.split(",") as ProviderType[];
+  return data.providers.split(",");
 }

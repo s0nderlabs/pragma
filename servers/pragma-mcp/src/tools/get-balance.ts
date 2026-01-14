@@ -1,6 +1,6 @@
 // Get Balance Tool
 // Retrieves token balance for a specific token
-// Uses Monorail API + RPC fallback for freshness
+// Uses Data API + RPC for freshness
 // Adapted from pragma-v2-stable (H2)
 // Copyright (c) 2026 s0nderlabs
 
@@ -14,11 +14,10 @@ import {
   type PublicClient,
   getAddress,
 } from "viem";
-import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
+import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
+import { x402HttpOptions } from "../core/x402/client.js";
 import { getChainConfig, buildViemChain } from "../config/chains.js";
-import { getProvider } from "../core/signer/index.js";
-import { resolveToken } from "../core/monorail/tokens.js";
-import { fetchSingleTokenBalance } from "../core/monorail/balances.js";
+import { resolveToken, fetchSingleTokenBalance, getTokenPrice } from "../core/data/client.js";
 
 // Native token address
 const NATIVE_TOKEN_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
@@ -114,8 +113,8 @@ async function getBalanceHandler(
       };
     }
 
-    // Step 3: Get RPC provider
-    const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
+    // Step 3: Get RPC URL (mode-aware: skips Keychain in x402 mode)
+    const rpcUrl = await getRpcUrl(config);
     if (!rpcUrl) {
       return {
         success: false,
@@ -128,11 +127,11 @@ async function getBalanceHandler(
     const chain = buildViemChain(chainId, rpcUrl);
     const publicClient = createPublicClient({
       chain,
-      transport: http(rpcUrl),
+      transport: http(rpcUrl, x402HttpOptions()),
     }) as PublicClient;
 
     // Step 5: Fetch balance
-    // For native MON, use RPC directly (Monorail doesn't return native balance)
+    // For native MON, use RPC directly
     const isNative = tokenInfo.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
 
     let balance: string;
@@ -154,23 +153,15 @@ async function getBalanceHandler(
       balanceWei = result.balanceWei;
     }
 
-    // Step 6: Try to get USD price from Monorail
+    // Step 6: Try to get USD price from Data API
     let usdPrice: number | undefined;
     let usdValue: number | undefined;
 
     try {
-      const dataApiUrl = chainConfig.protocols?.monorailDataApi;
-      if (dataApiUrl) {
-        const priceUrl = `${dataApiUrl}/token/${tokenInfo.address}`;
-        const priceResp = await fetch(priceUrl);
-        if (priceResp.ok) {
-          const priceData = (await priceResp.json()) as { usd_per_token?: string };
-          if (priceData.usd_per_token) {
-            usdPrice = parseFloat(priceData.usd_per_token);
-            const balanceNum = parseFloat(balance);
-            usdValue = balanceNum * usdPrice;
-          }
-        }
+      usdPrice = await getTokenPrice(tokenInfo.address, chainId);
+      if (usdPrice) {
+        const balanceNum = parseFloat(balance);
+        usdValue = balanceNum * usdPrice;
       }
     } catch {
       // Price fetch failed, continue without

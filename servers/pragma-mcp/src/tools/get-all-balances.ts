@@ -1,6 +1,6 @@
 // Get All Balances Tool
 // Fetches complete portfolio with all token balances and USD values
-// Uses Monorail API + RPC for native MON
+// Uses Data API + RPC for native MON
 // Adapted from pragma-v2-stable (H2)
 // Copyright (c) 2026 s0nderlabs
 
@@ -8,13 +8,10 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Address, PublicClient } from "viem";
 import { createPublicClient, http, getAddress } from "viem";
-import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
+import { x402HttpOptions } from "../core/x402/client.js";
+import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { getChainConfig, buildViemChain } from "../config/chains.js";
-import { getProvider } from "../core/signer/index.js";
-import {
-  fetchPortfolio,
-  type MonorailBalancesConfig,
-} from "../core/monorail/balances.js";
+import { fetchPortfolio } from "../core/data/client.js";
 
 const GetAllBalancesSchema = z.object({
   address: z
@@ -93,8 +90,8 @@ async function getAllBalancesHandler(
     const chainId = config.network.chainId;
     const chainConfig = getChainConfig(chainId);
 
-    // Step 2: Get RPC provider
-    const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
+    // Step 2: Get RPC URL (mode-aware: skips Keychain in x402 mode)
+    const rpcUrl = await getRpcUrl(config);
     if (!rpcUrl) {
       return {
         success: false,
@@ -103,32 +100,17 @@ async function getAllBalancesHandler(
       };
     }
 
-    // Step 3: Get Monorail Data API URL
-    const dataApiUrl = chainConfig.protocols?.monorailDataApi;
-    if (!dataApiUrl) {
-      return {
-        success: false,
-        message: "Monorail API not configured",
-        error: "Monorail Data API not available for this chain",
-      };
-    }
-
-    // Step 4: Create public client for RPC calls
+    // Step 3: Create public client for RPC calls
     const chain = buildViemChain(chainId, rpcUrl);
     const publicClient = createPublicClient({
       chain,
-      transport: http(rpcUrl),
+      transport: http(rpcUrl, x402HttpOptions()),
     }) as PublicClient;
 
-    // Step 5: Fetch portfolio (Monorail API + RPC for native MON)
-    const monorailConfig: MonorailBalancesConfig = {
-      dataApiUrl,
-      chainId,
-    };
-
+    // Step 4: Fetch portfolio (Data API + RPC for native MON)
     const portfolio = await fetchPortfolio(
       targetAddress,
-      monorailConfig,
+      chainId,
       publicClient
     );
 

@@ -4,9 +4,9 @@
 
 import { createPublicClient, http, type Address, erc20Abi } from "viem";
 import type { TokenInfo } from "../../config/tokens.js";
-import { getProvider } from "../signer/index.js";
-import { loadConfig } from "../../config/pragma-config.js";
+import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain } from "../../config/chains.js";
+import { x402HttpOptions } from "../x402/client.js";
 
 /**
  * Fetch token info from blockchain for unknown addresses
@@ -17,16 +17,16 @@ export async function fetchTokenFromChain(
   chainId: number
 ): Promise<TokenInfo | null> {
   try {
-    // Get RPC URL
+    // Get RPC URL (mode-aware: skips Keychain in x402 mode)
     const config = await loadConfig();
-    const rpcUrl = (await getProvider("rpc")) || config?.network.rpc;
-    if (!rpcUrl) {
+    if (!config) {
       return null;
     }
+    const rpcUrl = await getRpcUrl(config);
 
     // Create viem client
     const chain = buildViemChain(chainId, rpcUrl);
-    const client = createPublicClient({ chain, transport: http(rpcUrl) });
+    const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
 
     // Fetch name, symbol, decimals in parallel
     const [name, symbol, decimals] = await Promise.all([

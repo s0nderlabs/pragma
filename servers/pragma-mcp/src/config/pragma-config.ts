@@ -5,8 +5,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { PragmaConfig } from "../types/index.js";
-import { getChainConfig, buildViemChain } from "./chains.js";
-import type { Chain } from "viem";
+import { getChainConfig } from "./chains.js";
 
 /**
  * Get the path to the pragma config file
@@ -51,7 +50,73 @@ export async function configExists(): Promise<boolean> {
 }
 
 /**
+ * Migrate old config format to new format
+ * Removes deprecated fields: rpc, bundler, apis, passkeyPublicKey
+ * Normalizes mode to "byok" | "x402"
+ */
+function migrateConfig(rawConfig: Record<string, unknown>): PragmaConfig {
+  // Normalize mode (handle legacy names)
+  let mode: "byok" | "x402" = "x402";
+  if (rawConfig.mode === "diy" || rawConfig.mode === "byok") {
+    mode = "byok";
+  } else if (rawConfig.mode === "convenient" || rawConfig.mode === "x402") {
+    mode = "x402";
+  }
+
+  // Extract network (remove deprecated rpc field)
+  const network = rawConfig.network as Record<string, unknown> | undefined;
+  const chainId = network?.chainId as number | undefined;
+  const name = network?.name as string | undefined;
+
+  if (!chainId) {
+    throw new Error("Invalid config: missing network.chainId");
+  }
+
+  // Get chain name if missing
+  const chainConfig = getChainConfig(chainId);
+  const networkName = name || chainConfig.name;
+
+  // Build new config
+  const config: PragmaConfig = {
+    mode,
+    network: {
+      chainId,
+      name: networkName,
+    },
+  };
+
+  // Migrate wallet if present (remove passkeyPublicKey)
+  const wallet = rawConfig.wallet as Record<string, unknown> | undefined;
+  if (wallet) {
+    const smartAccountAddress = wallet.smartAccountAddress as `0x${string}` | undefined;
+    const sessionKeyAddress = wallet.sessionKeyAddress as `0x${string}` | undefined;
+    const keyId = wallet.keyId as string | undefined;
+
+    if (smartAccountAddress && sessionKeyAddress && keyId) {
+      config.wallet = {
+        smartAccountAddress,
+        sessionKeyAddress,
+        keyId,
+      };
+    }
+  }
+
+  // Preserve providers field if present
+  const providers = rawConfig.providers as {
+    quote?: string[];
+    bundler?: string[];
+    data?: string[];
+  } | undefined;
+  if (providers) {
+    config.providers = providers;
+  }
+
+  return config;
+}
+
+/**
  * Load the pragma config
+ * Automatically migrates old config format to new format
  * @returns Config object or null if not found
  * @throws Error if config is malformed
  */
@@ -60,11 +125,18 @@ export async function loadConfig(): Promise<PragmaConfig | null> {
 
   try {
     const content = await fs.readFile(configPath, "utf-8");
-    const config = JSON.parse(content) as PragmaConfig;
+    const rawConfig = JSON.parse(content) as Record<string, unknown>;
 
-    // Basic validation
-    if (!config.mode || !config.network?.chainId || !config.network?.rpc) {
-      throw new Error("Invalid config: missing required fields");
+    // Migrate and validate
+    const config = migrateConfig(rawConfig);
+
+    // Check if migration changed anything (compare stringified versions)
+    const originalStr = JSON.stringify(rawConfig);
+    const migratedStr = JSON.stringify(config);
+    if (originalStr !== migratedStr) {
+      // Save migrated config
+      await saveConfig(config);
+      console.log("[config] Migrated config to new format");
     }
 
     return config;
@@ -117,16 +189,8 @@ export function isWalletConfigured(config: PragmaConfig | null): boolean {
   return !!(
     config.wallet.smartAccountAddress &&
     config.wallet.sessionKeyAddress &&
-    config.wallet.passkeyPublicKey
+    config.wallet.keyId
   );
-}
-
-/**
- * Build a viem Chain object from the config
- * Convenience function for creating chain from saved config
- */
-export function buildChainFromConfig(config: PragmaConfig): Chain {
-  return buildViemChain(config.network.chainId, config.network.rpc);
 }
 
 /**
@@ -138,17 +202,16 @@ export function getConfiguredChainConfig(config: PragmaConfig) {
 
 /**
  * Create a minimal config for initial setup
+ * URLs are resolved at runtime based on mode
  * @param chainId - Chain ID to configure
- * @param rpc - RPC URL
  */
-export function createInitialConfig(chainId: number, rpc: string): PragmaConfig {
+export function createInitialConfig(chainId: number): PragmaConfig {
   const chainConfig = getChainConfig(chainId);
 
   return {
-    mode: "diy",
+    mode: "x402", // Default to x402 mode (pay per API call)
     network: {
       chainId,
-      rpc,
       name: chainConfig.name,
     },
   };
@@ -160,7 +223,7 @@ export function createInitialConfig(chainId: number, rpc: string): PragmaConfig 
 export async function updateConfigWithWallet(
   smartAccountAddress: `0x${string}`,
   sessionKeyAddress: `0x${string}`,
-  passkeyPublicKey: `0x${string}`
+  keyId: string
 ): Promise<PragmaConfig> {
   const config = await loadConfig();
   if (!config) {
@@ -170,7 +233,7 @@ export async function updateConfigWithWallet(
   config.wallet = {
     smartAccountAddress,
     sessionKeyAddress,
-    passkeyPublicKey,
+    keyId,
   };
 
   await saveConfig(config);
@@ -178,64 +241,48 @@ export async function updateConfigWithWallet(
 }
 
 /**
- * Get bundler URL from config or environment
- * Falls back to Pimlico URL constructed from API key
- *
- * Priority:
- * 1. config.bundler.url (explicit URL)
- * 2. PIMLICO_API_KEY env var
- * 3. Use getBundlerUrlAsync() for Keychain lookup
+ * Get RPC URL based on mode
+ * - x402 mode: Construct URL from hardcoded constant
+ * - BYOK mode: Read from Keychain ONLY (no fallback)
  */
-export function getBundlerUrl(config: PragmaConfig): string | null {
-  // Check config first
-  if (config.bundler?.url) {
-    return config.bundler.url;
+export async function getRpcUrl(config: PragmaConfig): Promise<string> {
+  if (config.mode === "x402") {
+    // x402: Construct from hardcoded constant
+    const { getX402BaseUrl } = await import("../core/x402/client.js");
+    return `${getX402BaseUrl()}/${config.network.chainId}/rpc`;
   }
 
-  // Fall back to env var
-  const apiKey = process.env.PIMLICO_API_KEY;
-  if (apiKey) {
-    const chainConfig = getChainConfig(config.network.chainId);
-    // Pimlico URL format: https://api.pimlico.io/v2/{chain}/rpc?apikey={key}
-    return `https://api.pimlico.io/v2/${chainConfig.name}/rpc?apikey=${apiKey}`;
-  }
-
-  // Keychain check requires async - use getBundlerUrlAsync() instead
-  return null;
-}
-
-/**
- * Get bundler URL with Keychain provider lookup (async)
- * Use this when you need to check all sources including Keychain
- */
-export async function getBundlerUrlAsync(config: PragmaConfig): Promise<string | null> {
-  // Check sync sources first
-  const syncResult = getBundlerUrl(config);
-  if (syncResult) {
-    return syncResult;
-  }
-
-  // Check Keychain for pimlico API key
+  // BYOK: Keychain ONLY, no fallback
   const { getProvider } = await import("../core/signer/index.js");
-  const pimlicoKey = await getProvider("pimlico");
-  if (pimlicoKey) {
-    const chainConfig = getChainConfig(config.network.chainId);
-    return `https://api.pimlico.io/v2/${chainConfig.name}/rpc?apikey=${pimlicoKey}`;
+  const keychainRpc = await getProvider("rpc");
+  if (!keychainRpc) {
+    throw new Error(
+      "RPC not configured. Run /pragma:providers to set your RPC endpoint."
+    );
   }
-
-  return null;
+  return keychainRpc;
 }
 
 /**
- * Get paymaster URL from config or environment
- * Falls back to Pimlico paymaster URL
+ * Get bundler URL based on mode
+ * - x402 mode: Construct URL from hardcoded constant
+ * - BYOK mode: Read from Keychain ONLY (no fallback)
  */
-export function getPaymasterUrl(config: PragmaConfig): string | null {
-  // Check config first
-  if (config.bundler?.paymasterUrl) {
-    return config.bundler.paymasterUrl;
+export async function getBundlerUrl(config: PragmaConfig): Promise<string> {
+  if (config.mode === "x402") {
+    // x402: Construct from hardcoded constant
+    const { getX402BaseUrl } = await import("../core/x402/client.js");
+    return `${getX402BaseUrl()}/${config.network.chainId}/bundler`;
   }
 
-  // Paymaster uses same URL as bundler for Pimlico
-  return getBundlerUrl(config);
+  // BYOK: Check for bundler URL in Keychain
+  // Note: Bundler uses direct URL storage (not adapter system) due to JSON-RPC nature
+  const { getProvider } = await import("../core/signer/index.js");
+  const bundlerUrl = await getProvider("bundler");
+  if (!bundlerUrl) {
+    throw new Error(
+      "Bundler not configured. Run /pragma:providers to set up your bundler provider."
+    );
+  }
+  return bundlerUrl;
 }

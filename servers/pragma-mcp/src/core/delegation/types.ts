@@ -55,7 +55,7 @@ export const FUNCTION_SELECTORS = {
   // ERC20
   approve: "0x095ea7b3" as Hex, // approve(address,uint256)
   transfer: "0xa9059cbb" as Hex, // transfer(address,uint256)
-  // Monorail
+  // DEX aggregator
   aggregate: "0x087c2af4" as Hex, // aggregate(address,address,uint256,uint256,address,bytes)
   // Wrapped native
   deposit: "0xd0e30db0" as Hex, // deposit()
@@ -69,8 +69,8 @@ export const CALLDATA_OFFSETS = {
     spender: 4, // After selector
     amount: 36, // 4 + 32
   },
-  // Monorail aggregate(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address destination, bytes data)
-  monorailAggregate: {
+  // DEX aggregate(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address destination, bytes data)
+  aggregate: {
     tokenIn: 4,
     tokenOut: 36,
     amountIn: 68,

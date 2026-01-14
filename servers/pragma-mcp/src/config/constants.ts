@@ -65,5 +65,41 @@ export const DELEGATION_FRAMEWORK = {
 // Binary paths
 export const PRAGMA_SIGNER_BINARY = "pragma-signer";
 
-// Pimlico API configuration
-export const PIMLICO_BASE_URL = "https://api.pimlico.io/v2";
+// ============================================================================
+// x402 / USDC Configuration
+// ============================================================================
+
+/**
+ * USDC addresses by chain ID
+ * Used for x402 micropayments
+ */
+export const USDC_ADDRESS: Record<number, Address> = {
+  143: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603" as Address, // Monad mainnet (checksummed)
+};
+
+/**
+ * USDC decimals (always 6)
+ */
+export const USDC_DECIMALS = 6;
+
+/**
+ * x402 API URL patterns for auto-detection
+ * When a URL matches one of these patterns, x402 payment flow is used
+ * For local dev, set X402_API_URL env var - it will be added to detection automatically
+ */
+export const X402_API_PATTERNS = ["api.pr4gma.xyz"] as const;
+
+/**
+ * Minimum USDC balance for x402 operations (in base units)
+ */
+export const MIN_USDC_BALANCE = 100_000n; // 0.1 USDC
+
+/**
+ * Low USDC balance warning threshold (in base units)
+ */
+export const LOW_USDC_BALANCE_WARNING = 100_000n; // 0.1 USDC
+
+/**
+ * Recommended USDC funding amount (in base units)
+ */
+export const RECOMMENDED_USDC_FUNDING = 1_000_000n; // 1 USDC

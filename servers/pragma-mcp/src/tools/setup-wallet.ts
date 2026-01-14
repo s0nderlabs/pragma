@@ -135,8 +135,8 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
     const chainConfig = getChainConfig(chainId);
 
     // Step 4: Create initial config
-    let config = existingConfig || createInitialConfig(chainId, rpc);
-    config.network.rpc = rpc;
+    // Note: RPC is only used for validation. Actual URLs are resolved at runtime based on mode.
+    let config = existingConfig || createInitialConfig(chainId);
     config.network.chainId = chainId;
 
     // Step 5: Create or retrieve passkey
@@ -190,11 +190,11 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
       await storeSessionKey(sessionKey);
     }
 
-    // Step 10: Save config with P-256 info
+    // Step 10: Save config with wallet addresses and keyId
+    // Note: passkeyPublicKey is stored in Keychain and retrieved via getPasskeyPublicKey() when needed
     config.wallet = {
       smartAccountAddress: handle.address,
       sessionKeyAddress: sessionKey.address,
-      passkeyPublicKey,
       keyId: handle.keyId,
     };
 

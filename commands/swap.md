@@ -1,11 +1,11 @@
 ---
 name: swap
-description: Swap tokens using Monorail DEX aggregator
+description: Swap tokens using DEX aggregator
 ---
 
 # Token Swap
 
-Execute a token swap through Monorail DEX aggregator.
+Execute a token swap through DEX aggregator.
 
 ## Flow
 

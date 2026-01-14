@@ -4,14 +4,22 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createPublicClient, http, type Address, type PublicClient } from "viem";
+import { x402HttpOptions } from "../core/x402/client.js";
 import { executeSwap as executeSwapCore } from "../core/execution/swap.js";
 import { getCachedQuote, isQuoteExpired, getQuoteTimeRemaining } from "../core/aggregator/index.js";
-import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
-import { getChainConfig } from "../config/chains.js";
+import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
+import { getChainConfig, buildViemChain } from "../config/chains.js";
+import { isX402Mode } from "../core/x402/client.js";
+import {
+  getUsdcBalance,
+  formatUsdcBalance,
+  LOW_BALANCE_WARNING,
+  isUsdcConfigured,
+  getMinRequiredForOperation,
+} from "../core/x402/usdc.js";
 
-// Slippage constants (matches H2)
-// Monorail API ignores max_slippage param and always returns ~0.5% slippage,
-// so we patch the calldata with actual slippage at execution time
+// Slippage constants
 const DEFAULT_SLIPPAGE_BPS = 500; // 5% default
 const MAX_SLIPPAGE_BPS = 5000; // 50% max allowed
 
@@ -22,7 +30,7 @@ const ExecuteSwapSchema = z.object({
   slippageBps: z
     .number()
     .optional()
-    .describe("Max slippage in basis points. NOTE: For 0x quotes (primary), slippage is already baked into the quote - this parameter only affects Monorail fallback quotes. Set slippage at quote time via get_swap_quote instead."),
+    .describe("Max slippage in basis points. NOTE: Slippage is already baked into the quote - set slippage at quote time via get_swap_quote instead."),
 });
 
 interface ExecuteSwapResult {
@@ -82,7 +90,40 @@ async function executeSwapHandler(
       };
     }
 
-    // Step 2: Verify quote exists and is valid
+    const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
+    const chainId = config.network.chainId;
+
+    // Step 2: Check USDC balance in x402 mode
+    // Only block if truly insufficient, warn if low
+    if (await isX402Mode()) {
+      if (isUsdcConfigured(chainId)) {
+        const rpcUrl = await getRpcUrl(config);
+        const chain = buildViemChain(chainId, rpcUrl);
+        const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
+
+        const usdcBalance = await getUsdcBalance(sessionKeyAddress, client as PublicClient, chainId);
+        const minRequired = getMinRequiredForOperation("bundler"); // Swap execution uses bundler
+
+        // Only block if truly insufficient (below actual operation cost ~0.011 USDC)
+        if (usdcBalance < minRequired) {
+          return {
+            success: false,
+            message: "Insufficient USDC for x402 API calls",
+            error:
+              `Session key has ${formatUsdcBalance(usdcBalance)} but needs at least ` +
+              `${formatUsdcBalance(minRequired)} for this operation. ` +
+              `Fund your session key with USDC to continue.`,
+          };
+        }
+
+        // Log warning if low but proceed (warning shown in check_session_key_balance)
+        if (usdcBalance < LOW_BALANCE_WARNING) {
+          console.log(`[x402] USDC balance low: ${formatUsdcBalance(usdcBalance)}`);
+        }
+      }
+    }
+
+    // Step 3: Verify quote exists and is valid
     const quote = await getCachedQuote(params.quoteId);
     if (!quote) {
       return {

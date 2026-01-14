@@ -55,7 +55,6 @@ export interface AllowedCalldataConfig {
  */
 export interface SwapDelegationContext {
   aggregator: Address;
-  aggregatorName?: "0x" | "monorail"; // For calldata enforcement selection
   destination: Address;
   delegator: Address;
   sessionKey: Address;
@@ -151,8 +150,8 @@ const WMON_DEPOSIT_SELECTOR = "0xd0e30db0" as Hex;
 /** WMON withdraw function selector (unwrap WMON → MON) */
 const WMON_WITHDRAW_SELECTOR = "0x2e1a7d4d" as Hex;
 
-/** Monorail aggregate function selector */
-const MONORAIL_AGGREGATE_SELECTOR = "0xf99cae99" as Hex;
+/** DEX aggregate function selector */
+const DEX_AGGREGATE_SELECTOR = "0xf99cae99" as Hex;
 
 // Byte offsets for AllowedCalldataEnforcer
 const CALLDATA_OFFSETS = {
@@ -164,7 +163,7 @@ const CALLDATA_OFFSETS = {
     recipient: 4,  // After selector
     amount: 36,    // 4 + 32
   },
-  monorailAggregate: {
+  aggregate: {
     destination: 132, // Offset 132 in aggregate() calldata
   },
 } as const;
@@ -215,7 +214,7 @@ function buildTransferEnforcement(
 }
 
 /**
- * Build AllowedCalldata config for Monorail swap
+ * Build AllowedCalldata config for DEX aggregate swap
  * Enforces only destination (offset 132)
  *
  * Other params not enforced because:
@@ -226,7 +225,7 @@ function buildTransferEnforcement(
 function buildSwapEnforcement(destination: Address): AllowedCalldataConfig[] {
   return [
     {
-      startIndex: CALLDATA_OFFSETS.monorailAggregate.destination,
+      startIndex: CALLDATA_OFFSETS.aggregate.destination,
       value: pad(destination, { size: 32 }),
     },
   ];
@@ -335,23 +334,21 @@ export function createApproveDelegation(
  * - 5 minute expiry (TimestampEnforcer)
  * - Single use (LimitedCallsEnforcer limit=1)
  * - Nonce-based revocation (NonceEnforcer)
- * - Destination enforcement for Monorail (AllowedCalldataEnforcer offset 132)
- * - Target + selector enforcement only for 0x (different calldata structure)
+ * - Target + selector enforcement (AllowedTargetsEnforcer + AllowedMethodsEnforcer)
  * - Unique salt per delegation (prevents hash collisions)
  *
- * Security note for 0x: Still protected by:
+ * Additional protections:
  * - Target enforcement: Can only call the specific aggregator address
  * - Selector enforcement: Can only call the specific function
  * - timestamp/nonce/limitedCalls caveats
  * - Session key requirement
- * - The 0x router respects the sender's address (user's smart account)
+ * - The router respects the sender's address (user's smart account)
  */
 export function createSwapDelegation(
   context: SwapDelegationContext
 ): DelegationResult {
   const {
     aggregator,
-    aggregatorName,
     destination,
     delegator,
     sessionKey,
@@ -364,32 +361,23 @@ export function createSwapDelegation(
   // Expiry: 5 minutes from now
   const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
 
-  // Extract selector from transaction data or use default Monorail selector
+  // Extract selector from transaction data
+  // Default to a generic swap selector if not provided
   const selector = transactionData && transactionData.length >= 10
     ? (transactionData.slice(0, 10) as Hex)
-    : MONORAIL_AGGREGATE_SELECTOR;
+    : ("0x00000000" as Hex); // Will be overwritten by actual calldata selector
 
-  // valueLte: Allow native value if swapping native token (MON), otherwise 0
+  // valueLte: Allow native value if swapping native token, otherwise 0
   const valueLteConfig = { maxValue: nativeValueAmount ?? 0n };
 
-  // Build scope based on aggregator
-  // Monorail: Full calldata enforcement (destination at offset 132)
-  // 0x: No calldata enforcement (different calldata structure, but still protected)
-  const scope = aggregatorName === "0x"
-    ? {
-        type: "functionCall" as const,
-        targets: [getAddress(aggregator)],
-        selectors: [selector],
-        valueLte: valueLteConfig,
-        // No allowedCalldata for 0x - different calldata structure
-      }
-    : {
-        type: "functionCall" as const,
-        targets: [getAddress(aggregator)],
-        selectors: [selector],
-        valueLte: valueLteConfig,
-        allowedCalldata: buildSwapEnforcement(destination), // Enforces destination (offset 132)
-      };
+  // Build scope with basic enforcement
+  // Protected by: target enforcement, selector enforcement, timestamp/nonce/limitedCalls caveats
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(aggregator)],
+    selectors: [selector],
+    valueLte: valueLteConfig,
+  };
 
   // Build caveats (timestamp, nonce, limitedCalls: 1)
   const caveats = buildEphemeralCaveats(nonce, expiresAt);

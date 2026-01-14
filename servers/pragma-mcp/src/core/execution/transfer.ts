@@ -28,10 +28,10 @@ import {
 import { getCurrentNonce } from "../delegation/nonce.js";
 import { getSessionKey, getSessionAccount } from "../session/keys.js";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
-import { loadConfig } from "../../config/pragma-config.js";
+import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain } from "../../config/chains.js";
-import { getProvider } from "../signer/index.js";
-import { resolveToken } from "../monorail/tokens.js";
+import { x402HttpOptions } from "../x402/client.js";
+import { resolveToken } from "../data/client.js";
 import { DELEGATION_FRAMEWORK, NATIVE_TOKEN_ADDRESS } from "../../config/constants.js";
 import {
   getMinBalanceForOperation,
@@ -139,13 +139,13 @@ export async function executeTransfer(
     throw new Error("Amount must be greater than 0");
   }
 
-  // Step 5: Get RPC and create clients
-  const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
+  // Step 5: Get RPC URL (mode-aware: skips Keychain in x402 mode)
+  const rpcUrl = await getRpcUrl(config);
   const chain = buildViemChain(chainId, rpcUrl);
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 6: Verify user has sufficient balance
@@ -275,7 +275,7 @@ export async function executeTransfer(
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 12: Execute delegation

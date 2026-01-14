@@ -1,15 +1,15 @@
 // Token Registry
-// Static verified list + Monorail Data API for extended tokens
-// Based on pragma-v2-stable/packages/core/src/monorail/tokens.ts (H2 pattern)
+// Static verified list + Data API for extended tokens
+// All API calls go through api.pr4gma.xyz
 // Copyright (c) 2026 s0nderlabs
 
 import { type Address, getAddress } from "viem";
-import { getChainConfig } from "./chains.js";
 import {
   VERIFIED_TOKENS,
   getVerifiedTokenBySymbol,
   getVerifiedTokenByAddress,
 } from "./verified-tokens.js";
+import { getApiEndpoint, x402Fetch } from "../core/x402/client.js";
 
 // MARK: - Types
 
@@ -25,7 +25,7 @@ export interface TokenInfo {
   logoURI?: string;
 }
 
-interface RawMonorailToken {
+interface RawApiToken {
   address?: string;
   symbol?: string;
   name?: string;
@@ -48,7 +48,7 @@ interface TokenCacheEntry {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
 // Fallback tokens: Use static verified list (23 tokens)
-// These are used when Monorail API is unavailable
+// These are used when Data API is unavailable
 const FALLBACK_TOKENS: TokenInfo[] = VERIFIED_TOKENS;
 
 // MARK: - Cache
@@ -74,7 +74,7 @@ initializeFallback();
 
 // MARK: - Parsing
 
-function parseMonorailToken(raw: RawMonorailToken): TokenInfo | null {
+function parseApiToken(raw: RawApiToken): TokenInfo | null {
   if (!raw.address) return null;
 
   try {
@@ -87,7 +87,7 @@ function parseMonorailToken(raw: RawMonorailToken): TokenInfo | null {
     } else if (typeof raw.decimals === "number") {
       decimals = raw.decimals;
     } else {
-      decimals = 18; // Default for Monorail verified tokens
+      decimals = 18; // Default for verified tokens
     }
 
     // Validate decimals
@@ -128,8 +128,8 @@ function parseMonorailToken(raw: RawMonorailToken): TokenInfo | null {
 // MARK: - API Loading
 
 /**
- * Load verified tokens from Monorail Data API
- * Endpoint: GET {dataApiUrl}/tokens/category/verified
+ * Load verified tokens from Data API
+ * All requests go through api.pr4gma.xyz
  */
 export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> {
   const now = Date.now();
@@ -140,16 +140,15 @@ export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> 
   }
 
   try {
-    const chainConfig = getChainConfig(chainId);
-    const dataApiUrl = chainConfig.protocols?.monorailDataApi;
+    const endpoint = await getApiEndpoint("data", chainId);
 
-    if (!dataApiUrl) {
-      console.warn("[tokens] No Monorail Data API URL configured");
+    if (!endpoint.url) {
+      console.warn("[tokens] No Data API endpoint configured");
       return FALLBACK_TOKENS;
     }
 
-    const url = `${dataApiUrl}/tokens/category/verified`;
-    const response = await fetch(url, {
+    const url = `${endpoint.url}/tokens/category/verified`;
+    const response = await x402Fetch(url, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -158,18 +157,18 @@ export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> 
     });
 
     if (!response.ok) {
-      console.warn(`[tokens] Monorail API error: ${response.status}`);
+      console.warn(`[tokens] Data API error: ${response.status}`);
       return FALLBACK_TOKENS;
     }
 
-    const rawTokens = (await response.json()) as RawMonorailToken[];
+    const rawTokens = (await response.json()) as RawApiToken[];
     const tokens: TokenInfo[] = [];
 
     // Always include native MON
     tokens.push(FALLBACK_TOKENS[0]);
 
     for (const raw of rawTokens) {
-      const parsed = parseMonorailToken(raw);
+      const parsed = parseApiToken(raw);
       if (parsed && parsed.address !== "0x0000000000000000000000000000000000000000") {
         tokens.push(parsed);
       }
@@ -186,11 +185,11 @@ export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> 
       tokensByAddress.set(token.address.toLowerCase(), token);
     }
 
-    console.log(`[tokens] Loaded ${tokens.length} verified tokens from Monorail`);
+    console.log(`[tokens] Loaded ${tokens.length} verified tokens from Data API`);
     return tokens;
   } catch (error) {
     console.warn(
-      "[tokens] Failed to load from Monorail:",
+      "[tokens] Failed to load from Data API:",
       error instanceof Error ? error.message : "Unknown error"
     );
     return FALLBACK_TOKENS;
@@ -203,14 +202,14 @@ export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> 
  * Find token by symbol (case-insensitive)
  * Resolution order:
  * 1. Static verified list (fast, no network)
- * 2. Monorail cache (if loaded)
+ * 2. API cache (if loaded)
  */
 export function findTokenBySymbol(symbol: string): TokenInfo | undefined {
   // 1. Check static verified list first (fast, no network)
   const fromStatic = getVerifiedTokenBySymbol(symbol);
   if (fromStatic) return fromStatic;
 
-  // 2. Check Monorail cache
+  // 2. Check API cache
   return tokensBySymbol.get(symbol.toLowerCase());
 }
 
@@ -218,14 +217,14 @@ export function findTokenBySymbol(symbol: string): TokenInfo | undefined {
  * Find token by address
  * Resolution order:
  * 1. Static verified list (fast, no network)
- * 2. Monorail cache (if loaded)
+ * 2. API cache (if loaded)
  */
 export function findTokenByAddress(address: string): TokenInfo | undefined {
   // 1. Check static verified list first
   const fromStatic = getVerifiedTokenByAddress(address);
   if (fromStatic) return fromStatic;
 
-  // 2. Check Monorail cache
+  // 2. Check API cache
   return tokensByAddress.get(address.toLowerCase());
 }
 

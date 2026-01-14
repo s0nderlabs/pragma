@@ -1,7 +1,6 @@
 // Swap Execution
 // Executes swaps via delegation framework
-// Supports 0x (primary) and Monorail (fallback) aggregators
-// Adapted from pragma-v2-stable (H2)
+// All quotes from api.pr4gma.xyz
 // Copyright (c) 2026 s0nderlabs
 
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
@@ -28,15 +27,14 @@ import {
 import { getCurrentNonce } from "../delegation/nonce.js";
 import { getSessionKey, getSessionAccount } from "../session/keys.js";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
-import { loadConfig } from "../../config/pragma-config.js";
+import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain } from "../../config/chains.js";
-import { getProvider } from "../signer/index.js";
+import { x402HttpOptions } from "../x402/client.js";
 import {
   getCachedQuote,
   getQuoteExecutionData,
   isQuoteExpired,
 } from "../aggregator/index.js";
-import { patchMonorailMinOutput } from "../monorail/calldataPatcher.js";
 import { DELEGATION_FRAMEWORK, NATIVE_TOKEN_ADDRESS } from "../../config/constants.js";
 
 import {
@@ -111,13 +109,13 @@ export async function executeSwap(
     );
   }
 
-  // Step 4: Get RPC and create clients
-  const rpcUrl = (await getProvider("rpc")) || config.network.rpc;
+  // Step 4: Get RPC URL (mode-aware: skips Keychain in x402 mode)
+  const rpcUrl = await getRpcUrl(config);
   const chain = buildViemChain(chainId, rpcUrl);
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 5: Get session key
@@ -218,32 +216,10 @@ export async function executeSwap(
   // Use provided slippage or default
   const slippageBps = params.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
 
-  // Determine final calldata based on aggregator
-  // - 0x: Calldata already has slippage applied (use as-is)
-  // - Monorail: Need to patch calldata with slippage
-  let finalCalldata: Hex;
-
-  if (quote.aggregator === "0x") {
-    // 0x calldata is ready to use - slippage already baked in at quote time
-    console.log(`[swap] Using 0x aggregator - calldata ready (slippage pre-applied)`);
-    console.log(`[swap] MinOutput from quote: ${quote.minOutputWei}`);
-    finalCalldata = executionData.calldata;
-  } else {
-    // Monorail requires calldata patching
-    console.log(`[swap] Using Monorail aggregator - patching calldata`);
-    const patchResult = patchMonorailMinOutput(
-      executionData.calldata,
-      quote.expectedOutputWei,
-      slippageBps
-    );
-
-    console.log(`[swap] Patcher result: tradesPatched=${patchResult.tradesPatched}, slippage=${slippageBps}bps`);
-    console.log(`[swap] Original minOutput: ${patchResult.originalMinOutput}`);
-    console.log(`[swap] Patched minOutput: ${patchResult.patchedMinOutput}`);
-    console.log(`[swap] Calldata changed: ${patchResult.originalCalldata !== patchResult.patchedCalldata}`);
-
-    finalCalldata = patchResult.patchedCalldata;
-  }
+  // Calldata is ready to use - slippage already applied at quote time via api.pr4gma.xyz
+  console.log(`[swap] Calldata ready (slippage pre-applied)`);
+  console.log(`[swap] MinOutput from quote: ${quote.minOutputWei}`);
+  const finalCalldata: Hex = executionData.calldata;
 
   // For native token swaps, include value
   // Use executionData.value if available (from 0x), otherwise calculate from quote
@@ -252,7 +228,6 @@ export async function executeSwap(
   // Create swap delegation
   const swapDelegation = createSwapDelegation({
     aggregator: executionData.router,
-    aggregatorName: quote.aggregator, // For calldata enforcement selection (0x vs monorail)
     destination: userAddress, // Output goes to user's smart account
     delegator: userAddress,
     sessionKey: sessionKeyAddress,
@@ -304,7 +279,7 @@ export async function executeSwap(
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl),
+    transport: http(rpcUrl, x402HttpOptions()),
   });
 
   // Step 10: Execute all delegations sequentially
@@ -356,11 +331,11 @@ export async function validateQuote(quote: SwapQuote): Promise<boolean> {
 }
 
 /**
- * Build swap calldata (delegates to Monorail)
- * The actual calldata comes from the Monorail API quote response
+ * Build swap calldata
+ * The actual calldata comes from the quote API response
  */
 export function buildSwapCalldata(_quote: SwapQuote): Hex {
   throw new Error(
-    "Swap calldata is obtained from Monorail quote, not built locally"
+    "Swap calldata is obtained from quote API, not built locally"
   );
 }

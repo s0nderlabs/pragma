@@ -15,6 +15,7 @@ import { registerStake } from "./stake.js";
 import { registerCheckSessionKeyBalance } from "./check-session-key-balance.js";
 import { registerFundSessionKey } from "./fund-session-key.js";
 import { registerListVerifiedTokens } from "./list-verified-tokens.js";
+import { registerSetMode } from "./set-mode.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -23,6 +24,9 @@ export function registerTools(server: McpServer): void {
 
   // Wallet setup
   registerSetupWallet(server);
+
+  // Mode switching (BYOK vs x402)
+  registerSetMode(server);
 
   // Balance checking
   registerGetBalance(server);

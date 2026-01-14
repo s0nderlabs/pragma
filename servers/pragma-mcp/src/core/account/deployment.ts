@@ -391,12 +391,14 @@ export async function deploySmartAccount(
     };
   }
 
-  // Get bundler URL
-  const bundlerUrl = getBundlerUrl(config);
-  if (!bundlerUrl) {
+  // Get bundler URL (async - resolves based on mode)
+  let bundlerUrl: string;
+  try {
+    bundlerUrl = await getBundlerUrl(config);
+  } catch (error) {
     return {
       success: false,
-      error: "No bundler URL configured. Set PIMLICO_API_KEY or configure bundler in config.",
+      error: error instanceof Error ? error.message : "Failed to get bundler URL",
     };
   }
 
