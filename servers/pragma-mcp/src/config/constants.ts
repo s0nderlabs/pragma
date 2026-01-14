@@ -92,12 +92,12 @@ export const X402_API_PATTERNS = ["api.pr4gma.xyz"] as const;
 /**
  * Minimum USDC balance for x402 operations (in base units)
  */
-export const MIN_USDC_BALANCE = 100_000n; // 0.1 USDC
+export const MIN_USDC_BALANCE = 50_000n; // 0.05 USDC
 
 /**
  * Low USDC balance warning threshold (in base units)
  */
-export const LOW_USDC_BALANCE_WARNING = 100_000n; // 0.1 USDC
+export const LOW_USDC_BALANCE_WARNING = 50_000n; // 0.05 USDC
 
 /**
  * Recommended USDC funding amount (in base units)

@@ -31,13 +31,13 @@ export const USDC_DECIMALS = 6;
 /**
  * Minimum USDC balance to proceed with x402 operations
  */
-export const MIN_USDC_BALANCE = 100_000n; // 0.1 USDC
+export const MIN_USDC_BALANCE = 50_000n; // 0.05 USDC
 
 /**
  * Low balance warning threshold
  * When below this, warn user to fund session key
  */
-export const LOW_BALANCE_WARNING = 100_000n; // 0.1 USDC
+export const LOW_BALANCE_WARNING = 50_000n; // 0.05 USDC
 
 /**
  * Default recommended funding amount
@@ -60,7 +60,7 @@ export const USDC_COST_PER_OPERATION: Record<X402OperationType, bigint> = {
 /**
  * Safety buffer to add to cost estimates
  */
-export const COST_BUFFER = 10_000n; // 0.01 USDC
+export const COST_BUFFER = 20_000n; // 0.02 USDC
 
 /**
  * Get minimum required USDC for a single operation
