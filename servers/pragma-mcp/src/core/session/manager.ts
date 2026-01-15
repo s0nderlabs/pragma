@@ -11,6 +11,7 @@ import {
   SESSION_KEY_FUNDING_AMOUNT,
   MIN_GAS_FOR_DELEGATION,
 } from "../../config/constants.js";
+import type { PragmaConfig } from "../../types/index.js";
 
 // MARK: - Types
 
@@ -65,7 +66,7 @@ export class SessionKeyFundingError extends Error {
   }
 }
 
-// MARK: - Gas Constants (re-export for convenience)
+// MARK: - Gas Constants
 
 export {
   GAS_PER_OPERATION,
@@ -79,6 +80,12 @@ export const AVG_GAS_PER_OPERATION = 80_000_000_000_000_000n; // 0.08 MON
 
 /** Safety buffer for batch operations */
 export const BATCH_SAFETY_BUFFER = 20_000_000_000_000_000n; // 0.02 MON
+
+/** Margin added to funding calculation */
+export const FUNDING_SAFETY_MARGIN = 100_000_000_000_000_000n; // 0.1 MON
+
+/** Maximum funding in a single operation */
+export const MAX_FUNDING_AMOUNT = 3_000_000_000_000_000_000n; // 3.0 MON
 
 // MARK: - Operation-Specific Gas Functions
 
@@ -175,14 +182,11 @@ export function calculateFundingAmount(
   // Calculate gap between required and current
   const gap = requiredBalance - currentBalance;
 
-  // Add safety margin to prevent edge case failures
-  const safetyMargin = 100_000_000_000_000_000n; // 0.1 MON
-
-  const fundingAmount = gap + safetyMargin;
+  const fundingAmount = gap + FUNDING_SAFETY_MARGIN;
 
   // Apply bounds to prevent dust funding and excessive single transfers
   const minFunding = SESSION_KEY_FUNDING_AMOUNT; // 0.5 MON min
-  const maxFunding = 3_000_000_000_000_000_000n; // 3.0 MON max
+  const maxFunding = MAX_FUNDING_AMOUNT; // 3.0 MON max
 
   // Return bounded amount
   if (fundingAmount < minFunding) return minFunding;
@@ -197,11 +201,13 @@ export function calculateFundingAmount(
  *
  * @param sessionKeyAddress - Session key public address
  * @param publicClient - Viem public client
+ * @param config - Current Pragma configuration
  * @returns Balance information and funding recommendation
  */
 export async function checkSessionKeyBalance(
   sessionKeyAddress: Address,
-  publicClient: PublicClient
+  publicClient: PublicClient,
+  config: PragmaConfig
 ): Promise<SessionKeyBalance> {
   const balance = await publicClient.getBalance({
     address: getAddress(sessionKeyAddress),
@@ -219,6 +225,7 @@ export async function checkSessionKeyBalance(
  *
  * @param sessionKeyAddress - Session key public address
  * @param publicClient - Viem public client
+ * @param config - Current Pragma configuration
  * @param operationType - Optional specific operation type
  * @param estimatedOperations - Optional number of operations
  * @returns Detailed balance check result
@@ -226,6 +233,7 @@ export async function checkSessionKeyBalance(
 export async function checkSessionKeyBalanceForOperation(
   sessionKeyAddress: Address,
   publicClient: PublicClient,
+  config: PragmaConfig,
   operationType?: OperationType,
   estimatedOperations?: number
 ): Promise<SessionKeyBalanceCheck> {

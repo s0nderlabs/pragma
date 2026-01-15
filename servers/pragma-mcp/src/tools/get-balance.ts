@@ -127,7 +127,7 @@ async function getBalanceHandler(
     const chain = buildViemChain(chainId, rpcUrl);
     const publicClient = createPublicClient({
       chain,
-      transport: http(rpcUrl, x402HttpOptions()),
+      transport: http(rpcUrl, x402HttpOptions(config)),
     }) as PublicClient;
 
     // Step 5: Fetch balance

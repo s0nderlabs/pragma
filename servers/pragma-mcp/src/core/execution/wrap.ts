@@ -112,7 +112,7 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   // Step 5: Check MON balance
@@ -193,7 +193,7 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   // Step 11: Execute delegation
@@ -275,7 +275,7 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   // Step 5: Check WMON balance
@@ -362,7 +362,7 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   // Step 11: Execute delegation

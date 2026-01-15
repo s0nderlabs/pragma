@@ -30,7 +30,7 @@ import {
 } from "../signer/p256SignerConfig.js";
 import { getPasskeyPublicKey, parseP256PublicKey } from "../signer/index.js";
 import { buildViemChain } from "../../config/chains.js";
-import { getRpcUrl } from "../../config/pragma-config.js";
+import { getRpcUrl, loadConfig } from "../../config/pragma-config.js";
 import { x402HttpOptions } from "../x402/client.js";
 import type { PragmaConfig } from "../../types/index.js";
 
@@ -95,7 +95,7 @@ export async function createHybridDelegatorHandle(
   const chain = buildViemChain(config.network.chainId, rpcUrl);
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   const keyId = await getOrCreateKeyId();
@@ -188,10 +188,13 @@ export async function deriveSmartAccountAddress(
   chainId: number,
   rpcUrl: string
 ): Promise<Address> {
+  const config = await loadConfig();
+  if (!config) throw new Error("Config required for address derivation");
+
   const chain = buildViemChain(chainId, rpcUrl);
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   const keyId = await getOrCreateKeyId();

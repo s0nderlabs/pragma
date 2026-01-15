@@ -42,15 +42,11 @@ import {
   formatSessionKeyBalance,
 } from "../session/manager.js";
 
-// Default slippage in basis points (500 = 5%)
-// User can override via slippageBps parameter (max 5000 = 50%)
 const DEFAULT_SLIPPAGE_BPS = 500;
-
-// MARK: - Types
 
 export interface SwapExecutionParams {
   quoteId: string;
-  slippageBps?: number; // Optional, defaults to 500 (5%)
+  slippageBps?: number;
 }
 
 export interface SwapExecutionResult extends ExecutionResult {
@@ -60,24 +56,35 @@ export interface SwapExecutionResult extends ExecutionResult {
   balanceAfter?: string;
 }
 
-// MARK: - Execution
+export interface BatchSwapResult {
+  results: {
+    quoteId: string;
+    success: boolean;
+    txHash?: string;
+    error?: string;
+    quote?: SwapQuote;
+  }[];
+  totalDelegations: number;
+}
+
+interface SwapBundle {
+  quote: SwapQuote;
+  delegations: DelegationBundle[];
+  executionData: any;
+}
 
 /**
- * Execute a swap using a previously quoted swap
+ * Execute a batch of swaps in parallel.
  *
- * Flow:
- * 1. Retrieve cached quote (validate not expired)
- * 2. Get execution data (calldata, router)
- * 3. Fetch current nonce
- * 4. Build delegations (approve if needed + swap)
- * 5. Sign delegations with passkey (Touch ID)
- * 6. Execute via session key
- * 7. Return transaction hash
+ * Pipeline:
+ * 1. Prepare: Build all delegations state-aware (virtual allowance tracking).
+ * 2. Sign: Prompt Touch ID sequentially for all bundles (Burst Signing).
+ * 3. Execute: Broadcast all txs sequentially (nonce ordering) but wait for receipts in parallel.
  */
-export async function executeSwap(
-  params: SwapExecutionParams
-): Promise<SwapExecutionResult> {
-  // Step 1: Load config and verify wallet
+export async function executeBatchSwap(
+  quoteIds: string[],
+  slippageBps: number = DEFAULT_SLIPPAGE_BPS
+): Promise<BatchSwapResult> {
   const config = await loadConfig();
   if (!config?.wallet) {
     throw new Error("Wallet not configured. Please run setup_wallet first.");
@@ -87,253 +94,307 @@ export async function executeSwap(
   const sessionKeyAddress = config.wallet.sessionKeyAddress as Address;
   const chainId = config.network.chainId;
 
-  // Step 2: Retrieve cached quote
-  const quote = await getCachedQuote(params.quoteId);
-  if (!quote) {
-    throw new Error(
-      `Quote not found or expired: ${params.quoteId}. Please get a fresh quote.`
-    );
-  }
-
-  if (isQuoteExpired(quote)) {
-    throw new Error(
-      "Quote has expired. Please get a fresh quote before executing."
-    );
-  }
-
-  // Step 3: Get execution data (calldata, router address)
-  const executionData = await getQuoteExecutionData(params.quoteId);
-  if (!executionData) {
-    throw new Error(
-      "Execution data not found for quote. Quote may have been corrupted."
-    );
-  }
-
-  // Step 4: Get RPC URL (mode-aware: skips Keychain in x402 mode)
   const rpcUrl = await getRpcUrl(config);
   const chain = buildViemChain(chainId, rpcUrl);
-
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
-  // Step 5: Get session key
   const sessionKey = await getSessionKey();
-  if (!sessionKey) {
-    throw new Error("Session key not found. Please run setup_wallet first.");
-  }
+  if (!sessionKey) throw new Error("Session key not found.");
 
-  // Step 5.1: Check session key balance (throw error if insufficient - Claude will fund via fund_session_key tool)
   const sessionKeyBalance = await publicClient.getBalance({ address: sessionKeyAddress });
+  const minRequired = getMinBalanceForOperation("swap") * BigInt(quoteIds.length); 
 
-  const minSwapBalance = getMinBalanceForOperation("swap");
-  if (sessionKeyBalance < minSwapBalance) {
+  if (sessionKeyBalance < minRequired) {
     throw new Error(
-      `Session key balance too low: ${formatSessionKeyBalance(sessionKeyBalance)} ` +
-        `(minimum for swap: ${formatSessionKeyBalance(minSwapBalance)}). ` +
-        `Please call fund_session_key first with operationType: "swap".`
+      `Session key balance too low for ${quoteIds.length} swaps. ` +
+        `Have: ${formatSessionKeyBalance(sessionKeyBalance)}, Need ~${formatSessionKeyBalance(minRequired)}. ` +
+        `Please fund session key first.`
     );
   }
 
-  // Step 6: Fetch current nonce
-  const nonce = await getCurrentNonce(publicClient as PublicClient, userAddress);
-
-  // Step 7: Build delegation bundles
-  const delegationBundles: DelegationBundle[] = [];
-  const isNativeSwap = quote.fromToken.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
-
-  // Check if we need to approve (for ERC20 tokens only)
-  if (!isNativeSwap) {
-    // Check current allowance
-    const currentAllowance = await publicClient.readContract({
-      address: quote.fromToken.address,
-      abi: erc20Abi,
-      functionName: "allowance",
-      args: [userAddress, executionData.router],
-    });
-
-    if (currentAllowance < quote.amountInWei) {
-      // Need to approve - for safety, reset to 0 first if there's existing allowance
-      if (currentAllowance > 0n) {
-        // Create reset approval delegation
-        const resetDelegation = createApproveDelegation({
-          tokenAddress: quote.fromToken.address,
-          spender: executionData.router,
-          amount: 0n,
-          delegator: userAddress,
-          sessionKey: sessionKeyAddress,
-          nonce,
-          chainId,
-        });
-
-        const resetCalldata = encodeFunctionData({
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [executionData.router, 0n],
-        });
-
-        delegationBundles.push({
-          delegation: resetDelegation.delegation as SignedDelegation,
-          execution: {
-            target: quote.fromToken.address,
-            value: 0n,
-            callData: resetCalldata,
-          },
-          kind: "approve",
-        });
-      }
-
-      // Create approval delegation
-      const approveDelegation = createApproveDelegation({
-        tokenAddress: quote.fromToken.address,
-        spender: executionData.router,
-        amount: quote.amountInWei,
-        delegator: userAddress,
-        sessionKey: sessionKeyAddress,
-        nonce,
-        chainId,
-      });
-
-      const approveCalldata = encodeFunctionData({
-        abi: erc20Abi,
-        functionName: "approve",
-        args: [executionData.router, quote.amountInWei],
-      });
-
-      delegationBundles.push({
-        delegation: approveDelegation.delegation as SignedDelegation,
-        execution: {
-          target: quote.fromToken.address,
-          value: 0n,
-          callData: approveCalldata,
-        },
-        kind: "approve",
-      });
-    }
-  }
-
-  // Use provided slippage or default
-  const slippageBps = params.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
-
-  // Calldata is ready to use - slippage already applied at quote time via api.pr4gma.xyz
-  console.log(`[swap] Calldata ready (slippage pre-applied)`);
-  console.log(`[swap] MinOutput from quote: ${quote.minOutputWei}`);
-  const finalCalldata: Hex = executionData.calldata;
-
-  // For native token swaps, include value
-  // Use executionData.value if available (from 0x), otherwise calculate from quote
-  const swapValue = isNativeSwap ? (executionData.value || quote.amountInWei) : 0n;
-
-  // Create swap delegation
-  const swapDelegation = createSwapDelegation({
-    aggregator: executionData.router,
-    destination: userAddress, // Output goes to user's smart account
-    delegator: userAddress,
-    sessionKey: sessionKeyAddress,
-    nonce,
+  const bundles = await prepareSwapBundles(
+    quoteIds,
+    slippageBps,
+    userAddress,
+    sessionKeyAddress,
     chainId,
-    transactionData: finalCalldata, // For selector extraction
-    nativeValueAmount: swapValue, // For valueLte enforcement when swapping native tokens
-  });
+    publicClient
+  );
 
-  delegationBundles.push({
-    delegation: swapDelegation.delegation as SignedDelegation,
-    execution: {
-      target: executionData.router,
-      value: swapValue,
-      callData: finalCalldata,
-    },
-    kind: "swap",
-  });
+  const signedBundles = await signSwapBundles(bundles, chainId, config.wallet.keyId);
 
-  // Step 8: Sign all delegations with passkey (Touch ID)
-  // Uses WebAuthn-wrapped P-256 signatures compatible with HybridDeleGator
-  const keyId = config.wallet.keyId;
-  if (!keyId) {
-    throw new Error("Key ID not found in config. Please run setup_wallet first.");
-  }
-
-  for (const bundle of delegationBundles) {
-    // Build Touch ID prompt message with full details
-    const actionLabel =
-      bundle.kind === "approve"
-        ? `Approve ${quote.amountIn} ${quote.fromToken.symbol}`
-        : `Swap ${quote.amountIn} ${quote.fromToken.symbol} → ${quote.expectedOutput} ${quote.toToken.symbol}`;
-
-    // Sign with P-256 passkey using WebAuthn wrapper (triggers Touch ID)
-    // This returns an ABI-encoded signature compatible with HybridDeleGator
-    const signature = await signDelegationWithP256(
-      bundle.delegation,
-      chainId,
-      keyId,
-      actionLabel
-    );
-
-    // Attach signature to delegation
-    bundle.delegation.signature = signature;
-  }
-
-  // Step 9: Create session wallet client
   const sessionAccount = getSessionAccount(sessionKey);
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
-  // Step 10: Execute all delegations sequentially
-  let lastTxHash: Hex = "0x" as Hex;
+  const broadcastResults = await broadcastAndExecute(
+    signedBundles,
+    sessionWallet,
+    publicClient
+  );
 
-  for (const bundle of delegationBundles) {
-    const execution = createExecution({
-      target: bundle.execution.target,
-      value: bundle.execution.value,
-      callData: bundle.execution.callData,
-    });
-
-    lastTxHash = await redeemDelegations(
-      sessionWallet as WalletClient,
-      publicClient as PublicClient,
-      DELEGATION_FRAMEWORK.delegationManager,
-      [
-        {
-          permissionContext: [bundle.delegation],
-          executions: [execution],
-          mode: ExecutionMode.SingleDefault,
-        },
-      ]
-    );
-
-    // Wait for confirmation before next delegation
-    await publicClient.waitForTransactionReceipt({
-      hash: lastTxHash,
-      timeout: 60_000,
-    });
-  }
-
-  // Step 11: Return result
   return {
-    txHash: lastTxHash,
-    status: "success",
-    quote,
-    delegationsUsed: delegationBundles.length,
+    results: broadcastResults,
+    totalDelegations: signedBundles.reduce((acc, b) => acc + b.delegations.length, 0),
   };
 }
 
-// MARK: - Validation
+async function prepareSwapBundles(
+  quoteIds: string[],
+  slippageBps: number,
+  userAddress: Address,
+  sessionKeyAddress: Address,
+  chainId: number,
+  publicClient: PublicClient
+): Promise<SwapBundle[]> {
+  const bundles: SwapBundle[] = [];
+  const allowanceCache = new Map<string, bigint>(); 
 
-/**
- * Validate a quote before execution
- */
+  const nonce = await getCurrentNonce(publicClient, userAddress);
+
+  for (const quoteId of quoteIds) {
+    const quote = await getCachedQuote(quoteId);
+    if (!quote || isQuoteExpired(quote)) {
+      throw new Error(`Quote ${quoteId} invalid or expired.`);
+    }
+
+    const executionData = await getQuoteExecutionData(quoteId);
+    if (!executionData) {
+      throw new Error(`Execution data missing for ${quoteId}`);
+    }
+
+    const delegations: DelegationBundle[] = [];
+    const isNativeSwap = quote.fromToken.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
+
+    if (!isNativeSwap) {
+      const cacheKey = `${quote.fromToken.address}-${executionData.router}`;
+      let currentAllowance = allowanceCache.get(cacheKey);
+
+      if (currentAllowance === undefined) {
+        currentAllowance = await publicClient.readContract({
+          address: quote.fromToken.address as Address,
+          abi: erc20Abi,
+          functionName: "allowance",
+          args: [userAddress, executionData.router as Address],
+        });
+        allowanceCache.set(cacheKey, currentAllowance);
+      }
+
+      if (currentAllowance < quote.amountInWei) {
+        if (currentAllowance > 0n) {
+          delegations.push({
+            delegation: createApproveDelegation({
+              tokenAddress: quote.fromToken.address,
+              spender: executionData.router,
+              amount: 0n,
+              delegator: userAddress,
+              sessionKey: sessionKeyAddress,
+              nonce,
+              chainId,
+            }).delegation as SignedDelegation,
+            execution: {
+              target: quote.fromToken.address,
+              value: 0n,
+              callData: encodeFunctionData({
+                abi: erc20Abi,
+                functionName: "approve",
+                args: [executionData.router as Address, 0n],
+              }),
+            },
+            kind: "approve",
+          });
+        }
+
+        delegations.push({
+          delegation: createApproveDelegation({
+            tokenAddress: quote.fromToken.address,
+            spender: executionData.router,
+            amount: quote.amountInWei,
+            delegator: userAddress,
+            sessionKey: sessionKeyAddress,
+            nonce,
+            chainId,
+          }).delegation as SignedDelegation,
+          execution: {
+            target: quote.fromToken.address,
+            value: 0n,
+            callData: encodeFunctionData({
+              abi: erc20Abi,
+              functionName: "approve",
+              args: [executionData.router as Address, quote.amountInWei],
+            }),
+          },
+          kind: "approve",
+        });
+
+        allowanceCache.set(cacheKey, 0n);
+      } else {
+        allowanceCache.set(cacheKey, currentAllowance - quote.amountInWei);
+      }
+    }
+
+    const swapValue = isNativeSwap ? (executionData.value || quote.amountInWei) : 0n;
+    const swapDelegation = createSwapDelegation({
+      aggregator: executionData.router,
+      destination: userAddress,
+      delegator: userAddress,
+      sessionKey: sessionKeyAddress,
+      nonce,
+      chainId,
+      transactionData: executionData.calldata,
+      nativeValueAmount: swapValue,
+    });
+
+    delegations.push({
+      delegation: swapDelegation.delegation as SignedDelegation,
+      execution: {
+        target: executionData.router,
+        value: swapValue,
+        callData: executionData.calldata,
+      },
+      kind: "swap",
+    });
+
+    bundles.push({ quote, delegations, executionData });
+  }
+
+  return bundles;
+}
+
+async function signSwapBundles(
+  bundles: SwapBundle[],
+  chainId: number,
+  keyId: string
+): Promise<SwapBundle[]> {
+  for (const bundle of bundles) {
+    for (const delegationBundle of bundle.delegations) {
+      const actionLabel =
+        delegationBundle.kind === "approve"
+          ? `Approve ${bundle.quote.amountIn} ${bundle.quote.fromToken.symbol}`
+          : `Swap ${bundle.quote.amountIn} ${bundle.quote.fromToken.symbol} → ${bundle.quote.expectedOutput} ${bundle.quote.toToken.symbol}`;
+
+      const signature = await signDelegationWithP256(
+        delegationBundle.delegation,
+        chainId,
+        keyId,
+        actionLabel
+      );
+      delegationBundle.delegation.signature = signature;
+    }
+  }
+  return bundles;
+}
+
+async function broadcastAndExecute(
+  bundles: SwapBundle[],
+  sessionWallet: WalletClient,
+  publicClient: PublicClient
+): Promise<BatchSwapResult["results"]> {
+  const redemptions: {
+    permissionContext: SignedDelegation[];
+    executions: Execution[];
+    mode: ExecutionMode;
+  }[] = [];
+  const results: BatchSwapResult["results"] = [];
+
+  // Flatten all delegations from all bundles into redemptions
+  for (const bundle of bundles) {
+    for (const delBundle of bundle.delegations) {
+      redemptions.push({
+        permissionContext: [delBundle.delegation],
+        executions: [
+          createExecution({
+            target: delBundle.execution.target,
+            value: delBundle.execution.value,
+            callData: delBundle.execution.callData,
+          }),
+        ],
+        mode: ExecutionMode.SingleDefault,
+      });
+    }
+  }
+
+  if (redemptions.length === 0) {
+    return [];
+  }
+
+  try {
+    // ONE single transaction for the entire batch
+    const txHash = await redeemDelegations(
+      sessionWallet,
+      publicClient,
+      DELEGATION_FRAMEWORK.delegationManager,
+      redemptions
+    );
+
+    // Wait for confirmation
+    const receipt = await publicClient.waitForTransactionReceipt({
+      hash: txHash,
+      timeout: 60_000,
+    });
+
+    // Map the single txHash to all successful swap results
+    for (const bundle of bundles) {
+      if (receipt.status === "reverted") {
+        results.push({
+          quoteId: bundle.quote.quoteId,
+          success: false,
+          error: "Batch transaction reverted on-chain",
+          txHash,
+          quote: bundle.quote,
+        });
+      } else {
+        results.push({
+          quoteId: bundle.quote.quoteId,
+          success: true,
+          txHash,
+          quote: bundle.quote,
+        });
+      }
+    }
+  } catch (e: any) {
+    // If the entire batch fails to broadcast
+    for (const bundle of bundles) {
+      results.push({
+        quoteId: bundle.quote.quoteId,
+        success: false,
+        error: e.message || "Batch broadcast failed",
+        quote: bundle.quote,
+      });
+    }
+  }
+
+  return results;
+}
+
+export async function executeSwap(
+  params: SwapExecutionParams
+): Promise<SwapExecutionResult> {
+  const batchResult = await executeBatchSwap([params.quoteId], params.slippageBps);
+  const result = batchResult.results[0];
+
+  if (!result.success) {
+    throw new Error(result.error || "Swap failed");
+  }
+
+  return {
+    txHash: result.txHash as Hex,
+    status: "success",
+    quote: result.quote!,
+    delegationsUsed: 1, 
+  };
+}
+
 export async function validateQuote(quote: SwapQuote): Promise<boolean> {
   return !isQuoteExpired(quote);
 }
 
-/**
- * Build swap calldata
- * The actual calldata comes from the quote API response
- */
 export function buildSwapCalldata(_quote: SwapQuote): Hex {
   throw new Error(
     "Swap calldata is obtained from quote API, not built locally"

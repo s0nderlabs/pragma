@@ -145,7 +145,7 @@ export async function executeTransfer(
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   // Step 6: Verify user has sufficient balance
@@ -275,7 +275,7 @@ export async function executeTransfer(
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions()),
+    transport: http(rpcUrl, x402HttpOptions(config)),
   });
 
   // Step 12: Execute delegation

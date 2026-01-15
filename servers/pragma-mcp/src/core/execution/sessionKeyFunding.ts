@@ -1,25 +1,91 @@
 // Session Key Funding
-// Funds session key from smart account using UserOp
-// Adapted from pragma-v2-stable (H2)
+// Funds session key from smart account using UserOp and delegation paths
 // Copyright (c) 2026 s0nderlabs
 
-import {
-  type Address,
-  type Hex,
-  type PublicClient,
-  encodeFunctionData,
+import { 
+  type Address, 
+  type Hex, 
+  type PublicClient, 
+  encodeFunctionData, 
   formatEther,
+  formatUnits,
+  createWalletClient,
+  createPublicClient,
+  http,
+  type WalletClient,
+  erc20Abi
 } from "viem";
 import { formatUserOperationRequest, type UserOperationRequest } from "viem/account-abstraction";
 import type { HybridDelegatorHandle } from "../account/hybridDelegator.js";
 import {
   MIN_SESSION_KEY_BALANCE,
   SESSION_KEY_FUNDING_AMOUNT,
+  DELEGATION_FRAMEWORK,
 } from "../../config/constants.js";
-import { x402Fetch } from "../x402/client.js";
+import { x402Fetch, x402HttpOptions } from "../x402/client.js";
+import type { SignedDelegation } from "../delegation/types.js";
+import { createNativeTransferDelegation, createERC20TransferDelegation } from "../delegation/hybrid.js";
+import { getCurrentNonce } from "../delegation/nonce.js";
+import { getSessionKey, getSessionAccount } from "../session/keys.js";
+import { ExecutionMode, redeemDelegations, createExecution } from "@metamask/smart-accounts-kit";
+import { getRpcUrl } from "../../config/pragma-config.js";
+import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
+import { USDC_ADDRESS, USDC_DECIMALS } from "../x402/usdc.js";
+import type { PragmaConfig } from "../../types/index.js";
 
 // Re-export constants for convenience
 export { MIN_SESSION_KEY_BALANCE, SESSION_KEY_FUNDING_AMOUNT };
+
+// MARK: - Types
+
+interface SignableUserOp {
+  sender: Address;
+  nonce: bigint;
+  factory?: Address;
+  factoryData?: Hex;
+  callData: Hex;
+  callGasLimit: bigint;
+  verificationGasLimit: bigint;
+  preVerificationGas: bigint;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+  signature: Hex;
+  paymaster?: Address;
+  paymasterData?: Hex;
+  paymasterVerificationGasLimit?: bigint;
+  paymasterPostOpGasLimit?: bigint;
+}
+
+/**
+ * Custom execution for UserOp
+ * When provided, overrides default native MON transfer
+ */
+export interface CustomExecution {
+  target: Address;
+  value: bigint;
+  callData: Hex;
+}
+
+export interface FundSessionKeyParams {
+  handle: HybridDelegatorHandle;
+  sessionKeyAddress: Address;
+  publicClient: PublicClient;
+  config: PragmaConfig;
+  bundlerUrl?: string;
+  fundingAmount?: bigint;
+  customExecution?: CustomExecution;
+}
+
+export interface FundSessionKeyResult {
+  userOpHash: Hex;
+  transactionHash?: Hex;
+  newBalance: bigint;
+  fundedAmount: bigint;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
 
 /**
  * HybridDelegator's execute() function ABI
@@ -54,54 +120,9 @@ const MIN_VERIFICATION_GAS_LIMIT = 500_000n;
 const MIN_PRE_VERIFICATION_GAS = 400_000n; // Higher for P-256 WebAuthn
 const MIN_CALL_GAS_LIMIT = 100_000n;
 
-// MARK: - Types
-
-interface SignableUserOp {
-  sender: Address;
-  nonce: bigint;
-  factory?: Address;
-  factoryData?: Hex;
-  callData: Hex;
-  callGasLimit: bigint;
-  verificationGasLimit: bigint;
-  preVerificationGas: bigint;
-  maxFeePerGas: bigint;
-  maxPriorityFeePerGas: bigint;
-  signature: Hex;
-  paymaster?: Address;
-  paymasterData?: Hex;
-  paymasterVerificationGasLimit?: bigint;
-  paymasterPostOpGasLimit?: bigint;
-}
-
-/**
- * Custom execution for UserOp
- * When provided, overrides the default native MON transfer
- */
-export interface CustomExecution {
-  target: Address;
-  value: bigint;
-  callData: Hex;
-}
-
-export interface FundSessionKeyParams {
-  handle: HybridDelegatorHandle;
-  sessionKeyAddress: Address;
-  publicClient: PublicClient;
-  bundlerUrl: string;
-  fundingAmount?: bigint;
-  /** Custom execution - overrides default native transfer */
-  customExecution?: CustomExecution;
-}
-
-export interface FundSessionKeyResult {
-  userOpHash: Hex;
-  transactionHash?: Hex;
-  newBalance: bigint;
-  fundedAmount: bigint;
-}
-
-// MARK: - Bundler Helpers
+// ============================================================================
+// Bundler Helpers
+// ============================================================================
 
 /**
  * Get gas price recommendations from bundler
@@ -205,7 +226,7 @@ async function estimateUserOpGas(
   const result = data.result ?? {};
   return {
     callGasLimit: parseGasValue(result.callGasLimit),
-    verificationGasLimit: parseGasValue(result.verificationGasLimit ?? result.verificationGas),
+    verificationGasLimit: parseGasValue(result.verificationGasLimit),
     preVerificationGas: parseGasValue(result.preVerificationGas),
   };
 }
@@ -221,7 +242,6 @@ function applyGasEstimates(
     preVerificationGas?: bigint;
   }
 ): void {
-  // Apply estimates with minimum floors
   userOp.callGasLimit = estimates.callGasLimit && estimates.callGasLimit > MIN_CALL_GAS_LIMIT
     ? estimates.callGasLimit
     : MIN_CALL_GAS_LIMIT;
@@ -300,41 +320,237 @@ async function waitForUserOperationReceipt(
       const data = (await response.json()) as {
         result?: {
           receipt?: { transactionHash?: Hex };
-          transactionHash?: Hex;
         };
         error?: { message: string };
       };
 
-      if (data.result) {
-        return {
-          transactionHash:
-            data.result.receipt?.transactionHash ?? data.result.transactionHash,
-        };
+      if (data.error) {
+        continue;
+      }
+
+      if (data.result?.receipt?.transactionHash) {
+        return { transactionHash: data.result.receipt.transactionHash };
       }
     }
 
-    // Wait before polling again
+    // Wait before retrying
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
   throw new Error(`Timeout waiting for UserOp ${userOpHash}`);
 }
 
-// MARK: - Main Funding Function
+// ============================================================================
+// MARK: - Native Funding via Delegation
+// ============================================================================
+
+/**
+ * Fund session key from smart account using delegation
+ * Session key pays its own gas (no bundler needed)
+ *
+ * @param params - Funding parameters
+ * @returns UserOp hash (as 0x), transaction hash, and new balance
+ */
+export async function fundSessionKeyViaDelegation(
+  params: FundSessionKeyParams
+): Promise<FundSessionKeyResult> {
+  const {
+    handle,
+    sessionKeyAddress,
+    publicClient,
+    config,
+    fundingAmount = SESSION_KEY_FUNDING_AMOUNT,
+  } = params;
+
+  // Get balance before funding
+  const balanceBefore = await publicClient.getBalance({ address: sessionKeyAddress });
+
+  // Get chain ID from handle
+  const chainId = handle.chain.id;
+
+  // CRITICAL: Get nonce from NonceEnforcer, NOT from smart account entrypoint
+  const nonce = await getCurrentNonce(publicClient, handle.address);
+
+  // Step 1: Create native MON transfer delegation (SA → session key)
+  const delegationResult = createNativeTransferDelegation({
+    recipient: sessionKeyAddress,
+    amount: fundingAmount,
+    delegator: handle.address,
+    sessionKey: sessionKeyAddress,
+    nonce,
+    chainId,
+  });
+
+  // Step 2: Sign delegation with passkey (Touch ID)
+  const touchIdMessage = `Fund session key: ${formatEther(fundingAmount)} MON (delegation)`;
+  const signature = await signDelegationWithP256(
+    delegationResult.delegation,
+    chainId,
+    handle.keyId,
+    touchIdMessage
+  );
+  delegationResult.delegation.signature = signature;
+
+  // Step 3: Build native transfer execution
+  const execution = createExecution({
+    target: sessionKeyAddress,
+    value: fundingAmount,
+    callData: "0x" as Hex,
+  });
+
+  // Step 4: Get session key and create wallet
+  const sessionKey = await getSessionKey();
+  if (!sessionKey) throw new Error("Session key not found");
+
+  const sessionAccount = getSessionAccount(sessionKey);
+
+  // Get RPC URL - Respect config.mode
+  const rpcUrl = await getRpcUrl(config);
+
+  const sessionWallet = createWalletClient({
+    account: sessionAccount,
+    chain: handle.chain,
+    transport: http(rpcUrl, x402HttpOptions(config)),
+  });
+
+  // Step 5: Execute via delegation
+  const txHash = await redeemDelegations(
+    sessionWallet as WalletClient,
+    publicClient,
+    DELEGATION_FRAMEWORK.delegationManager,
+    [
+      {
+        permissionContext: [delegationResult.delegation as SignedDelegation],
+        executions: [execution],
+        mode: ExecutionMode.SingleDefault,
+      },
+    ]
+  );
+
+  // Step 6: Wait for confirmation
+  await publicClient.waitForTransactionReceipt({
+    hash: txHash,
+    timeout: 60_000,
+  });
+
+  // Step 7: Get new balance
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  const newBalance = await publicClient.getBalance({ address: sessionKeyAddress });
+
+  return {
+    userOpHash: "0x" as Hex,
+    transactionHash: txHash,
+    newBalance,
+    fundedAmount: newBalance - balanceBefore,
+  };
+}
+
+// ============================================================================
+// MARK: - USDC Funding via Delegation
+// ============================================================================
+
+/**
+ * Fund session key with USDC using delegation
+ *
+ * @param params - Funding parameters
+ * @returns Transaction hash and results
+ */
+export async function fundUsdcViaDelegation(
+  params: FundSessionKeyParams
+): Promise<FundSessionKeyResult> {
+  const {
+    handle,
+    sessionKeyAddress,
+    publicClient,
+    config,
+    fundingAmount = 0n, // USDC amount in base units
+  } = params;
+
+  const chainId = handle.chain.id;
+  const usdcAddress = USDC_ADDRESS[chainId];
+  if (!usdcAddress) throw new Error(`USDC not configured for chain ${chainId}`);
+
+  // 1. Get nonce from NonceEnforcer
+  const nonce = await getCurrentNonce(publicClient, handle.address);
+
+  // 2. Create USDC transfer delegation
+  const delegationResult = createERC20TransferDelegation({
+    tokenAddress: usdcAddress,
+    recipient: sessionKeyAddress,
+    amount: fundingAmount,
+    delegator: handle.address,
+    sessionKey: sessionKeyAddress,
+    nonce,
+    chainId,
+  });
+
+  // 3. Sign delegation with passkey
+  const touchIdMessage = `Fund session key: ${formatUnits(fundingAmount, USDC_DECIMALS)} USDC (delegation)`;
+  const signature = await signDelegationWithP256(
+    delegationResult.delegation,
+    chainId,
+    handle.keyId,
+    touchIdMessage
+  );
+  delegationResult.delegation.signature = signature;
+
+  // 4. Build transfer execution
+  const execution = createExecution({
+    target: usdcAddress,
+    value: 0n,
+    callData: encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "transfer",
+      args: [sessionKeyAddress, fundingAmount],
+    }),
+  });
+
+  // 5. Create session wallet
+  const sessionKey = await getSessionKey();
+  if (!sessionKey) throw new Error("Session key not found");
+  const sessionAccount = getSessionAccount(sessionKey);
+  
+  // Respect config.mode
+  const rpcUrl = await getRpcUrl(config);
+
+  const sessionWallet = createWalletClient({
+    account: sessionAccount,
+    chain: handle.chain,
+    transport: http(rpcUrl, x402HttpOptions(config)),
+  });
+
+  // 6. Execute via delegation
+  const txHash = await redeemDelegations(
+    sessionWallet as WalletClient,
+    publicClient,
+    DELEGATION_FRAMEWORK.delegationManager,
+    [
+      {
+        permissionContext: [delegationResult.delegation as SignedDelegation],
+        executions: [execution],
+        mode: ExecutionMode.SingleDefault,
+      },
+    ]
+  );
+
+  // 7. Wait for receipt
+  await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+  return {
+    userOpHash: "0x" as Hex,
+    transactionHash: txHash,
+    newBalance: 0n, // Balance check handled by caller
+    fundedAmount: fundingAmount,
+  };
+}
+
+// ============================================================================
+// MARK: - Native Funding via UserOp
+// ============================================================================
 
 /**
  * Fund session key from smart account using UserOp
- *
- * This function creates a UserOp that calls the smart account's execute()
- * function to transfer MON to the session key. The smart account pays gas.
- *
- * Flow:
- * 1. Build execute() calldata for native MON transfer
- * 2. Create UserOp with that calldata
- * 3. Estimate gas via bundler
- * 4. Sign UserOp with P-256 passkey (via SDK)
- * 5. Submit to bundler
- * 6. Wait for confirmation
+ * Bundler pays gas
  *
  * @param params - Funding parameters
  * @returns UserOp hash, transaction hash, and new balance
@@ -351,16 +567,18 @@ export async function fundSessionKeyViaUserOp(
     customExecution,
   } = params;
 
+  if (!bundlerUrl) {
+    throw new Error("Bundler URL required for UserOp path");
+  }
+
   // Get balance before funding
   const balanceBefore = await publicClient.getBalance({ address: sessionKeyAddress });
 
   // Step 1: Build execute() calldata
-  // If customExecution provided, use it (for ERC20 transfers like USDC)
-  // Otherwise, use default native MON transfer to session key
   const execution = customExecution ?? {
     target: sessionKeyAddress,
     value: fundingAmount,
-    callData: "0x" as Hex, // Native transfer (no contract call)
+    callData: "0x" as Hex,
   };
 
   const callData = encodeFunctionData({
@@ -375,7 +593,7 @@ export async function fundSessionKeyViaUserOp(
   // Step 3: Get gas prices from bundler
   const gasPrices = await getGasPrice(bundlerUrl);
 
-  // Step 4: Build base UserOp (self-paid, no paymaster)
+  // Step 4: Build base UserOp
   const userOp: SignableUserOp = {
     sender: handle.address,
     nonce,
@@ -401,10 +619,9 @@ export async function fundSessionKeyViaUserOp(
     applyGasEstimates(userOp, gasEstimates);
   } catch (error) {
     console.warn("Failed to estimate gas, using defaults:", error);
-    // Continue with default gas values
   }
 
-  // Step 6: Sign UserOp with P-256 passkey via SDK (triggers Touch ID)
+  // Step 6: Sign UserOp
   const signature = await handle.smartAccount.signUserOperation(userOp);
   userOp.signature = signature;
 
@@ -420,7 +637,6 @@ export async function fundSessionKeyViaUserOp(
   const receipt = await waitForUserOperationReceipt(bundlerUrl, userOpHash);
 
   // Step 9: Get new balance
-  // Wait a bit for RPC to update
   await new Promise((resolve) => setTimeout(resolve, 2000));
   const newBalance = await publicClient.getBalance({ address: sessionKeyAddress });
 

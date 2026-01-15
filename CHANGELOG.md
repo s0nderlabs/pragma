@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-01-15
+
+### Added
+- **Atomic Batch Swaps**: Support for executing multiple trades in a single on-chain transaction.
+- **Virtual Allowance Tracking**: Intelligent cache to manage token approvals across complex batches.
+- **Hybrid Funding Path**: High-speed "Pull" funding via delegation for session keys with existing gas.
+- **Batch-Aware Gas Estimation**: Precise calculation for multi-operation turns.
+
+### Changed
+- **execute_swap Tool**: Now accepts a `quoteIds` array for parallel/batch execution (Breaking).
+- **Config-Aware Transport**: RPC client now strictly respects BYOK vs x402 mode for safety.
+- **Optimized Orchestration**: Updated core skills to strictly enforce sequential "Fund-Then-Execute" rules.
+
+### Fixed
+- Improved address derivation to correctly resolve transport options from user configuration.
+
 ## [0.2.1] - 2026-01-14
 
 ### Fixed

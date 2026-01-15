@@ -83,7 +83,7 @@ Execute multiple tool calls simultaneously when operations are **independent**:
 2. Show combined confirmation to user
 3. Check session key balance for ALL operations combined
 4. Fund session key if needed (WAIT for completion)
-5. Execute all operations in parallel (single message, multiple tool calls)
+5. Execute all operations in parallel (single message, multiple tool calls to execute_swap with quoteIds array)
 
 ### When to Execute SEQUENTIALLY
 
@@ -275,14 +275,14 @@ Received: 0.999 TOKEN_B
 ### Example 1: Parallel Independent Swaps
 User: "swap 0.5 MON each to USDC and AUSD"
 
-**Analysis:** Two swaps, no dependency → PARALLEL
+**Analysis:** Two swaps, no dependency → BATCH EXECUTION
 
 **Execution:**
 1. [get_swap_quote MON→USDC, get_swap_quote MON→AUSD] (parallel)
 2. Show combined quote, get confirmation
 3. check_session_key_balance(estimatedOperations: 2)
 4. fund_session_key if needed → WAIT
-5. [execute_swap USDC, execute_swap AUSD] (parallel)
+5. execute_swap(quoteIds=["QUOTE_USDC", "QUOTE_AUSD"]) (batch execution)
 
 ### Example 2: Sequential Dependent Swaps
 User: "swap 1 MON to USDC, then swap that USDC to DAK"

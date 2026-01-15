@@ -7,6 +7,7 @@ import { signPaymentAuthorization, createPaymentHeader } from "./payment.js";
 import { X402_API_PATTERNS, type X402PaymentRequired } from "./types.js";
 import { getUsdcAddress } from "./usdc.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
+import type { PragmaConfig } from "../../types/index.js";
 
 // MARK: - Constants
 
@@ -254,7 +255,8 @@ export function createX402Fetch(
  * NOTE: This uses viem's `onFetchRequest` and `onFetchResponse` hooks to
  * intercept and handle 402 responses with automatic payment signing.
  *
- * @returns HTTP transport options for x402
+ * @param config - Current configuration (respects config.mode)
+ * @returns HTTP transport options for x402, or empty options if in BYOK mode
  *
  * @example
  * ```typescript
@@ -263,11 +265,16 @@ export function createX402Fetch(
  *
  * const client = createPublicClient({
  *   chain,
- *   transport: http(rpcUrl, x402HttpOptions()),
+ *   transport: http(rpcUrl, x402HttpOptions(config)),
  * });
  * ```
  */
-export function x402HttpOptions() {
+export function x402HttpOptions(config: PragmaConfig) {
+  // If not in x402 mode, return empty options (default fetch)
+  if (config.mode !== "x402") {
+    return {};
+  }
+
   return {
     // Use custom fetch function that handles x402 payment flow
     fetchFn: x402Fetch as typeof fetch,

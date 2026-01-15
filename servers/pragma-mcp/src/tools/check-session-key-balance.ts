@@ -126,13 +126,14 @@ async function checkSessionKeyBalanceHandler(
 
     const publicClient = createPublicClient({
       chain,
-      transport: http(rpcUrl, x402HttpOptions()),
+      transport: http(rpcUrl, x402HttpOptions(config)),
     });
 
     // Step 3: Check MON balance with operation context
     const balanceCheck = await checkSessionKeyBalanceForOperation(
       sessionKeyAddress,
       publicClient,
+      config,
       params.operationType as OperationType | undefined,
       params.estimatedOperations
     );
@@ -141,7 +142,7 @@ async function checkSessionKeyBalanceHandler(
     let usdcInfo: CheckSessionKeyBalanceResult["usdc"] | undefined;
     const shouldCheckUsdc =
       params.includeUsdc === true ||
-      (params.includeUsdc !== false && (await isX402Mode()));
+      (params.includeUsdc !== false && config.mode === "x402");
 
     if (shouldCheckUsdc && isUsdcConfigured(config.network.chainId)) {
       try {

@@ -26,7 +26,7 @@ export async function fetchTokenFromChain(
 
     // Create viem client
     const chain = buildViemChain(chainId, rpcUrl);
-    const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
+    const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions(config)) });
 
     // Fetch name, symbol, decimals in parallel
     const [name, symbol, decimals] = await Promise.all([

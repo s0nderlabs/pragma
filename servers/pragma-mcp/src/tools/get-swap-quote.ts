@@ -19,6 +19,7 @@ import {
   isUsdcConfigured,
   getMinRequiredForOperation,
 } from "../core/x402/usdc.js";
+import type { PragmaConfig } from "../types/index.js";
 
 // Slippage constants
 const DEFAULT_SLIPPAGE_BPS = 500; // 5% default
@@ -96,15 +97,24 @@ async function resolveToken(input: string, chainId: number): Promise<TokenInfo |
  */
 async function checkX402UsdcBalance(
   sessionKeyAddress: Address,
-  chainId: number,
+  config: PragmaConfig,
   rpcUrl: string
 ): Promise<{ error?: QuoteResult; warning?: string }> {
-  if (!(await isX402Mode()) || !isUsdcConfigured(chainId)) {
+  // If not in x402 mode, skip checks
+  if (config.mode !== "x402") {
+    return {};
+  }
+
+  const chainId = config.network.chainId;
+  if (!isUsdcConfigured(chainId)) {
     return {};
   }
 
   const chain = buildViemChain(chainId, rpcUrl);
-  const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
+  const client = createPublicClient({ 
+    chain, 
+    transport: http(rpcUrl, x402HttpOptions(config)) 
+  });
   const usdcBalance = await getUsdcBalance(sessionKeyAddress, client as PublicClient, chainId);
   const minRequired = getMinRequiredForOperation("quote");
 
@@ -180,7 +190,7 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
     const rpcUrl = await getRpcUrl(config);
 
     // Check x402 USDC balance
-    const x402Check = await checkX402UsdcBalance(sessionKeyAddress, chainId, rpcUrl);
+    const x402Check = await checkX402UsdcBalance(sessionKeyAddress, config, rpcUrl);
     if (x402Check.error) return x402Check.error;
 
     // Load verified tokens and resolve input tokens
@@ -225,7 +235,10 @@ async function getSwapQuote(params: z.infer<typeof GetSwapQuoteSchema>): Promise
 
     try {
       const chain = buildViemChain(chainId, rpcUrl);
-      const client = createPublicClient({ chain, transport: http(rpcUrl, x402HttpOptions()) });
+      const client = createPublicClient({ 
+        chain, 
+        transport: http(rpcUrl, x402HttpOptions(config)) 
+      });
       const balance = await client.getBalance({ address: walletAddress });
 
       if (fromToken.address === NATIVE_TOKEN_ADDRESS && balance < amountWei) {
