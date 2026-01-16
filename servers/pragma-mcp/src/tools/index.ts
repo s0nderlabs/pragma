@@ -18,6 +18,7 @@ import { registerListVerifiedTokens } from "./list-verified-tokens.js";
 import { registerSetMode } from "./set-mode.js";
 import { registerGetAccountInfo } from "./get-account-info.js";
 import { registerGetTokenInfo } from "./get-token-info.js";
+import { registerWithdrawSessionKey } from "./withdraw-session-key.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -44,6 +45,7 @@ export function registerTools(server: McpServer): void {
   // Session key management
   registerCheckSessionKeyBalance(server);
   registerFundSessionKey(server);
+  registerWithdrawSessionKey(server);
 
   // Swap operations
   registerGetSwapQuote(server);

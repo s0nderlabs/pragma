@@ -17,6 +17,7 @@ allowed-tools:
   - mcp__pragma__stake
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
+  - mcp__pragma__withdraw_session_key
   - mcp__pragma__setup_wallet
   - mcp__pragma__set_mode
   - AskUserQuestion
@@ -167,6 +168,7 @@ Before executing multiple operations, calculate total gas needed:
 | Stake | `stake` | Stake to liquid staking |
 | Session | `check_session_key_balance` | Check gas funding |
 | Session | `fund_session_key` | Fund for operations |
+| Session | `withdraw_session_key` | Withdraw MON from session key |
 | Setup | `setup_wallet` | Initial creation |
 | Config | `set_mode` | Switch BYOK/x402 mode |
 
