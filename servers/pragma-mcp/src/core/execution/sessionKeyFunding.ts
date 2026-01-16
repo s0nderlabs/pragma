@@ -2,11 +2,11 @@
 // Funds session key from smart account using UserOp and delegation paths
 // Copyright (c) 2026 s0nderlabs
 
-import { 
-  type Address, 
-  type Hex, 
-  type PublicClient, 
-  encodeFunctionData, 
+import {
+  type Address,
+  type Hex,
+  type PublicClient,
+  encodeFunctionData,
   formatEther,
   formatUnits,
   createWalletClient,
@@ -23,6 +23,7 @@ import {
   DELEGATION_FRAMEWORK,
 } from "../../config/constants.js";
 import { x402Fetch, x402HttpOptions } from "../x402/client.js";
+import { withRetryOrThrow } from "../utils/retry.js";
 import type { SignedDelegation } from "../delegation/types.js";
 import { createNativeTransferDelegation, createERC20TransferDelegation } from "../delegation/hybrid.js";
 import { getCurrentNonce } from "../delegation/nonce.js";
@@ -126,47 +127,53 @@ const MIN_CALL_GAS_LIMIT = 100_000n;
 
 /**
  * Get gas price recommendations from bundler
+ * Includes retry for transient errors (idempotent read operation)
  */
 async function getGasPrice(bundlerUrl: string): Promise<{
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
 }> {
-  const response = await x402Fetch(bundlerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "pimlico_getUserOperationGasPrice",
-      params: [],
-      id: 1,
-    }),
-  });
+  return withRetryOrThrow(
+    async () => {
+      const response = await x402Fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "pimlico_getUserOperationGasPrice",
+          params: [],
+          id: 1,
+        }),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Gas price request failed: ${response.status}`);
-  }
+      if (!response.ok) {
+        throw new Error(`Gas price request failed: ${response.status}`);
+      }
 
-  const data = (await response.json()) as {
-    result?: {
-      fast?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
-      standard?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
-    };
-    error?: { message: string };
-  };
+      const data = (await response.json()) as {
+        result?: {
+          fast?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
+          standard?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
+        };
+        error?: { message: string };
+      };
 
-  if (data.error) {
-    throw new Error(`Gas price error: ${data.error.message}`);
-  }
+      if (data.error) {
+        throw new Error(`Gas price error: ${data.error.message}`);
+      }
 
-  const prices = data.result?.fast ?? data.result?.standard;
-  if (!prices) {
-    throw new Error("No gas price data returned");
-  }
+      const prices = data.result?.fast ?? data.result?.standard;
+      if (!prices) {
+        throw new Error("No gas price data returned");
+      }
 
-  return {
-    maxFeePerGas: BigInt(prices.maxFeePerGas),
-    maxPriorityFeePerGas: BigInt(prices.maxPriorityFeePerGas),
-  };
+      return {
+        maxFeePerGas: BigInt(prices.maxFeePerGas),
+        maxPriorityFeePerGas: BigInt(prices.maxPriorityFeePerGas),
+      };
+    },
+    { operationName: "bundler-gas-price" }
+  );
 }
 
 /**
@@ -184,6 +191,7 @@ function parseGasValue(value?: string | null): bigint | undefined {
 
 /**
  * Estimate gas via bundler
+ * Includes retry for transient errors (idempotent read operation)
  */
 async function estimateUserOpGas(
   bundlerUrl: string,
@@ -194,41 +202,46 @@ async function estimateUserOpGas(
   verificationGasLimit?: bigint;
   preVerificationGas?: bigint;
 }> {
-  const response = await x402Fetch(bundlerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "eth_estimateUserOperationGas",
-      params: [userOp, entryPoint],
-      id: 1,
-    }),
-  });
+  return withRetryOrThrow(
+    async () => {
+      const response = await x402Fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_estimateUserOperationGas",
+          params: [userOp, entryPoint],
+          id: 1,
+        }),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Gas estimation failed: ${response.status}`);
-  }
+      if (!response.ok) {
+        throw new Error(`Gas estimation failed: ${response.status}`);
+      }
 
-  const data = (await response.json()) as {
-    result?: {
-      callGasLimit?: string;
-      verificationGasLimit?: string;
-      verificationGas?: string;
-      preVerificationGas?: string;
-    };
-    error?: { message: string };
-  };
+      const data = (await response.json()) as {
+        result?: {
+          callGasLimit?: string;
+          verificationGasLimit?: string;
+          verificationGas?: string;
+          preVerificationGas?: string;
+        };
+        error?: { message: string };
+      };
 
-  if (data.error) {
-    throw new Error(`Gas estimation error: ${data.error.message}`);
-  }
+      if (data.error) {
+        throw new Error(`Gas estimation error: ${data.error.message}`);
+      }
 
-  const result = data.result ?? {};
-  return {
-    callGasLimit: parseGasValue(result.callGasLimit),
-    verificationGasLimit: parseGasValue(result.verificationGasLimit),
-    preVerificationGas: parseGasValue(result.preVerificationGas),
-  };
+      const result = data.result ?? {};
+      return {
+        callGasLimit: parseGasValue(result.callGasLimit),
+        verificationGasLimit: parseGasValue(result.verificationGasLimit),
+        preVerificationGas: parseGasValue(result.preVerificationGas),
+      };
+    },
+    { operationName: "bundler-estimate-gas" }
+  );
 }
 
 /**

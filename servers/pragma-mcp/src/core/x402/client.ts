@@ -8,15 +8,79 @@ import { X402_API_PATTERNS, type X402PaymentRequired } from "./types.js";
 import { getUsdcAddress } from "./usdc.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import type { PragmaConfig } from "../../types/index.js";
+import { isTransientError, sleep } from "../utils/retry.js";
 
 // MARK: - Constants
 
 const X_PAYMENT_HEADER = "x-payment";
 const X_PAYMENT_RESPONSE_HEADER = "x-payment-response";
 
-// Bootstrap headers for free calls
-const X_PRAGMA_WALLET_HEADER = "x-pragma-wallet";
-const X_PRAGMA_SESSION_HEADER = "x-pragma-session";
+// Retry defaults for transient errors
+const MAX_RETRIES = 2;
+const BASE_DELAY_MS = 500;
+
+/**
+ * Fetch with retry for transient errors
+ *
+ * Retries on network errors, timeouts, and 502/503/504 responses.
+ * Does NOT retry on 402 (expected x402 payment required response).
+ *
+ * @param input - URL or Request
+ * @param init - Request options
+ * @param operationName - For logging
+ * @returns Response
+ */
+async function fetchWithRetry(
+  input: string | Request | URL,
+  init?: RequestInit,
+  operationName = "fetch"
+): Promise<Response> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(input, init);
+
+      // Don't retry 402 - it's expected x402 response, not an error
+      if (response.status === 402) {
+        return response;
+      }
+
+      // Retry on server errors (502, 503, 504)
+      if (response.status >= 502 && response.status <= 504) {
+        const errorMsg = `Server error ${response.status}`;
+        if (attempt < MAX_RETRIES) {
+          const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+          console.log(`[x402] ${operationName}: ${errorMsg}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+          await sleep(delay);
+          continue;
+        }
+        // Final attempt failed, return the response anyway
+        console.log(`[x402] ${operationName}: ${errorMsg} after ${MAX_RETRIES} retries`);
+        return response;
+      }
+
+      // Success or client error (4xx except 402) - return as-is
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if transient error
+      if (isTransientError(lastError) && attempt < MAX_RETRIES) {
+        const delay = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.log(`[x402] ${operationName}: ${lastError.message}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(delay);
+        continue;
+      }
+
+      // Non-transient error or max retries reached
+      throw lastError;
+    }
+  }
+
+  // Should not reach here, but TypeScript needs this
+  throw lastError ?? new Error("Fetch failed after retries");
+}
 
 // MARK: - Detection
 
@@ -50,13 +114,24 @@ export function isX402Endpoint(url: string): boolean {
 
 /**
  * Extract route type from pragma-api URL for logging
- *
- * @param url - URL to parse
- * @returns Route type (e.g., "rpc", "bundler", "quote")
  */
 function getRouteType(url: string): string {
   const match = url.match(/\/\d+\/(\w+)/);
   return match?.[1] || "unknown";
+}
+
+/**
+ * Check if request headers already contain a payment header
+ */
+function hasPaymentHeader(headers: RequestInit["headers"]): boolean {
+  if (!headers) return false;
+
+  if (headers instanceof Headers) {
+    return headers.has(X_PAYMENT_HEADER);
+  }
+
+  const headerObj = headers as Record<string, string>;
+  return X_PAYMENT_HEADER in headerObj || "X-PAYMENT" in headerObj;
 }
 
 // MARK: - x402 Fetch Wrapper
@@ -83,27 +158,20 @@ export async function x402Fetch(
 ): Promise<Response> {
   const url = input.toString();
 
-  // BYOK mode - pass through to regular fetch
+  // BYOK mode - pass through with retry for transient errors
   if (!isX402Endpoint(url)) {
-    return fetch(input, init);
+    return fetchWithRetry(input, init, "byok");
   }
 
   // Check if payment already attempted (prevent infinite loops)
-  const existingHeaders = init?.headers;
-  if (existingHeaders) {
-    const headerObj = existingHeaders instanceof Headers
-      ? Object.fromEntries(existingHeaders.entries())
-      : existingHeaders as Record<string, string>;
-    if (headerObj[X_PAYMENT_HEADER] || headerObj["X-PAYMENT"] || headerObj["PAYMENT-SIGNATURE"]) {
-      // Payment header already present, don't try to pay again
-      return fetch(input, init);
-    }
+  if (hasPaymentHeader(init?.headers)) {
+    return fetchWithRetry(input, init, "x402-paid");
   }
 
   console.log("[x402] Making request to:", url);
 
-  // Step 1: Make initial request
-  const initialResponse = await fetch(input, init);
+  // Step 1: Make initial request (with retry for transient errors)
+  const initialResponse = await fetchWithRetry(input, init, "x402-initial");
 
   console.log("[x402] Initial response status:", initialResponse.status);
 
@@ -183,7 +251,7 @@ export async function x402Fetch(
 
   console.log("[x402] Retrying with payment...");
   console.log("[x402] Payment header (first 100 chars):", paymentHeader.substring(0, 100));
-  const paidResponse = await fetch(input, paidInit);
+  const paidResponse = await fetchWithRetry(input, paidInit, "x402-paid");
   console.log("[x402] Paid response status:", paidResponse.status);
 
   // Check for payment rejection

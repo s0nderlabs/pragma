@@ -10,7 +10,7 @@ import type { SwapQuote } from "../../types/index.js";
 import { getChainConfig } from "../../config/chains.js";
 import { NATIVE_TOKEN_ADDRESS } from "../../config/constants.js";
 import { x402Fetch, getApiEndpoint, isX402Mode } from "../x402/client.js";
-import { loadConfig } from "../../config/pragma-config.js";
+import { withRetryOrThrow } from "../utils/retry.js";
 
 // EIP-7528 native token address format (standard for DEX aggregators)
 const EIP7528_NATIVE_TOKEN = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE" as Address;
@@ -193,13 +193,19 @@ export async function fetchQuote(request: QuoteRequest): Promise<SwapQuote | nul
   url.searchParams.set("taker", request.sender);
   url.searchParams.set("slippageBps", request.slippageBps.toString());
 
-  const response = await x402Fetch(url.toString(), { method: "GET" });
+  // Fetch with retry for transient errors
+  const data = await withRetryOrThrow(
+    async () => {
+      const response = await x402Fetch(url.toString(), { method: "GET" });
 
-  if (!response.ok) {
-    throw new Error(`Quote API error (${response.status}): ${await response.text()}`);
-  }
+      if (!response.ok) {
+        throw new Error(`Quote API error (${response.status}): ${await response.text()}`);
+      }
 
-  const data = (await response.json()) as QuoteApiResponse;
+      return (await response.json()) as QuoteApiResponse;
+    },
+    { operationName: "quote-x402" }
+  );
 
   if (data.message) {
     throw new Error(`Quote API: ${data.message}`);

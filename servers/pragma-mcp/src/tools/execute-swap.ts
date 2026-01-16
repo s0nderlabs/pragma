@@ -4,20 +4,11 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { createPublicClient, http, type Address, type PublicClient } from "viem";
-import { x402HttpOptions } from "../core/x402/client.js";
+import type { Address } from "viem";
 import { executeBatchSwap } from "../core/execution/swap.js";
 import { getCachedQuote, isQuoteExpired, getQuoteTimeRemaining } from "../core/aggregator/index.js";
-import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
-import { getChainConfig, buildViemChain } from "../config/chains.js";
-import { isX402Mode } from "../core/x402/client.js";
-import {
-  getUsdcBalance,
-  formatUsdcBalance,
-  LOW_BALANCE_WARNING,
-  isUsdcConfigured,
-  getMinRequiredForOperation,
-} from "../core/x402/usdc.js";
+import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
+import { getChainConfig } from "../config/chains.js";
 
 const DEFAULT_SLIPPAGE_BPS = 500;
 const MAX_SLIPPAGE_BPS = 5000;
@@ -94,39 +85,7 @@ async function executeSwapHandler(
       };
     }
 
-    const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
     const chainId = config.network.chainId;
-
-    if (config.mode === "x402") {
-      if (isUsdcConfigured(chainId)) {
-        const rpcUrl = await getRpcUrl(config);
-        const chain = buildViemChain(chainId, rpcUrl);
-        const client = createPublicClient({ 
-          chain, 
-          transport: http(rpcUrl, x402HttpOptions(config)) 
-        });
-
-        const usdcBalance = await getUsdcBalance(sessionKeyAddress, client as PublicClient, chainId);
-        const minRequired = getMinRequiredForOperation("bundler") * BigInt(params.quoteIds.length);
-
-        if (usdcBalance < minRequired) {
-          return {
-            success: false,
-            message: "Insufficient USDC for x402 API calls",
-            results: [],
-            summary: { total: 0, successful: 0, failed: 0 },
-            error:
-              `Session key has ${formatUsdcBalance(usdcBalance)} but needs at least ` +
-              `${formatUsdcBalance(minRequired)} for this batch operation. ` +
-              `Fund your session key with USDC to continue.`,
-          };
-        }
-
-        if (usdcBalance < LOW_BALANCE_WARNING) {
-          console.log(`[x402] USDC balance low: ${formatUsdcBalance(usdcBalance)}`);
-        }
-      }
-    }
 
     for (const quoteId of params.quoteIds) {
       const quote = await getCachedQuote(quoteId);

@@ -11,6 +11,7 @@ import { findTokenBySymbol, findTokenByAddress } from "../../config/tokens.js";
 import { getApiEndpoint, x402Fetch, isX402Mode } from "../x402/client.js";
 import { NATIVE_TOKEN_ADDRESS } from "../../config/constants.js";
 import { getChainConfig } from "../../config/chains.js";
+import { withRetry } from "../utils/retry.js";
 
 // MARK: - Types
 
@@ -126,6 +127,7 @@ function parseTokenResponse(raw: TokenApiResponse): TokenInfo | null {
 
 /**
  * Fetch data from API (handles both x402 and BYOK modes)
+ * Includes retry logic for transient errors
  */
 async function fetchData<T>(
   path: string,
@@ -134,21 +136,33 @@ async function fetchData<T>(
   const inX402Mode = await isX402Mode();
 
   if (!inX402Mode) {
+    // BYOK mode: adapter engine handles retry at adapter level
     const { executeDataRequest } = await import("../adapters/engine.js");
     const result = await executeDataRequest<T>({ path, chainId });
     return result.success ? (result.data ?? null) : null;
   }
 
+  // x402 mode: use retry wrapper
   const endpoint = await getApiEndpoint("data", chainId);
   if (!endpoint.url) return null;
 
-  const response = await x402Fetch(`${endpoint.url}${path}`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-  });
+  const result = await withRetry(
+    async () => {
+      const response = await x402Fetch(`${endpoint.url}${path}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
 
-  if (!response.ok) return null;
-  return (await response.json()) as T;
+      if (!response.ok) {
+        throw new Error(`Data API error (${response.status})`);
+      }
+
+      return (await response.json()) as T;
+    },
+    { operationName: `data-${path}` }
+  );
+
+  return result.success ? (result.data ?? null) : null;
 }
 
 /**

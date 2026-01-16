@@ -14,6 +14,7 @@ import {
 } from "./hybridDelegator.js";
 import { getBundlerUrl } from "../../config/pragma-config.js";
 import type { PragmaConfig } from "../../types/index.js";
+import { withRetryOrThrow } from "../utils/retry.js";
 
 /**
  * Result of deployment operation
@@ -138,110 +139,123 @@ function applySponsorshipToUserOp(target: SignableUserOp, update: PimlicoSponsor
 
 /**
  * Sponsor a user operation via Pimlico paymaster
+ * Includes retry for transient errors (idempotent - just gets paymaster signature)
  */
 async function sponsorUserOperation(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
   entryPoint: Address
 ): Promise<PimlicoSponsorship> {
-  const response = await fetch(bundlerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "pm_sponsorUserOperation",
-      params: [userOp, entryPoint],
-      id: 1,
-    }),
-  });
+  return withRetryOrThrow(
+    async () => {
+      const response = await fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "pm_sponsorUserOperation",
+          params: [userOp, entryPoint],
+          id: 1,
+        }),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Paymaster request failed: ${response.status}`);
-  }
+      if (!response.ok) {
+        throw new Error(`Paymaster request failed: ${response.status}`);
+      }
 
-  const data = (await response.json()) as {
-    result?: Record<string, string | null | undefined>;
-    error?: { message: string };
-  };
+      const data = (await response.json()) as {
+        result?: Record<string, string | null | undefined>;
+        error?: { message: string };
+      };
 
-  if (data.error) {
-    throw new Error(`Paymaster error: ${data.error.message}`);
-  }
+      if (data.error) {
+        throw new Error(`Paymaster error: ${data.error.message}`);
+      }
 
-  const result = data.result;
-  if (!result) {
-    throw new Error("Pimlico paymaster did not return a result");
-  }
+      const result = data.result;
+      if (!result) {
+        throw new Error("Pimlico paymaster did not return a result");
+      }
 
-  // Build paymasterAndData from separate fields if needed
-  let paymasterAndData = result.paymasterAndData as string | undefined;
-  if ((!paymasterAndData || paymasterAndData === "0x") && result.paymaster && result.paymasterData) {
-    paymasterAndData = `${result.paymaster}${(result.paymasterData as string).slice(2)}`;
-  }
+      // Build paymasterAndData from separate fields if needed
+      let paymasterAndData = result.paymasterAndData as string | undefined;
+      if ((!paymasterAndData || paymasterAndData === "0x") && result.paymaster && result.paymasterData) {
+        paymasterAndData = `${result.paymaster}${(result.paymasterData as string).slice(2)}`;
+      }
 
-  if (!paymasterAndData || paymasterAndData === "0x") {
-    throw new Error(`Pimlico paymaster response missing paymasterAndData`);
-  }
+      if (!paymasterAndData || paymasterAndData === "0x") {
+        throw new Error(`Pimlico paymaster response missing paymasterAndData`);
+      }
 
-  return {
-    paymasterAndData: paymasterAndData as Hex,
-    paymaster: result.paymaster as Address | undefined,
-    paymasterData: result.paymasterData as Hex | undefined,
-    preVerificationGas: parseGasValue(result.preVerificationGas),
-    verificationGasLimit: parseGasValue(result.verificationGasLimit),
-    callGasLimit: parseGasValue(result.callGasLimit),
-    paymasterPostOpGasLimit: parseGasValue(result.paymasterPostOpGasLimit),
-    paymasterVerificationGasLimit: parseGasValue(result.paymasterVerificationGasLimit),
-  };
+      return {
+        paymasterAndData: paymasterAndData as Hex,
+        paymaster: result.paymaster as Address | undefined,
+        paymasterData: result.paymasterData as Hex | undefined,
+        preVerificationGas: parseGasValue(result.preVerificationGas),
+        verificationGasLimit: parseGasValue(result.verificationGasLimit),
+        callGasLimit: parseGasValue(result.callGasLimit),
+        paymasterPostOpGasLimit: parseGasValue(result.paymasterPostOpGasLimit),
+        paymasterVerificationGasLimit: parseGasValue(result.paymasterVerificationGasLimit),
+      };
+    },
+    { operationName: "paymaster-sponsor" }
+  );
 }
 
 /**
  * Get gas price recommendations from Pimlico
+ * Includes retry for transient errors (idempotent read operation)
  */
 async function getGasPrice(bundlerUrl: string): Promise<{
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
 }> {
-  const response = await fetch(bundlerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "pimlico_getUserOperationGasPrice",
-      params: [],
-      id: 1,
-    }),
-  });
+  return withRetryOrThrow(
+    async () => {
+      const response = await fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "pimlico_getUserOperationGasPrice",
+          params: [],
+          id: 1,
+        }),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Gas price request failed: ${response.status}`);
-  }
+      if (!response.ok) {
+        throw new Error(`Gas price request failed: ${response.status}`);
+      }
 
-  const data = (await response.json()) as {
-    result?: {
-      fast?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
-      standard?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
-    };
-    error?: { message: string };
-  };
+      const data = (await response.json()) as {
+        result?: {
+          fast?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
+          standard?: { maxFeePerGas: Hex; maxPriorityFeePerGas: Hex };
+        };
+        error?: { message: string };
+      };
 
-  if (data.error) {
-    throw new Error(`Gas price error: ${data.error.message}`);
-  }
+      if (data.error) {
+        throw new Error(`Gas price error: ${data.error.message}`);
+      }
 
-  const prices = data.result?.fast ?? data.result?.standard;
-  if (!prices) {
-    throw new Error("No gas price data returned");
-  }
+      const prices = data.result?.fast ?? data.result?.standard;
+      if (!prices) {
+        throw new Error("No gas price data returned");
+      }
 
-  return {
-    maxFeePerGas: BigInt(prices.maxFeePerGas),
-    maxPriorityFeePerGas: BigInt(prices.maxPriorityFeePerGas),
-  };
+      return {
+        maxFeePerGas: BigInt(prices.maxFeePerGas),
+        maxPriorityFeePerGas: BigInt(prices.maxPriorityFeePerGas),
+      };
+    },
+    { operationName: "bundler-gas-price" }
+  );
 }
 
 /**
  * Estimate gas via bundler (with paymaster context)
+ * Includes retry for transient errors (idempotent read operation)
  */
 async function estimateUserOpGas(
   bundlerUrl: string,
@@ -252,41 +266,46 @@ async function estimateUserOpGas(
   verificationGasLimit?: bigint;
   preVerificationGas?: bigint;
 }> {
-  const response = await fetch(bundlerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "eth_estimateUserOperationGas",
-      params: [userOp, entryPoint],
-      id: 1,
-    }),
-  });
+  return withRetryOrThrow(
+    async () => {
+      const response = await fetch(bundlerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          method: "eth_estimateUserOperationGas",
+          params: [userOp, entryPoint],
+          id: 1,
+        }),
+      });
 
-  if (!response.ok) {
-    throw new Error(`Gas estimation failed: ${response.status}`);
-  }
+      if (!response.ok) {
+        throw new Error(`Gas estimation failed: ${response.status}`);
+      }
 
-  const data = (await response.json()) as {
-    result?: {
-      callGasLimit?: string;
-      verificationGasLimit?: string;
-      verificationGas?: string;
-      preVerificationGas?: string;
-    };
-    error?: { message: string };
-  };
+      const data = (await response.json()) as {
+        result?: {
+          callGasLimit?: string;
+          verificationGasLimit?: string;
+          verificationGas?: string;
+          preVerificationGas?: string;
+        };
+        error?: { message: string };
+      };
 
-  if (data.error) {
-    throw new Error(`Gas estimation error: ${data.error.message}`);
-  }
+      if (data.error) {
+        throw new Error(`Gas estimation error: ${data.error.message}`);
+      }
 
-  const result = data.result ?? {};
-  return {
-    callGasLimit: parseGasValue(result.callGasLimit),
-    verificationGasLimit: parseGasValue(result.verificationGasLimit ?? result.verificationGas),
-    preVerificationGas: parseGasValue(result.preVerificationGas),
-  };
+      const result = data.result ?? {};
+      return {
+        callGasLimit: parseGasValue(result.callGasLimit),
+        verificationGasLimit: parseGasValue(result.verificationGasLimit ?? result.verificationGas),
+        preVerificationGas: parseGasValue(result.preVerificationGas),
+      };
+    },
+    { operationName: "bundler-estimate-gas" }
+  );
 }
 
 /**

@@ -16,6 +16,7 @@ import type {
 import { getConfiguredAdapters, loadAdapter } from "./loader.js";
 import { loadConfig } from "../../config/pragma-config.js";
 import type { PragmaConfig } from "../../types/index.js";
+import { withRetry } from "../utils/retry.js";
 
 // MARK: - Helpers
 
@@ -329,23 +330,34 @@ export async function executeQuoteRequest(
 
     console.log(`[adapters] Fetching quote from ${adapter.name}: ${url}`);
 
-    // Make request
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-    });
+    // Make request with retry for transient errors
+    const fetchResult = await withRetry(
+      async () => {
+        const response = await fetch(url, {
+          method: "GET",
+          headers,
+        });
 
-    if (!response.ok) {
-      const text = await response.text();
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(`${adapter.name} API error (${response.status}): ${text}`);
+        }
+
+        return response.json();
+      },
+      { operationName: `quote-${adapter.name}` }
+    );
+
+    if (!fetchResult.success) {
       return {
         success: false,
-        error: `${adapter.name} API error (${response.status}): ${text}`,
+        error: fetchResult.error?.message ?? "Unknown error",
         provider: adapter.name,
         latencyMs: Date.now() - startTime,
       };
     }
 
-    const rawResponse = await response.json();
+    const rawResponse = fetchResult.data;
 
     // Map response to unified format
     const mapped = mapResponse<UnifiedQuoteResponse>(rawResponse, adapter.response);
@@ -479,14 +491,26 @@ export async function executeDataRequest<T>(
 
       console.log(`[adapters] Fetching data from ${adapter.name}: ${url}`);
 
-      const response = await fetch(url, { method: "GET", headers });
+      // Fetch with retry for transient errors
+      const fetchResult = await withRetry(
+        async () => {
+          const response = await fetch(url, { method: "GET", headers });
 
-      if (!response.ok) {
-        errors.push(`${adapter.name}: API error (${response.status}): ${await response.text()}`);
+          if (!response.ok) {
+            throw new Error(`${adapter.name}: API error (${response.status}): ${await response.text()}`);
+          }
+
+          return response.json();
+        },
+        { operationName: `data-${adapter.name}` }
+      );
+
+      if (!fetchResult.success) {
+        errors.push(fetchResult.error?.message ?? "Unknown error");
         continue;
       }
 
-      const rawResponse = await response.json();
+      const rawResponse = fetchResult.data;
       const mapped = Object.keys(adapter.response).length > 0
         ? mapResponse<T>(rawResponse, adapter.response)
         : rawResponse as T;

@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-01-16
+
+### Added
+- **Centralized Retry System**: New shared retry utility (`src/core/utils/retry.ts`) with exponential backoff for all API operations
+- Retry now integrated at core client level (quote, data, adapters, bundler operations)
+- **RPC Transport Retry**: `x402Fetch` now includes `fetchWithRetry()` for all RPC calls via viem
+- Transient error detection for: fetch failed, timeout, ECONNRESET, 502/503/504, rate limits
+
+### Changed
+- **batch.ts Simplified**: Removed ~65 lines of local retry logic - now handled at lower level
+- Batch response no longer includes `retried` field (retry is internal)
+- Bundler operations (`getGasPrice`, `estimateUserOpGas`, `sponsorUserOperation`) now retry on transient errors
+- All `x402Fetch` calls now use retry-enabled fetch for both x402 and BYOK modes
+
+### Security
+- **Idempotency Safety**: `sendUserOperation` is explicitly NOT retried to prevent double-spend
+- Only idempotent read operations retry automatically
+
+## [0.3.1] - 2026-01-16
+
+### Added
+- **Batch Quote Support**: `get_swap_quote` now supports batch mode with `quotes` array parameter
+- **Parallel Quote Fetching**: Up to 5 concurrent quote requests for efficient multi-swap preparation
+- **Auto-Retry for Transient Failures**: Batch quotes automatically retry on network errors (max 2 retries, exponential backoff)
+- New `src/core/quote/batch.ts` module for batch orchestration with retry logic
+
+### Changed
+- `get_swap_quote` schema extended to support both single and batch modes (backward compatible)
+- Batch response includes `quoteIds` array ready for `execute_swap`
+
+### Removed
+- **x402 USDC Balance Pre-Checks**: Removed redundant pre-operation USDC balance checks from `get_swap_quote` and `execute_swap`
+  - Reduces latency (one less RPC call per operation)
+  - Prevents transient RPC failures from blocking valid operations
+  - x402 proxy returns clear 402 error if USDC is insufficient
+  - Use `check_session_key_balance` for explicit balance checks
+
 ## [0.3.0] - 2026-01-15
 
 ### Added

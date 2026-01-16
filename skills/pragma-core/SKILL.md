@@ -154,7 +154,7 @@ Before executing multiple operations, calculate total gas needed:
 | Balance | `get_balance` | Single token balance |
 | Balance | `get_all_balances` | Full portfolio |
 | Discovery | `list_verified_tokens` | List tradeable tokens |
-| Trade | `get_swap_quote` | Quote before swap |
+| Trade | `get_swap_quote` | Quote before swap (single or batch) |
 | Trade | `execute_swap` | Execute swap (Touch ID) |
 | Transfer | `transfer` | Send tokens (Touch ID) |
 | Convert | `wrap` | Native to Wrapped |
@@ -164,20 +164,63 @@ Before executing multiple operations, calculate total gas needed:
 | Session | `fund_session_key` | Fund for operations |
 | Setup | `setup_wallet` | Initial creation |
 
+### Batch Quote Support
+
+`get_swap_quote` supports two modes:
+
+**Single quote (original):**
+```
+get_swap_quote(fromToken: "MON", toToken: "USDC", amount: "1")
+```
+
+**Batch quotes (new):**
+```
+get_swap_quote(quotes: [
+  { fromToken: "MON", toToken: "USDC", amount: "1" },
+  { fromToken: "MON", toToken: "AUSD", amount: "1" }
+])
+```
+
+**Batch features:**
+- Up to 10 quotes per batch
+- Parallel fetching (faster than sequential)
+- Auto-retry for transient failures
+- Partial success (some quotes can fail without blocking others)
+- Returns `quoteIds` array ready for `execute_swap`
+
+**When to use batch mode:**
+- Multiple independent swaps (e.g., "swap 1 MON to USDC and 1 MON to AUSD")
+- Portfolio rebalancing
+- Multi-token purchases
+
 ## Operation Flows
 
-### Swaps
+### Swaps (Single)
 1. `get_balance` (source token)
-2. `get_swap_quote`
+2. `get_swap_quote` (single mode)
 3. **Use `AskUserQuestion`:**
    - Header: "Swap"
    - Question: "Confirm swap of X TOKEN_A for ~Y TOKEN_B?"
    - Options: ["Confirm swap", "Cancel"]
    - Include price impact warning in description if > 1%
 4. If confirmed: `check_session_key_balance` (operationType: "swap")
-5. If needsFunding - `fund_session_key`
+5. If needsFunding - `fund_session_key` → WAIT
 6. `execute_swap`
 7. Report result with tx hash
+
+### Swaps (Batch)
+For multiple independent swaps (e.g., "swap 1 MON to USDC and 1 MON to AUSD"):
+1. `get_balance` (source token)
+2. `get_swap_quote` with `quotes` array (batch mode) - fetches all in parallel
+3. **Use `AskUserQuestion`:**
+   - Header: "Batch Swap"
+   - Question: "Confirm N swaps: X TOKEN → Y TOKEN, ...?"
+   - Options: ["Confirm all", "Cancel"]
+   - Show summary of all swaps in description
+4. If confirmed: `check_session_key_balance` (estimatedOperations: N)
+5. If needsFunding - `fund_session_key` → WAIT
+6. `execute_swap` with all `quoteIds` from batch response
+7. Report all results (atomic - all succeed or all fail)
 
 ### Transfers
 1. Validate address (0x, 42 chars)
@@ -272,17 +315,24 @@ Received: 0.999 TOKEN_B
 
 ## Execution Examples
 
-### Example 1: Parallel Independent Swaps
+### Example 1: Batch Independent Swaps
 User: "swap 0.5 MON each to USDC and AUSD"
 
-**Analysis:** Two swaps, no dependency → BATCH EXECUTION
+**Analysis:** Two swaps, no dependency → USE BATCH QUOTE
 
 **Execution:**
-1. [get_swap_quote MON→USDC, get_swap_quote MON→AUSD] (parallel)
-2. Show combined quote, get confirmation
-3. check_session_key_balance(estimatedOperations: 2)
-4. fund_session_key if needed → WAIT
-5. execute_swap(quoteIds=["QUOTE_USDC", "QUOTE_AUSD"]) (batch execution)
+1. `get_swap_quote` with batch mode:
+   ```
+   get_swap_quote(quotes: [
+     { fromToken: "MON", toToken: "USDC", amount: "0.5" },
+     { fromToken: "MON", toToken: "AUSD", amount: "0.5" }
+   ])
+   ```
+2. Response includes `quoteIds: ["quote-xxx", "quote-yyy"]`
+3. Show combined quote summary, get confirmation via AskUserQuestion
+4. `check_session_key_balance(estimatedOperations: 2)`
+5. `fund_session_key` if needed → WAIT for completion
+6. `execute_swap(quoteIds: ["quote-xxx", "quote-yyy"])` (atomic batch)
 
 ### Example 2: Sequential Dependent Swaps
 User: "swap 1 MON to USDC, then swap that USDC to DAK"
