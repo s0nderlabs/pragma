@@ -6,6 +6,8 @@ allowed-tools:
   - mcp__pragma__has_providers
   - mcp__pragma__get_balance
   - mcp__pragma__get_all_balances
+  - mcp__pragma__get_account_info
+  - mcp__pragma__get_token_info
   - mcp__pragma__list_verified_tokens
   - mcp__pragma__get_swap_quote
   - mcp__pragma__execute_swap
@@ -16,6 +18,7 @@ allowed-tools:
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
   - mcp__pragma__setup_wallet
+  - mcp__pragma__set_mode
   - AskUserQuestion
   - Read
 ---
@@ -151,9 +154,11 @@ Before executing multiple operations, calculate total gas needed:
 |----------|------|---------|
 | Check | `has_wallet` | Verify wallet initialization |
 | Check | `has_providers` | Verify provider configuration |
+| Account | `get_account_info` | Wallet addresses, mode, network |
 | Balance | `get_balance` | Single token balance |
 | Balance | `get_all_balances` | Full portfolio |
 | Discovery | `list_verified_tokens` | List tradeable tokens |
+| Discovery | `get_token_info` | Token details, price, verification |
 | Trade | `get_swap_quote` | Quote before swap (single or batch) |
 | Trade | `execute_swap` | Execute swap (Touch ID) |
 | Transfer | `transfer` | Send tokens (Touch ID) |
@@ -163,6 +168,7 @@ Before executing multiple operations, calculate total gas needed:
 | Session | `check_session_key_balance` | Check gas funding |
 | Session | `fund_session_key` | Fund for operations |
 | Setup | `setup_wallet` | Initial creation |
+| Config | `set_mode` | Switch BYOK/x402 mode |
 
 ### Batch Quote Support
 

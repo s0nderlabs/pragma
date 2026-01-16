@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-01-16
+
+### Added
+- **get_account_info tool**: View wallet configuration, addresses, mode, and network info
+- **get_token_info tool**: Look up token details by symbol or address with USD price and verification status
+- Updated pragma-core skill with new tools
+
 ## [0.3.2] - 2026-01-16
 
 ### Added
