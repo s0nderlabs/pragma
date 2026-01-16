@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-01-16
+
+### Added
+- **EIP-7966 Support**: `eth_sendRawTransactionSync` for ~50% latency reduction on transaction confirmations
+- New `src/core/rpc/` module with receipt caching, sync transport, and cache-first waiting
+- `createSyncHttpTransport()` helper combining x402 + EIP-7966 support
+
+### Changed
+- All execution operations (swap, transfer, wrap, unwrap, stake, session key funding) now use sync receipts
+- Receipts from EIP-7966 are cached (5-min TTL) for instant retrieval
+- Graceful fallback to standard polling if RPC doesn't support sync method
+
 ## [0.3.3] - 2026-01-16
 
 ### Added

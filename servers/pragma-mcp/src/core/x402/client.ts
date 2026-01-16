@@ -2,13 +2,14 @@
 // Fetch wrapper that handles x402 micropayments transparently
 // Copyright (c) 2026 s0nderlabs
 
-import type { Address } from "viem";
+import { http, type Transport } from "viem";
 import { signPaymentAuthorization, createPaymentHeader } from "./payment.js";
 import { X402_API_PATTERNS, type X402PaymentRequired } from "./types.js";
 import { getUsdcAddress } from "./usdc.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import type { PragmaConfig } from "../../types/index.js";
 import { isTransientError, sleep } from "../utils/retry.js";
+import { createSyncTransport } from "../rpc/index.js";
 
 // MARK: - Constants
 
@@ -168,19 +169,13 @@ export async function x402Fetch(
     return fetchWithRetry(input, init, "x402-paid");
   }
 
-  console.log("[x402] Making request to:", url);
-
   // Step 1: Make initial request (with retry for transient errors)
   const initialResponse = await fetchWithRetry(input, init, "x402-initial");
-
-  console.log("[x402] Initial response status:", initialResponse.status);
 
   // If not 402, return as-is (success or other error)
   if (initialResponse.status !== 402) {
     return initialResponse;
   }
-
-  console.log("[x402] Got 402, processing payment...");
 
   // Step 2: Parse 402 response
   let paymentRequired: X402PaymentRequired;
@@ -211,19 +206,13 @@ export async function x402Fetch(
     throw new Error(`USDC not configured for chain ${chainId}`);
   }
 
-  console.log("[x402] Payment requirements:", JSON.stringify(requirements, null, 2));
-
   // Step 4: Sign payment authorization with session key
-  // This uses the session key EOA - no Touch ID required
-  console.log("[x402] Signing payment authorization...");
   const { authorization, signature } = await signPaymentAuthorization(
     requirements,
     usdcAddress,
     chainId,
     rpcUrl
   );
-
-  console.log("[x402] Payment signed, authorization:", JSON.stringify(authorization, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2));
 
   // Step 5: Create payment header
   const paymentHeader = createPaymentHeader(
@@ -233,10 +222,7 @@ export async function x402Fetch(
     paymentRequired.resource
   );
 
-  console.log("[x402] Payment header created, length:", paymentHeader.length);
-
   // Step 6: Retry with payment header
-  // Preserve original headers and add payment header
   const originalHeaders = init?.headers instanceof Headers
     ? Object.fromEntries(init.headers.entries())
     : (init?.headers as Record<string, string>) || {};
@@ -249,10 +235,7 @@ export async function x402Fetch(
     },
   };
 
-  console.log("[x402] Retrying with payment...");
-  console.log("[x402] Payment header (first 100 chars):", paymentHeader.substring(0, 100));
   const paidResponse = await fetchWithRetry(input, paidInit, "x402-paid");
-  console.log("[x402] Paid response status:", paidResponse.status);
 
   // Check for payment rejection
   if (paidResponse.status === 402) {
@@ -268,14 +251,6 @@ export async function x402Fetch(
       // Use default error message
     }
     throw new Error(errorMessage);
-  }
-
-  // Log successful payment (for debugging)
-  const paymentResponse = paidResponse.headers.get(X_PAYMENT_RESPONSE_HEADER);
-  if (paymentResponse) {
-    console.log(
-      `[x402] Paid for ${getRouteType(url)}: ${requirements.amount} USDC base units`
-    );
   }
 
   return paidResponse;
@@ -349,6 +324,30 @@ export function x402HttpOptions(config: PragmaConfig) {
     // Retry configuration for transient failures
     retryCount: 0, // We handle retries ourselves in x402Fetch
   };
+}
+
+/**
+ * Create an EIP-7966 enabled viem HTTP transport
+ *
+ * Combines x402 payment handling with EIP-7966 sync transaction support
+ * for ~50% latency reduction on transaction submissions.
+ *
+ * @param rpcUrl - RPC endpoint URL
+ * @param config - Current configuration (respects config.mode)
+ * @returns Transport with EIP-7966 + x402 support
+ *
+ * @example
+ * ```typescript
+ * const transport = createSyncHttpTransport(rpcUrl, config);
+ * const client = createPublicClient({ chain, transport });
+ * ```
+ */
+export function createSyncHttpTransport(
+  rpcUrl: string,
+  config: PragmaConfig
+): Transport {
+  const baseTransport = http(rpcUrl, x402HttpOptions(config));
+  return createSyncTransport(baseTransport);
 }
 
 // MARK: - API URL Resolution

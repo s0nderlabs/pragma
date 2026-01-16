@@ -7,7 +7,6 @@ import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import {
   createPublicClient,
   createWalletClient,
-  http,
   encodeFunctionData,
   erc20Abi,
   getAddress,
@@ -29,7 +28,8 @@ import { getSessionKey, getSessionAccount } from "../session/keys.js";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain } from "../../config/chains.js";
-import { x402HttpOptions } from "../x402/client.js";
+import { createSyncHttpTransport } from "../x402/client.js";
+import { waitForReceiptSync } from "../rpc/index.js";
 import {
   getCachedQuote,
   getQuoteExecutionData,
@@ -98,7 +98,7 @@ export async function executeBatchSwap(
   const chain = buildViemChain(chainId, rpcUrl);
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   const sessionKey = await getSessionKey();
@@ -130,7 +130,7 @@ export async function executeBatchSwap(
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   const broadcastResults = await broadcastAndExecute(
@@ -333,11 +333,8 @@ async function broadcastAndExecute(
       redemptions
     );
 
-    // Wait for confirmation
-    const receipt = await publicClient.waitForTransactionReceipt({
-      hash: txHash,
-      timeout: 60_000,
-    });
+    // Wait for confirmation (EIP-7966 cache-first)
+    const receipt = await waitForReceiptSync(publicClient, txHash);
 
     // Map the single txHash to all successful swap results
     for (const bundle of bundles) {

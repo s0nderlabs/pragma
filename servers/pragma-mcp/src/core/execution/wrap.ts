@@ -7,7 +7,6 @@ import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import {
   createPublicClient,
   createWalletClient,
-  http,
   encodeFunctionData,
   parseUnits,
   formatUnits,
@@ -26,7 +25,8 @@ import { getSessionKey, getSessionAccount } from "../session/keys.js";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain, getChainConfig } from "../../config/chains.js";
-import { x402HttpOptions } from "../x402/client.js";
+import { createSyncHttpTransport } from "../x402/client.js";
+import { waitForReceiptSync } from "../rpc/index.js";
 import { DELEGATION_FRAMEWORK } from "../../config/constants.js";
 import {
   getMinBalanceForOperation,
@@ -112,7 +112,7 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 5: Check MON balance
@@ -193,7 +193,7 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 11: Execute delegation
@@ -216,11 +216,8 @@ export async function executeWrap(params: WrapParams): Promise<WrapResult> {
     ]
   );
 
-  // Wait for confirmation
-  await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-    timeout: 60_000,
-  });
+  // Wait for confirmation (EIP-7966 cache-first)
+  await waitForReceiptSync(publicClient as PublicClient, txHash);
 
   return {
     txHash,
@@ -275,7 +272,7 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 5: Check WMON balance
@@ -362,7 +359,7 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 11: Execute delegation
@@ -385,11 +382,8 @@ export async function executeUnwrap(params: UnwrapParams): Promise<WrapResult> {
     ]
   );
 
-  // Wait for confirmation
-  await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-    timeout: 60_000,
-  });
+  // Wait for confirmation (EIP-7966 cache-first)
+  await waitForReceiptSync(publicClient as PublicClient, txHash);
 
   return {
     txHash,

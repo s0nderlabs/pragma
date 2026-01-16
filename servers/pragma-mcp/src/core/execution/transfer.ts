@@ -7,7 +7,6 @@ import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import {
   createPublicClient,
   createWalletClient,
-  http,
   encodeFunctionData,
   erc20Abi,
   parseUnits,
@@ -30,7 +29,8 @@ import { getSessionKey, getSessionAccount } from "../session/keys.js";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain } from "../../config/chains.js";
-import { x402HttpOptions } from "../x402/client.js";
+import { createSyncHttpTransport } from "../x402/client.js";
+import { waitForReceiptSync } from "../rpc/index.js";
 import { resolveToken } from "../data/client.js";
 import { DELEGATION_FRAMEWORK, NATIVE_TOKEN_ADDRESS } from "../../config/constants.js";
 import {
@@ -145,7 +145,7 @@ export async function executeTransfer(
 
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 6: Verify user has sufficient balance
@@ -270,12 +270,12 @@ export async function executeTransfer(
 
   delegationBundle.delegation.signature = signature;
 
-  // Step 11: Create session wallet client
+  // Step 11: Create session wallet client (EIP-7966 support)
   const sessionAccount = getSessionAccount(sessionKey);
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 12: Execute delegation
@@ -298,11 +298,8 @@ export async function executeTransfer(
     ]
   );
 
-  // Wait for confirmation
-  await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-    timeout: 60_000,
-  });
+  // Wait for confirmation (EIP-7966 cache-first)
+  await waitForReceiptSync(publicClient as PublicClient, txHash);
 
   return {
     txHash,

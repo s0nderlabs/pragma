@@ -10,7 +10,6 @@ import {
   type PublicClient,
   createPublicClient,
   createWalletClient,
-  http,
   formatEther,
   formatUnits,
   parseEther,
@@ -21,7 +20,8 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { getChainConfig, buildViemChain } from "../config/chains.js";
-import { x402HttpOptions } from "../core/x402/client.js";
+import { createSyncHttpTransport, x402HttpOptions } from "../core/x402/client.js";
+import { waitForReceiptSync } from "../core/rpc/index.js";
 import { getSessionKey } from "../core/session/keys.js";
 import { resolveToken } from "../core/data/client.js";
 import { withRetryOrThrow } from "../core/utils/retry.js";
@@ -136,11 +136,11 @@ async function withdrawSessionKeyHandler(
       };
     }
 
-    // Step 4: Create public client
+    // Step 4: Create public client with EIP-7966 support
     const chain = buildViemChain(chainId, rpcUrl);
     const publicClient = createPublicClient({
       chain,
-      transport: http(rpcUrl, x402HttpOptions(config)),
+      transport: createSyncHttpTransport(rpcUrl, config),
     }) as PublicClient;
 
     // Step 5: Resolve token (default to native MON)
@@ -284,12 +284,12 @@ async function withdrawSessionKeyHandler(
       }
     }
 
-    // Step 11: Create wallet client with session key
+    // Step 11: Create wallet client with session key (EIP-7966 support)
     const sessionAccount = privateKeyToAccount(sessionKey.privateKey);
     const walletClient = createWalletClient({
       account: sessionAccount,
       chain,
-      transport: http(rpcUrl, x402HttpOptions(config)),
+      transport: createSyncHttpTransport(rpcUrl, config),
     });
 
     // Step 12: Send withdrawal transaction
@@ -311,10 +311,8 @@ async function withdrawSessionKeyHandler(
       });
     }
 
-    // Step 13: Wait for confirmation
-    const receipt = await publicClient.waitForTransactionReceipt({
-      hash: txHash,
-    });
+    // Step 13: Wait for confirmation (EIP-7966 cache-first)
+    const receipt = await waitForReceiptSync(publicClient, txHash);
 
     if (receipt.status !== "success") {
       return {

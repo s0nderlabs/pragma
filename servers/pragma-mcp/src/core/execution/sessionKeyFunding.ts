@@ -11,7 +11,6 @@ import {
   formatUnits,
   createWalletClient,
   createPublicClient,
-  http,
   type WalletClient,
   erc20Abi
 } from "viem";
@@ -22,7 +21,8 @@ import {
   SESSION_KEY_FUNDING_AMOUNT,
   DELEGATION_FRAMEWORK,
 } from "../../config/constants.js";
-import { x402Fetch, x402HttpOptions } from "../x402/client.js";
+import { x402Fetch, createSyncHttpTransport } from "../x402/client.js";
+import { waitForReceiptSync } from "../rpc/index.js";
 import { withRetryOrThrow } from "../utils/retry.js";
 import type { SignedDelegation } from "../delegation/types.js";
 import { createNativeTransferDelegation, createERC20TransferDelegation } from "../delegation/hybrid.js";
@@ -423,7 +423,7 @@ export async function fundSessionKeyViaDelegation(
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain: handle.chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // Step 5: Execute via delegation
@@ -440,11 +440,8 @@ export async function fundSessionKeyViaDelegation(
     ]
   );
 
-  // Step 6: Wait for confirmation
-  await publicClient.waitForTransactionReceipt({
-    hash: txHash,
-    timeout: 60_000,
-  });
+  // Step 6: Wait for confirmation (EIP-7966 cache-first)
+  await waitForReceiptSync(publicClient, txHash);
 
   // Step 7: Get new balance
   await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -529,7 +526,7 @@ export async function fundUsdcViaDelegation(
   const sessionWallet = createWalletClient({
     account: sessionAccount,
     chain: handle.chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: createSyncHttpTransport(rpcUrl, config),
   });
 
   // 6. Execute via delegation
@@ -546,8 +543,8 @@ export async function fundUsdcViaDelegation(
     ]
   );
 
-  // 7. Wait for receipt
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
+  // 7. Wait for receipt (EIP-7966 cache-first)
+  await waitForReceiptSync(publicClient, txHash);
 
   return {
     userOpHash: "0x" as Hex,
