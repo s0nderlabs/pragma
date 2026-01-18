@@ -22,6 +22,8 @@ allowed-tools:
   - mcp__pragma__set_mode
   - mcp__pragma__get_block
   - mcp__pragma__get_gas_price
+  - mcp__pragma__explain_transaction
+  - mcp__pragma__get_onchain_activity
   - AskUserQuestion
   - Read
 ---
@@ -175,6 +177,8 @@ Before executing multiple operations, calculate total gas needed:
 | Config | `set_mode` | Switch BYOK/x402 mode |
 | Chain | `get_block` | Block info by number/hash/latest |
 | Chain | `get_gas_price` | Current gas price with estimates |
+| Activity | `explain_transaction` | Decode and explain any tx (x402 only) |
+| Activity | `get_onchain_activity` | Transaction history for address (x402 only) |
 
 ### Batch Quote Support
 
@@ -321,9 +325,78 @@ Confirm?
 **Results**:
 ```
 Success!
-Tx: 0x123...
+Tx: 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef
 Received: 0.999 TOKEN_B
 ```
+
+**IMPORTANT:** Always show FULL transaction hashes (all 66 characters). Never truncate tx hashes - users need to copy them.
+
+## Human-Readable Explanations
+
+When using `explain_transaction` or `get_onchain_activity`, ALWAYS add human-readable context after the technical details.
+
+### Philosophy
+- Technical data is for verification and debugging
+- Human explanation is for understanding what happened and why it matters
+- Users should walk away knowing: what happened, why it was secure, and the net result
+
+### Structure for Transaction Explanations
+
+After presenting technical tables, add:
+
+```
+---
+
+## In Plain English
+
+### What Happened
+[One paragraph explaining the transaction simply]
+
+### Security (Pragma txs only)
+[What the caveats/enforcers protected against]
+
+### Net Result
+[What user gained, spent, and any observations]
+```
+
+### Explanation Templates by Transaction Type
+
+**Swap:**
+> You traded [input tokens] for [output token] through [protocol]. Your session key executed this swap on your behalf, with the delegation expiring after [time window].
+
+**Stake:**
+> You deposited [amount] MON into aPriori's liquid staking vault. You received [amount] aprMON in return - this is a receipt token that represents your staked position and accrues rewards over time.
+
+**Transfer:**
+> You sent [amount] [token] to [recipient address]. This was executed through your smart account via delegation.
+
+**Wrap/Unwrap:**
+> You converted [amount] MON to WMON (or vice versa). WMON is the ERC20 wrapped version of native MON, required for many DeFi protocols.
+
+### Caveat/Enforcer Explanations
+
+Always explain what each enforcer does in plain terms:
+
+| Enforcer | Plain English |
+|----------|---------------|
+| TimestampEnforcer | "This delegation was only valid for X minutes" |
+| NonceEnforcer | "Prevents replay attacks - this exact delegation can't be reused" |
+| LimitedCallsEnforcer | "Your session key could only use this permission X times" |
+| AllowedTargetsEnforcer | "Only specific contracts (like the DEX) could be called" |
+| AllowedMethodsEnforcer | "Only specific functions (like swap) were allowed" |
+| NativeTokenTransferAmountEnforcer | "Maximum MON that could be transferred was capped at X" |
+
+### Gas Context (Monad-specific)
+
+Always mention:
+> On Monad, you're charged for the gas *limit*, not gas *used*. This means the actual cost is based on the maximum gas allocated, even if less was consumed.
+
+### When to Highlight Concerns
+
+Flag these observations naturally:
+- "Gas cost (0.28 MON) exceeded the swap value (~$0.01) - this happens with small trades"
+- "This was a multi-token swap consolidating 3 stablecoins into MON"
+- "The delegation expired 5 minutes after creation, limiting the window for potential misuse"
 
 ## Execution Examples
 
@@ -333,18 +406,11 @@ User: "swap 0.5 MON each to USDC and AUSD"
 **Analysis:** Two swaps, no dependency → USE BATCH QUOTE
 
 **Execution:**
-1. `get_swap_quote` with batch mode:
-   ```
-   get_swap_quote(quotes: [
-     { fromToken: "MON", toToken: "USDC", amount: "0.5" },
-     { fromToken: "MON", toToken: "AUSD", amount: "0.5" }
-   ])
-   ```
-2. Response includes `quoteIds: ["quote-xxx", "quote-yyy"]`
-3. Show combined quote summary, get confirmation via AskUserQuestion
-4. `check_session_key_balance(estimatedOperations: 2)`
-5. `fund_session_key` if needed → WAIT for completion
-6. `execute_swap(quoteIds: ["quote-xxx", "quote-yyy"])` (atomic batch)
+1. `get_swap_quote` with batch `quotes` array (both swaps)
+2. Show combined summary, confirm via AskUserQuestion
+3. `check_session_key_balance(estimatedOperations: 2)`
+4. `fund_session_key` if needed → WAIT
+5. `execute_swap` with all quoteIds (atomic batch)
 
 ### Example 2: Sequential Dependent Swaps
 User: "swap 1 MON to USDC, then swap that USDC to DAK"
@@ -352,13 +418,9 @@ User: "swap 1 MON to USDC, then swap that USDC to DAK"
 **Analysis:** Second swap depends on first output → SEQUENTIAL
 
 **Execution:**
-1. get_swap_quote MON→USDC
-2. Confirm first swap
-3. check_session_key_balance, fund if needed
-4. execute_swap → get actual USDC output
-5. get_swap_quote (using actual USDC amount)→DAK
-6. Confirm second swap
-7. execute_swap
+1. `get_swap_quote` MON→USDC, confirm, fund if needed, execute
+2. Use actual USDC output for second swap
+3. `get_swap_quote` USDC→DAK, confirm, execute
 
 ### Example 3: Mixed Operations
 User: "wrap 1 MON and stake 2 MON"
@@ -366,22 +428,18 @@ User: "wrap 1 MON and stake 2 MON"
 **Analysis:** Independent operations → PARALLEL
 
 **Execution:**
-1. get_balance (verify has 3+ MON)
-2. check_session_key_balance(estimatedOperations: 2)
-3. fund_session_key if needed → WAIT
-4. [wrap, stake] (parallel)
+1. `get_balance` (verify 3+ MON available)
+2. `check_session_key_balance(estimatedOperations: 2)`, fund if needed → WAIT
+3. Execute `wrap` and `stake` in parallel
 
-### Example 4: "All" Requires Balance First
+### Example 4: Relative Amount ("all", "half", "max")
 User: "swap all my CHOG to MON"
 
-**Analysis:** Need balance before swap → SEQUENTIAL (get_balance → swap)
+**Analysis:** Need balance first → SEQUENTIAL
 
 **Execution:**
-1. get_balance CHOG → get exact amount
-2. get_swap_quote with exact amount
-3. Confirm swap
-4. check_session_key_balance, fund if needed
-5. execute_swap
+1. `get_balance` CHOG → get exact amount
+2. `get_swap_quote` with that amount, confirm, fund if needed, execute
 
 ## Error Handling
 

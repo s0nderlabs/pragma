@@ -21,6 +21,8 @@ import { registerGetTokenInfo } from "./get-token-info.js";
 import { registerWithdrawSessionKey } from "./withdraw-session-key.js";
 import { registerGetBlock } from "./get-block.js";
 import { registerGetGasPrice } from "./get-gas-price.js";
+import { registerExplainTransaction } from "./explain-transaction.js";
+import { registerGetOnchainActivity } from "./get-onchain-activity.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -66,4 +68,8 @@ export function registerTools(server: McpServer): void {
   // Direct RPC tools (work in both BYOK and x402 modes)
   registerGetBlock(server);
   registerGetGasPrice(server);
+
+  // On-chain activity tools (x402 mode only - require API infrastructure)
+  registerExplainTransaction(server);
+  registerGetOnchainActivity(server);
 }

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-01-18
+
+### Added
+- **explain_transaction tool**: Decode and explain any transaction in detail. Returns transaction type, token movements, gas info, and for Pragma transactions: delegation details and security analysis. x402 mode only.
+- **get_onchain_activity tool**: Fetch on-chain transaction history for any address. Returns swaps, transfers, stakes, NFT trades, and more with token movements and USD values. x402 mode only.
+- Updated pragma-core skill with new activity tools
+
+### Note
+- Activity tools require x402 mode (uses indexed data and ABI resolution infrastructure)
+- Pricing: `explain_transaction` costs 0.002 USDC, `get_onchain_activity` costs 0.005 USDC per call
+
 ## [0.3.5] - 2026-01-18
 
 ### Added
