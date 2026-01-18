@@ -31,7 +31,7 @@ TEST_*.md
 dev/
 
 # Large data files (not for git)
-data/monad-contracts.json
+data/
 
 # MCP
 .playwright-mcp/
