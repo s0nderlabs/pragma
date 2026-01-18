@@ -1,7 +1,6 @@
 ---
 name: transaction-explainer
 description: Explains blockchain transactions in detail. Use proactively when user asks to explain a transaction, decode a tx hash, or understand what happened in a specific transaction.
-tools: mcp__pragma__explain_transaction
 model: sonnet
 ---
 

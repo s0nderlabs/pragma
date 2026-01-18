@@ -1,7 +1,6 @@
 ---
 name: activity-fetcher
 description: Fetches and formats on-chain transaction history. Use proactively when user asks about recent activity, transaction history, or what transactions they made.
-tools: mcp__pragma__get_onchain_activity
 model: haiku
 ---
 
