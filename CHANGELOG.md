@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-01-18
+
+### Added
+- **get_block tool**: Get block information by number, hash, or latest with timestamp, gas usage, and transaction count
+- **get_gas_price tool**: Get current gas price in wei, Gwei, and MON with estimated costs for common operations
+- Both tools work in BYOK and x402 modes (direct RPC, no API endpoint needed)
+
 ## [0.3.4] - 2026-01-16
 
 ### Added

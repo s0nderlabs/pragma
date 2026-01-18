@@ -20,6 +20,8 @@ allowed-tools:
   - mcp__pragma__withdraw_session_key
   - mcp__pragma__setup_wallet
   - mcp__pragma__set_mode
+  - mcp__pragma__get_block
+  - mcp__pragma__get_gas_price
   - AskUserQuestion
   - Read
 ---
@@ -171,6 +173,8 @@ Before executing multiple operations, calculate total gas needed:
 | Session | `withdraw_session_key` | Withdraw MON from session key |
 | Setup | `setup_wallet` | Initial creation |
 | Config | `set_mode` | Switch BYOK/x402 mode |
+| Chain | `get_block` | Block info by number/hash/latest |
+| Chain | `get_gas_price` | Current gas price with estimates |
 
 ### Batch Quote Support
 

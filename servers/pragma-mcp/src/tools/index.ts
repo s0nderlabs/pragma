@@ -19,6 +19,8 @@ import { registerSetMode } from "./set-mode.js";
 import { registerGetAccountInfo } from "./get-account-info.js";
 import { registerGetTokenInfo } from "./get-token-info.js";
 import { registerWithdrawSessionKey } from "./withdraw-session-key.js";
+import { registerGetBlock } from "./get-block.js";
+import { registerGetGasPrice } from "./get-gas-price.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -60,4 +62,8 @@ export function registerTools(server: McpServer): void {
 
   // Staking operations
   registerStake(server);
+
+  // Direct RPC tools (work in both BYOK and x402 modes)
+  registerGetBlock(server);
+  registerGetGasPrice(server);
 }
