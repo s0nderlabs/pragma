@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-01-19
+
+### Changed
+- Enhanced transaction-explainer agent with comprehensive output format
+  - Now shows Execution Target (the actual contract called through delegation)
+  - Shows Action Type (swap, stake, transfer, etc.)
+  - Includes full function signature
+  - Token movements now show from/to addresses
+  - Gas table shows used vs limit with chain-specific notes
+  - Security analysis shows all 6 checks with actual values
+  - Key events section for notable contract interactions
+  - Complete field reference for all available API data
+
+## [0.3.8] - 2026-01-18
+
+### Fixed
+- Fixed plugin agents not calling MCP tools (removed explicit tools field to inherit all tools)
+
 ## [0.3.7] - 2026-01-18
 
 ### Added
