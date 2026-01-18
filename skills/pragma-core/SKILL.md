@@ -26,6 +26,7 @@ allowed-tools:
   - mcp__pragma__get_onchain_activity
   - AskUserQuestion
   - Read
+  - Task
 ---
 
 # Pragma Core
@@ -177,8 +178,30 @@ Before executing multiple operations, calculate total gas needed:
 | Config | `set_mode` | Switch BYOK/x402 mode |
 | Chain | `get_block` | Block info by number/hash/latest |
 | Chain | `get_gas_price` | Current gas price with estimates |
-| Activity | `explain_transaction` | Decode and explain any tx (x402 only) |
-| Activity | `get_onchain_activity` | Transaction history for address (x402 only) |
+| Activity | `explain_transaction` | Decode and explain any tx (x402 only) - **USE SUBAGENT** |
+| Activity | `get_onchain_activity` | Transaction history for address (x402 only) - **USE SUBAGENT** |
+
+### Context-Optimized Operations (IMPORTANT)
+
+**Problem:** `explain_transaction` and `get_onchain_activity` return large responses (40K-56K tokens) that consume main conversation context rapidly.
+
+**Solution:** ALWAYS delegate these operations to specialized subagents:
+
+| Operation | Subagent | Model | Why |
+|-----------|----------|-------|-----|
+| Transaction history | `activity-fetcher` | Haiku | Fast, cheap, structured formatting |
+| Explain transaction | `transaction-explainer` | Sonnet | Complex reasoning for delegation analysis |
+
+**How it works:**
+1. Subagent runs in isolated context
+2. Large API response stays in subagent context
+3. Only formatted summary returns to main conversation
+4. ~95% context savings (56K → 2-3K tokens)
+
+**When user asks about activity or to explain a tx:**
+- DO NOT call MCP tools directly
+- Delegate to the appropriate subagent using Task tool
+- The subagent will fetch, format, and return the summary
 
 ### Batch Quote Support
 
@@ -333,70 +356,12 @@ Received: 0.999 TOKEN_B
 
 ## Human-Readable Explanations
 
-When using `explain_transaction` or `get_onchain_activity`, ALWAYS add human-readable context after the technical details.
+**Note:** For `explain_transaction` and `get_onchain_activity`, use the dedicated subagents (`transaction-explainer` and `activity-fetcher`) which handle formatting automatically. See "Context-Optimized Operations" section above.
 
-### Philosophy
-- Technical data is for verification and debugging
-- Human explanation is for understanding what happened and why it matters
-- Users should walk away knowing: what happened, why it was secure, and the net result
-
-### Structure for Transaction Explanations
-
-After presenting technical tables, add:
-
-```
----
-
-## In Plain English
-
-### What Happened
-[One paragraph explaining the transaction simply]
-
-### Security (Pragma txs only)
-[What the caveats/enforcers protected against]
-
-### Net Result
-[What user gained, spent, and any observations]
-```
-
-### Explanation Templates by Transaction Type
-
-**Swap:**
-> You traded [input tokens] for [output token] through [protocol]. Your session key executed this swap on your behalf, with the delegation expiring after [time window].
-
-**Stake:**
-> You deposited [amount] MON into aPriori's liquid staking vault. You received [amount] aprMON in return - this is a receipt token that represents your staked position and accrues rewards over time.
-
-**Transfer:**
-> You sent [amount] [token] to [recipient address]. This was executed through your smart account via delegation.
-
-**Wrap/Unwrap:**
-> You converted [amount] MON to WMON (or vice versa). WMON is the ERC20 wrapped version of native MON, required for many DeFi protocols.
-
-### Caveat/Enforcer Explanations
-
-Always explain what each enforcer does in plain terms:
-
-| Enforcer | Plain English |
-|----------|---------------|
-| TimestampEnforcer | "This delegation was only valid for X minutes" |
-| NonceEnforcer | "Prevents replay attacks - this exact delegation can't be reused" |
-| LimitedCallsEnforcer | "Your session key could only use this permission X times" |
-| AllowedTargetsEnforcer | "Only specific contracts (like the DEX) could be called" |
-| AllowedMethodsEnforcer | "Only specific functions (like swap) were allowed" |
-| NativeTokenTransferAmountEnforcer | "Maximum MON that could be transferred was capped at X" |
-
-### Gas Context (Monad-specific)
-
-Always mention:
-> On Monad, you're charged for the gas *limit*, not gas *used*. This means the actual cost is based on the maximum gas allocated, even if less was consumed.
-
-### When to Highlight Concerns
-
-Flag these observations naturally:
-- "Gas cost (0.28 MON) exceeded the swap value (~$0.01) - this happens with small trades"
-- "This was a multi-token swap consolidating 3 stablecoins into MON"
-- "The delegation expired 5 minutes after creation, limiting the window for potential misuse"
+The subagents will provide:
+- Technical details (tables, token movements, gas info)
+- Human explanation (what happened, security analysis, net result)
+- Caveat/enforcer explanations for Pragma transactions
 
 ## Execution Examples
 
