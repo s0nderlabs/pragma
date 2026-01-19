@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-01-19
+
+### Changed
+- Improved subagent routing rules in pragma-core skill
+  - Clear separation: activity-fetcher for history, transaction-explainer for tx analysis
+  - Added "explain my last tx" two-step workflow
+  - Subagent output now passed through without re-summarizing
+
 ## [0.3.9] - 2026-01-19
 
 ### Changed

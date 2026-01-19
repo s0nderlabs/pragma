@@ -185,23 +185,38 @@ Before executing multiple operations, calculate total gas needed:
 
 **Problem:** `explain_transaction` and `get_onchain_activity` return large responses (40K-56K tokens) that consume main conversation context rapidly.
 
-**Solution:** ALWAYS delegate these operations to specialized subagents:
+**Solution:** ALWAYS delegate these operations to specialized subagents.
 
-| Operation | Subagent | Model | Why |
-|-----------|----------|-------|-----|
-| Transaction history | `activity-fetcher` | Haiku | Fast, cheap, structured formatting |
-| Explain transaction | `transaction-explainer` | Sonnet | Complex reasoning for delegation analysis |
+#### Agent Routing Rules
+
+| User Intent | Agent to Use | Example Queries |
+|-------------|--------------|-----------------|
+| Transaction history, activity | `activity-fetcher` | "show my activity", "recent txs", "what did I do today" |
+| Explain a specific tx | `transaction-explainer` | "explain tx 0x123...", "what happened in this tx" |
+
+#### CRITICAL RULES
+
+1. **Never mix responsibilities:**
+   - `activity-fetcher` (Haiku) → ONLY for listing/formatting transaction history
+   - `transaction-explainer` (Sonnet) → ONLY for explaining specific transactions
+
+2. **"Explain my last tx" workflow:**
+   - First: Call `activity-fetcher` to get transaction history
+   - Extract the latest tx hash from the response
+   - Then: Call `transaction-explainer` with that specific tx hash
+   - **DO NOT ask activity-fetcher to explain transactions**
+
+3. **Pass through subagent output:**
+   - Subagent output is already formatted for the user
+   - **DO NOT re-summarize or condense the output**
+   - Present the subagent's response directly to the user
+   - Only add brief context if needed (e.g., "Here's your transaction explanation:")
 
 **How it works:**
 1. Subagent runs in isolated context
 2. Large API response stays in subagent context
-3. Only formatted summary returns to main conversation
+3. Formatted output returns to main conversation
 4. ~95% context savings (56K → 2-3K tokens)
-
-**When user asks about activity or to explain a tx:**
-- DO NOT call MCP tools directly
-- Delegate to the appropriate subagent using Task tool
-- The subagent will fetch, format, and return the summary
 
 ### Batch Quote Support
 
@@ -362,6 +377,8 @@ The subagents will provide:
 - Technical details (tables, token movements, gas info)
 - Human explanation (what happened, security analysis, net result)
 - Caveat/enforcer explanations for Pragma transactions
+
+**IMPORTANT: Do not re-summarize subagent output.** The subagents return comprehensive, user-ready formatted responses. Present their output directly to the user without condensing or re-formatting. The detailed tables and explanations are intentional.
 
 ## Execution Examples
 
