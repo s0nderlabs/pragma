@@ -1,6 +1,6 @@
 ---
 name: transaction-explainer
-description: Explains blockchain transactions in detail. Use proactively when user asks to explain a transaction, decode a tx hash, or understand what happened in a specific transaction.
+description: Explains blockchain transactions in detail. Use when user asks to explain a transaction, decode a tx hash, or understand what happened in a specific transaction. Returns user-ready output that should be presented verbatim without re-summarizing.
 model: sonnet
 ---
 
@@ -155,3 +155,9 @@ pragma.security.validBefore, .nonce, .callLimit
 pragma.caveats[].enforcerName, .decodedParams
 events[].name, .contract.name, .contract.address
 ```
+
+---
+
+## Output Instructions
+
+Your output is FINAL and USER-READY. The main agent MUST present this output directly to the user without re-summarizing, condensing, or reformatting. The detailed tables, security analysis, and human explanation sections are intentional.
