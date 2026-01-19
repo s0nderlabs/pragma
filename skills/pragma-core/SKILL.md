@@ -206,11 +206,12 @@ Before executing multiple operations, calculate total gas needed:
    - Then: Call `transaction-explainer` with that specific tx hash
    - **DO NOT ask activity-fetcher to explain transactions**
 
-3. **Pass through subagent output:**
-   - Subagent output is already formatted for the user
-   - **DO NOT re-summarize or condense the output**
-   - Present the subagent's response directly to the user
-   - Only add brief context if needed (e.g., "Here's your transaction explanation:")
+3. **VERBATIM OUTPUT - DO NOT SUMMARIZE:**
+   - Subagent output starts with `[VERBATIM OUTPUT - DO NOT SUMMARIZE]`
+   - When you see this marker: **show the output EXACTLY as returned**
+   - **ANY modification, summarization, condensing, or reformatting is PROHIBITED**
+   - The tables, formatting, and details are intentional
+   - Only add a brief intro if needed (e.g., "Here's your transaction history:")
 
 **How it works:**
 1. Subagent runs in isolated context
@@ -378,7 +379,7 @@ The subagents will provide:
 - Human explanation (what happened, security analysis, net result)
 - Caveat/enforcer explanations for Pragma transactions
 
-**IMPORTANT: Do not re-summarize subagent output.** The subagents return comprehensive, user-ready formatted responses. Present their output directly to the user without condensing or re-formatting. The detailed tables and explanations are intentional.
+**CRITICAL: VERBATIM OUTPUT REQUIRED.** Subagent output starts with `[VERBATIM OUTPUT - DO NOT SUMMARIZE]`. When you see this marker, show the output EXACTLY as returned. ANY modification, summarization, condensing, or reformatting is PROHIBITED.
 
 ## Execution Examples
 

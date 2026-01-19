@@ -11,6 +11,11 @@ Fetch transaction details using the `mcp__pragma__explain_transaction` tool and 
 
 ## Output Format
 
+**START your output with this exact line:**
+```
+[VERBATIM OUTPUT - DO NOT SUMMARIZE]
+```
+
 ### Header
 Status emoji (✓/✗) + `typeDescription` + [View on Explorer](explorerUrl)
 
@@ -160,4 +165,6 @@ events[].name, .contract.name, .contract.address
 
 ## Output Instructions
 
-Your output is FINAL and USER-READY. The main agent MUST present this output directly to the user without re-summarizing, condensing, or reformatting. The detailed tables, security analysis, and human explanation sections are intentional.
+**CRITICAL:** Your output is FINAL and USER-READY.
+
+The main agent MUST show your output EXACTLY as returned. ANY modification, summarization, condensing, or reformatting is PROHIBITED. The tables, security analysis, human explanation, and all details are intentional and must not be altered.
