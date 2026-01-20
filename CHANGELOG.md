@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.15] - 2026-01-20
+
+### Added
+- **contract-explainer subagent**: Analyzes smart contracts with comprehensive output
+  - Uses Sonnet model for deep technical analysis
+  - Returns proxy status, detected interfaces, key functions, security notes
+  - Provides in-depth human explanation: purpose, how it works, who uses it, key considerations
+  - Includes integration code examples
+  - ~95% context savings vs direct tool call (110KB → 5KB)
+- Updated pragma-core skill with contract-explainer routing rules
+  - Added routing for "explain contract 0x..." queries
+  - Added two-step workflow for "explain the contract I used"
+
+## [0.3.14] - 2026-01-20
+
+### Fixed
+- Fixed `explain_contract` tool returning "Unknown Contract" for all contracts
+  - Root cause: ApiResponse interface mismatch - API returns data nested in `contract` object but tool was reading from top level
+  - Now correctly reads `apiResponse.contract.name` instead of `apiResponse.name`
+  - Tool now returns proper contract name, ABI, source code, and verification status
+
+## [0.3.13] - 2026-01-20
+
+### Added
+- New `explain_contract` MCP tool for smart contract analysis
+  - Analyzes contracts and returns ABI, source code, proxy detection, and interface detection
+  - x402 mode only (uses pragma-api-x402 contract endpoint)
+  - Presentation guide in tool description for Claude formatting
+
 ## [0.3.12] - 2026-01-19
 
 ### Changed

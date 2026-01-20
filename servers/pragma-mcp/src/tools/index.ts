@@ -23,6 +23,7 @@ import { registerGetBlock } from "./get-block.js";
 import { registerGetGasPrice } from "./get-gas-price.js";
 import { registerExplainTransaction } from "./explain-transaction.js";
 import { registerGetOnchainActivity } from "./get-onchain-activity.js";
+import { registerExplainContract } from "./explain-contract.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -72,4 +73,5 @@ export function registerTools(server: McpServer): void {
   // On-chain activity tools (x402 mode only - require API infrastructure)
   registerExplainTransaction(server);
   registerGetOnchainActivity(server);
+  registerExplainContract(server);
 }

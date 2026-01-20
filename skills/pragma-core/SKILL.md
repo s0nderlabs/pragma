@@ -24,6 +24,7 @@ allowed-tools:
   - mcp__pragma__get_gas_price
   - mcp__pragma__explain_transaction
   - mcp__pragma__get_onchain_activity
+  - mcp__pragma__explain_contract
   - AskUserQuestion
   - Read
   - Task
@@ -180,10 +181,11 @@ Before executing multiple operations, calculate total gas needed:
 | Chain | `get_gas_price` | Current gas price with estimates |
 | Activity | `explain_transaction` | Decode and explain any tx (x402 only) - **USE SUBAGENT** |
 | Activity | `get_onchain_activity` | Transaction history for address (x402 only) - **USE SUBAGENT** |
+| Analysis | `explain_contract` | Analyze smart contract details (x402 only) - **USE SUBAGENT** |
 
 ### Context-Optimized Operations (IMPORTANT)
 
-**Problem:** `explain_transaction` and `get_onchain_activity` return large responses (40K-56K tokens) that consume main conversation context rapidly.
+**Problem:** `explain_transaction`, `get_onchain_activity`, and `explain_contract` return large responses (40K-110KB) that consume main conversation context rapidly.
 
 **Solution:** ALWAYS delegate these operations to specialized subagents.
 
@@ -193,12 +195,14 @@ Before executing multiple operations, calculate total gas needed:
 |-------------|--------------|-----------------|
 | Transaction history, activity | `activity-fetcher` | "show my activity", "recent txs", "what did I do today" |
 | Explain a specific tx | `transaction-explainer` | "explain tx 0x123...", "what happened in this tx" |
+| Explain a contract | `contract-explainer` | "explain contract 0x...", "what does this contract do?", "analyze this contract" |
 
 #### CRITICAL RULES
 
 1. **Never mix responsibilities:**
    - `activity-fetcher` (Haiku) → ONLY for listing/formatting transaction history
    - `transaction-explainer` (Sonnet) → ONLY for explaining specific transactions
+   - `contract-explainer` (Sonnet) → ONLY for analyzing smart contracts
 
 2. **"Explain my last tx" workflow:**
    - First: Call `activity-fetcher` to get transaction history
@@ -206,12 +210,18 @@ Before executing multiple operations, calculate total gas needed:
    - Then: Call `transaction-explainer` with that specific tx hash
    - **DO NOT ask activity-fetcher to explain transactions**
 
-3. **VERBATIM OUTPUT - DO NOT SUMMARIZE:**
+3. **"Explain the contract I used" workflow:**
+   - First: Call `activity-fetcher` to get transaction history
+   - Extract the contract address from the transaction (look at Details column)
+   - Then: Call `contract-explainer` with that contract address
+   - **DO NOT ask activity-fetcher to explain contracts**
+
+4. **VERBATIM OUTPUT - DO NOT SUMMARIZE:**
    - Subagent output starts with `[VERBATIM OUTPUT - DO NOT SUMMARIZE]`
    - When you see this marker: **show the output EXACTLY as returned**
    - **ANY modification, summarization, condensing, or reformatting is PROHIBITED**
    - The tables, formatting, and details are intentional
-   - Only add a brief intro if needed (e.g., "Here's your transaction history:")
+   - Only add a brief intro if needed (e.g., "Here's the contract analysis:")
 
 **How it works:**
 1. Subagent runs in isolated context
