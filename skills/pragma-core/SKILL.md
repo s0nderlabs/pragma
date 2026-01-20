@@ -40,6 +40,23 @@ All operations use MCP tools exclusively. MCP tools handle private keys internal
 
 **CRITICAL: NEVER use Bash to call `pragma-signer` binary.** Direct CLI access exposes private keys in terminal output. The `allowed-tools` restriction enforces this automatically.
 
+## VERBATIM OUTPUT RULE (MANDATORY)
+
+**When subagent output starts with `[VERBATIM OUTPUT - DO NOT SUMMARIZE]`:**
+
+1. **STOP** - Do not process, summarize, condense, or reformat
+2. **COPY** - Present the ENTIRE output exactly as returned
+3. **NO CHANGES** - Tables, formatting, whitespace, details must be preserved
+4. **ONLY ALLOWED** - Add a brief 1-line intro like "Here's the analysis:"
+
+This applies to: `activity-fetcher`, `transaction-explainer`, `contract-explainer`
+
+**WHY:** Subagents format output specifically for the user. Re-summarizing:
+- Loses important details
+- Breaks table formatting
+- Wastes the work the subagent did
+- Confuses users who see different info than what was generated
+
 ## Initialization
 
 When skill activates or user appears new:
@@ -216,12 +233,7 @@ Before executing multiple operations, calculate total gas needed:
    - Then: Call `contract-explainer` with that contract address
    - **DO NOT ask activity-fetcher to explain contracts**
 
-4. **VERBATIM OUTPUT - DO NOT SUMMARIZE:**
-   - Subagent output starts with `[VERBATIM OUTPUT - DO NOT SUMMARIZE]`
-   - When you see this marker: **show the output EXACTLY as returned**
-   - **ANY modification, summarization, condensing, or reformatting is PROHIBITED**
-   - The tables, formatting, and details are intentional
-   - Only add a brief intro if needed (e.g., "Here's the contract analysis:")
+4. **VERBATIM OUTPUT:** See top-level "VERBATIM OUTPUT RULE" section above
 
 **How it works:**
 1. Subagent runs in isolated context
@@ -389,7 +401,7 @@ The subagents will provide:
 - Human explanation (what happened, security analysis, net result)
 - Caveat/enforcer explanations for Pragma transactions
 
-**CRITICAL: VERBATIM OUTPUT REQUIRED.** Subagent output starts with `[VERBATIM OUTPUT - DO NOT SUMMARIZE]`. When you see this marker, show the output EXACTLY as returned. ANY modification, summarization, condensing, or reformatting is PROHIBITED.
+**CRITICAL:** Follow the "VERBATIM OUTPUT RULE" at the top of this file.
 
 ## Execution Examples
 

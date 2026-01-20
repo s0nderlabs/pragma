@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.16] - 2026-01-20
+
+### Changed
+- Improved VERBATIM output handling for subagents
+  - Added prominent top-level rule in pragma-core skill
+  - Ensures subagent output is displayed exactly as returned
+- Aligned contract-explainer agent structure with other agents
+  - Added role intro, Task section, Field Reference
+
 ## [0.3.15] - 2026-01-20
 
 ### Added

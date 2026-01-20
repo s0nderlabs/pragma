@@ -12,7 +12,7 @@
       "name": "pragma",
       "source": "./",
       "description": "Vibetrading for Claude Code",
-      "version": "0.3.15",
+      "version": "0.3.16",
       "author": {
         "name": "s0nderlabs",
         "email": "s0nderlabs.hq@gmail.com"
