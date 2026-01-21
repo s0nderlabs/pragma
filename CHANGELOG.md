@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-22
+
+### Added
+- **Atomic Token Creation** - `nadfun_create` tool for deploying new tokens on nad.fun.
+  - Supports **Atomic Initial Buy** (creation + buy in one transaction).
+  - Multi-step asset handling: automatic image and metadata upload to nad.fun storage.
+  - Native vanity address mining (all tokens end in `7777`).
+  - Optional social links (Twitter, Telegram, Website) and description.
+  - Real-time quoting with slippage protection for the initial purchase.
+- **Interactive Flow** - New skill-based flow for guided token creation.
+
+## [0.4.2] - 2026-01-21
+
+### Added
+- **Token Creation** - `nadfun_create` tool for deploying new tokens on nad.fun bonding curve
+  - Uploads image and metadata to nad.fun storage
+  - Mines vanity address (tokens end in 7777)
+  - Deploys token via BondingCurveRouter contract
+  - **Atomic Initial Buy** - Supports buying tokens atomically during creation transaction
+  - Supports optional socials: Twitter, Telegram, website
+  - Full validation: image size/type, field lengths, URL formats
+  - NSFW detection via nad.fun API
+  - Works in both BYOK and x402 modes
+  - **Note:** Requires 10 MON deploy fee + initial buy MON in Smart Account balance.
+
 ## [0.4.1] - 2026-01-21
 
 ### Added

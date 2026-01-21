@@ -876,6 +876,100 @@ export function createNadFunSellDelegation(
   };
 }
 
+/**
+ * Context needed to create a nad.fun token creation delegation
+ * create() is payable - requires deploy fee (10 MON on mainnet)
+ */
+export interface NadFunCreateDelegationContext {
+  router: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+  value: bigint; // Deploy fee (10 MON on mainnet)
+}
+
+/**
+ * Create a nad.fun token creation delegation using DTK's createDelegation with scope
+ *
+ * create() is payable - requires deploy fee (10 MON on mainnet) and optional initial buy.
+ * The deploy fee and initial buy are transferred to nad.fun during token creation.
+ *
+ * Security properties:
+ * - 5 minute expiry (TimestampEnforcer)
+ * - Single use (LimitedCallsEnforcer limit=1)
+ * - Nonce-based revocation (NonceEnforcer)
+ * - Target enforcement (can only call the router)
+ * - Value enforcement (can only send up to deploy fee + initial buy)
+ * - Unique salt per delegation (prevents hash collisions)
+ */
+export function createNadFunCreateDelegation(
+  context: NadFunCreateDelegationContext
+): DelegationResult {
+  const {
+    router,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+    value,
+  } = context;
+
+  // Expiry: 5 minutes from now
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+
+  // Extract selector from calldata
+  const selector = calldata.slice(0, 10) as Hex;
+
+  // Build scope - create is payable with deploy fee + optional initial buy
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(router)],
+    selectors: [selector],
+    valueLte: { maxValue: value }, // Deploy fee + initial buy
+  };
+
+  // Build caveats (timestamp, nonce, limitedCalls: 1)
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+
+  // Get DTK environment
+  const environment = getDTKEnvironment();
+
+  // Generate unique salt to prevent hash collisions
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  // Create delegation using DTK
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  // Build EIP-712 typed data for signing
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
 // ============================================================================
 // Legacy Exports (for compatibility)
 // ============================================================================

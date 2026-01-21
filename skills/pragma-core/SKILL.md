@@ -32,6 +32,7 @@ allowed-tools:
   - mcp__pragma__nadfun_discover
   - mcp__pragma__nadfun_token_info
   - mcp__pragma__nadfun_positions
+  - mcp__pragma__nadfun_create
   - AskUserQuestion
   - Read
   - Task
@@ -213,6 +214,7 @@ Before executing multiple operations, calculate total gas needed:
 | nad.fun | `nadfun_discover` | Find trending/new tokens |
 | nad.fun | `nadfun_token_info` | Detailed token info |
 | nad.fun | `nadfun_positions` | User's holdings with PnL |
+| nad.fun | `nadfun_create` | Create new token on bonding curve |
 
 ### Context-Optimized Operations (IMPORTANT)
 
@@ -408,6 +410,119 @@ For multiple independent swaps (e.g., "swap 1 MON to USDC and 1 MON to AUSD"):
 
 #### Token Research
 1. `nadfun_token_info` - Full metadata and market data
+
+#### Token Creation Flow (Interactive)
+
+When user wants to create a token, gather all options interactively using AskUserQuestion.
+
+**Step 1: Basic Info**
+Use `AskUserQuestion` with 3 questions:
+```
+Question 1:
+  header: "Token Name"
+  question: "What is your token's full name? (1-32 chars, e.g., 'Moon Cat')"
+  options: [
+    { label: "Enter name", description: "Type your token name" }
+  ]
+  (User selects "Other" to type custom name)
+
+Question 2:
+  header: "Symbol"
+  question: "What is your token's ticker symbol? (1-10 alphanumeric, e.g., 'MCAT')"
+  options: [
+    { label: "Enter symbol", description: "Type your ticker symbol" }
+  ]
+
+Question 3:
+  header: "Image"
+  question: "What is the path to your token's image? (PNG/JPEG/WebP, max 5MB)"
+  options: [
+    { label: "Enter path", description: "Local file path like ./logo.png or /path/to/image.jpg" }
+  ]
+```
+
+**Step 2: Optional Metadata**
+Use `AskUserQuestion` with 2 questions:
+```
+Question 1:
+  header: "Description"
+  question: "Add a description for your token? (max 500 chars)"
+  options: [
+    { label: "No description", description: "Skip description" },
+    { label: "Add description", description: "Enter a description for your token page" }
+  ]
+
+Question 2:
+  header: "Socials"
+  question: "Add social links?"
+  multiSelect: true
+  options: [
+    { label: "Twitter/X", description: "Add X.com link" },
+    { label: "Telegram", description: "Add t.me link" },
+    { label: "Website", description: "Add https:// website" },
+    { label: "No socials", description: "Skip social links" }
+  ]
+```
+
+If user selected socials, follow up with another `AskUserQuestion` for each URL.
+
+**Step 3: Initial Purchase**
+Use `AskUserQuestion`:
+```
+Question 1:
+  header: "Initial Buy"
+  question: "Buy tokens right after creation? (You'll be the first holder)"
+  options: [
+    { label: "No initial buy", description: "Just create the token" },
+    { label: "Buy 0.1 MON worth", description: "Small initial position" },
+    { label: "Buy 1 MON worth", description: "Medium initial position" },
+    { label: "Custom amount", description: "Enter your own MON amount" }
+  ]
+```
+
+**Step 4: Pre-flight Checks**
+1. Verify session key has ~10.5 MON (10 MON deploy fee + gas)
+2. If insufficient: Tell user to `transfer 10.5 MON to <session_key_address>`
+3. `check_session_key_balance` - verify funding
+
+**Step 5: Confirmation**
+Use `AskUserQuestion`:
+```
+header: "Create Token"
+question: "Create [NAME] ([SYMBOL]) on nad.fun?"
+options: ["Confirm creation (Touch ID)", "Cancel"]
+description: |
+  Image: [path]
+  Description: [description or "None"]
+  Twitter: [url or "None"]
+  Telegram: [url or "None"]
+  Website: [url or "None"]
+  Initial buy: [amount or "None"]
+
+  ⚠️ Requires 10 MON deploy fee + gas
+```
+
+**Step 6: Execute**
+1. `nadfun_create` with all gathered parameters
+2. Report result with token address and explorer link
+3. If initialBuyMon was specified, prompt to run `nadfun_buy`
+
+**Token Creation Requirements:**
+| Field | Constraint |
+|-------|------------|
+| Image | PNG, JPEG, or WebP, max 5MB (local file path) |
+| Name | 1-32 characters |
+| Symbol | 1-10 alphanumeric characters |
+| Description | max 500 characters (optional) |
+| Twitter | Must contain "x.com" (optional) |
+| Telegram | Must contain "t.me" (optional) |
+| Website | Must start with "https://" (optional) |
+| Deploy Fee | 10 MON (paid by session key) |
+
+**Notes:**
+- Token deploys to vanity address ending in "7777"
+- Image checked for NSFW content by nad.fun API
+- Session key must have 10+ MON for deploy fee (transfer from smart account first)
 
 #### Graduation Warnings
 - If progress >= 90%, warn user: "Token is near graduation. Large trades may trigger graduation."

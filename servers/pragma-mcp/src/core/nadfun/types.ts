@@ -215,3 +215,91 @@ export interface NadFunExecuteResponse {
   };
   error?: string;
 }
+
+// ============================================================================
+// Token Creation Types
+// ============================================================================
+
+/**
+ * Input parameters for creating a new token on nad.fun
+ */
+export interface TokenCreationInput {
+  name: string;
+  symbol: string;
+  imagePath: string;
+  description?: string;
+  twitter?: string;
+  telegram?: string;
+  website?: string;
+  initialBuyMon?: string;
+  slippageBps?: number;
+}
+
+/**
+ * Cached creation quote with all prepared data
+ */
+export interface CreateQuote {
+  quoteId: string;
+  name: string;
+  symbol: string;
+  imageUri: string;
+  metadataUri: string;
+  salt: Hex;
+  predictedTokenAddress: Address;
+  initialBuyMon?: string;
+  expiresAt: number; // Unix timestamp (ms)
+  chainId: number;
+  // Internal execution data
+  _calldata: Hex;
+}
+
+/**
+ * Result of token creation execution
+ */
+export interface CreateResult {
+  success: boolean;
+  txHash?: Hex;
+  explorerUrl?: string;
+  tokenAddress?: Address;
+  tokenName?: string;
+  tokenSymbol?: string;
+  message?: string;
+  error?: string;
+  initialBuyMon?: string; // MON spent on initial buy (if atomic)
+}
+
+/**
+ * Context for creating a nad.fun token creation delegation
+ * create() is payable - requires deploy fee (10 MON on mainnet)
+ */
+export interface NadFunCreateDelegationContext {
+  router: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+  value: bigint; // Deploy fee (10 MON on mainnet)
+}
+
+/**
+ * Response from nadfun_create tool
+ */
+export interface NadFunCreateResponse {
+  success: boolean;
+  message: string;
+  token?: {
+    address: string;
+    name: string;
+    symbol: string;
+    explorerUrl: string; // Link to token on explorer
+  };
+  transaction?: {
+    hash: string;
+    explorerUrl: string;
+  };
+  initialBuy?: {
+    monSpent: string;
+  };
+  error?: string;
+}

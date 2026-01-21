@@ -251,3 +251,31 @@ export async function isTokenGraduated(
 export function isNearGraduation(progress: number): boolean {
   return progress >= (GRADUATION_PROGRESS * 0.9);
 }
+
+/**
+ * Get quote for initial buy during token creation
+ *
+ * @param amountIn - MON amount to buy with (in wei)
+ * @param chainId - Chain ID (default: 143)
+ * @returns Expected token output amount
+ */
+export async function getInitialBuyAmountOut(
+  amountIn: bigint,
+  chainId = 143
+): Promise<bigint> {
+  const client = await createNadFunClient();
+  const contracts = getNadFunContracts(chainId);
+
+  const lens = getContract({
+    address: contracts.lens,
+    abi: LENS_ABI,
+    client,
+  });
+
+  const amountOut = await withRetryOrThrow(
+    async () => lens.read.getInitialBuyAmountOut([amountIn]),
+    { operationName: "nadfun-initial-buy-quote" }
+  );
+
+  return amountOut;
+}

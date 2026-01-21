@@ -7,8 +7,10 @@ export {
   NADFUN_CONTRACTS,
   LENS_ABI,
   ROUTER_ABI,
+  ROUTER_CREATE_ABI,
   NADFUN_BUY_SELECTOR,
   NADFUN_SELL_SELECTOR,
+  NADFUN_CREATE_SELECTOR,
   NADFUN_QUOTE_EXPIRY_MS,
   DEFAULT_DEADLINE_SECONDS,
   DEFAULT_SLIPPAGE_BPS,
@@ -32,6 +34,12 @@ export type {
   NadFunStatusResponse,
   NadFunQuoteResponse,
   NadFunExecuteResponse,
+  // Token creation types
+  TokenCreationInput,
+  CreateQuote,
+  CreateResult,
+  NadFunCreateDelegationContext,
+  NadFunCreateResponse,
 } from "./types.js";
 
 // Types (HTTP API types)
@@ -69,6 +77,10 @@ export {
   NADFUN_API_BASE,
   MONAD_EXPLORER_URL,
   fetchNadFunApi,
+  postNadFunApi,
+  uploadTokenImage,
+  uploadTokenMetadata,
+  mineTokenSalt,
   formatPriceChange,
   formatPrice,
   formatAmount,
@@ -91,3 +103,12 @@ export {
   executeNadFunBuy,
   executeNadFunSell,
 } from "./execution.js";
+
+// Token Creation
+export {
+  prepareTokenCreation,
+  executeTokenCreation,
+  getCachedCreateQuote,
+  isCreateQuoteExpired,
+  deleteCreateQuote,
+} from "./create.js";

@@ -31,6 +31,7 @@ import { registerNadFunSell } from "./nadfun-sell.js";
 import { registerNadFunDiscover } from "./nadfun-discover.js";
 import { registerNadFunTokenInfo } from "./nadfun-token-info.js";
 import { registerNadFunPositions } from "./nadfun-positions.js";
+import { registerNadFunCreate } from "./nadfun-create.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -92,4 +93,7 @@ export function registerTools(server: McpServer): void {
   registerNadFunDiscover(server);
   registerNadFunTokenInfo(server);
   registerNadFunPositions(server);
+
+  // nad.fun token creation (HTTP API + on-chain - works in both BYOK and x402 modes)
+  registerNadFunCreate(server);
 }

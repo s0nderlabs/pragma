@@ -28,8 +28,16 @@ export const NADFUN_CONTRACTS = {
  * - isGraduated: Check if token has graduated to DEX
  * - isLocked: Check if token is locked during graduation
  * - availableBuyTokens: Get remaining tokens + required MON to graduate
+ * - getInitialBuyAmountOut: Get quote for initial buy during creation
  */
 export const LENS_ABI = [
+  {
+    name: "getInitialBuyAmountOut",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "amountIn", type: "uint256" }],
+    outputs: [{ name: "amountOut", type: "uint256" }],
+  },
   {
     name: "getAmountOut",
     type: "function",
@@ -147,9 +155,45 @@ export const NADFUN_BUY_SELECTOR = "0x0f5b0d09" as Hex;
 /** sell(SellParams) function selector */
 export const NADFUN_SELL_SELECTOR = "0xd4e19b4b" as Hex;
 
+/**
+ * BondingCurveRouter ABI for token creation
+ *
+ * create() - Payable function to deploy new token on bonding curve
+ * Requires deploy fee (1 MON testnet, 10 MON mainnet)
+ * Uses salt for deterministic vanity address (ending in 7777)
+ */
+export const ROUTER_CREATE_ABI = [
+  {
+    name: "create",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "params",
+        type: "tuple",
+        components: [
+          { name: "name", type: "string" },
+          { name: "symbol", type: "string" },
+          { name: "tokenURI", type: "string" },
+          { name: "amountOut", type: "uint256" },
+          { name: "salt", type: "bytes32" },
+          { name: "actionId", type: "uint8" },
+        ],
+      },
+    ],
+    outputs: [{ name: "token", type: "address" }],
+  },
+] as const;
+
+/** create(TokenCreationParams) function selector */
+export const NADFUN_CREATE_SELECTOR = "0x8b159e6e" as Hex;
+
 // ============================================================================
 // Configuration
 // ============================================================================
+
+/** Token creation deploy fee (10 MON on mainnet) */
+export const NADFUN_DEPLOY_FEE = 10000000000000000000n; // 10e18 = 10 MON
 
 /** Quote expiry in milliseconds (5 minutes) */
 export const NADFUN_QUOTE_EXPIRY_MS = 5 * 60 * 1000;
