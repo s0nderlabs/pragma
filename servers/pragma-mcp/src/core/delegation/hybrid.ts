@@ -690,6 +690,193 @@ export function createUnwrapDelegation(
 }
 
 // ============================================================================
+// nad.fun Delegation Builders
+// ============================================================================
+
+/**
+ * Context needed to create a nad.fun buy delegation
+ * buy() is payable - sends MON as msg.value
+ */
+export interface NadFunBuyDelegationContext {
+  router: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+  value: bigint; // MON to send as msg.value
+}
+
+/**
+ * Context needed to create a nad.fun sell delegation
+ * sell() is nonpayable - requires token approval first
+ */
+export interface NadFunSellDelegationContext {
+  router: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+}
+
+/**
+ * Create a nad.fun buy delegation using DTK's createDelegation with scope
+ *
+ * buy() is payable - MON is sent as msg.value to the bonding curve router.
+ *
+ * Security properties:
+ * - 5 minute expiry (TimestampEnforcer)
+ * - Single use (LimitedCallsEnforcer limit=1)
+ * - Nonce-based revocation (NonceEnforcer)
+ * - Target enforcement (can only call the router)
+ * - Value enforcement (valueLte limits MON sent)
+ * - Unique salt per delegation (prevents hash collisions)
+ */
+export function createNadFunBuyDelegation(
+  context: NadFunBuyDelegationContext
+): DelegationResult {
+  const {
+    router,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+    value,
+  } = context;
+
+  // Expiry: 5 minutes from now
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+
+  // Extract selector from calldata
+  const selector = calldata.slice(0, 10) as Hex;
+
+  // Build scope with value enforcement for MON sent
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(router)],
+    selectors: [selector],
+    valueLte: { maxValue: value }, // Enforce max MON sent
+  };
+
+  // Build caveats (timestamp, nonce, limitedCalls: 1)
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+
+  // Get DTK environment
+  const environment = getDTKEnvironment();
+
+  // Generate unique salt to prevent hash collisions
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  // Create delegation using DTK
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  // Build EIP-712 typed data for signing
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a nad.fun sell delegation using DTK's createDelegation with scope
+ *
+ * sell() is nonpayable - tokens are transferred from the user's account.
+ * Requires prior token approval to the router.
+ *
+ * Security properties:
+ * - 5 minute expiry (TimestampEnforcer)
+ * - Single use (LimitedCallsEnforcer limit=1)
+ * - Nonce-based revocation (NonceEnforcer)
+ * - Target enforcement (can only call the router)
+ * - Unique salt per delegation (prevents hash collisions)
+ */
+export function createNadFunSellDelegation(
+  context: NadFunSellDelegationContext
+): DelegationResult {
+  const {
+    router,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+  } = context;
+
+  // Expiry: 5 minutes from now
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+
+  // Extract selector from calldata
+  const selector = calldata.slice(0, 10) as Hex;
+
+  // Build scope - no value enforcement needed (nonpayable)
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(router)],
+    selectors: [selector],
+  };
+
+  // Build caveats (timestamp, nonce, limitedCalls: 1)
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+
+  // Get DTK environment
+  const environment = getDTKEnvironment();
+
+  // Generate unique salt to prevent hash collisions
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  // Create delegation using DTK
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  // Build EIP-712 typed data for signing
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+// ============================================================================
 // Legacy Exports (for compatibility)
 // ============================================================================
 

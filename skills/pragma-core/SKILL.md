@@ -25,6 +25,10 @@ allowed-tools:
   - mcp__pragma__explain_transaction
   - mcp__pragma__get_onchain_activity
   - mcp__pragma__explain_contract
+  - mcp__pragma__nadfun_status
+  - mcp__pragma__nadfun_quote
+  - mcp__pragma__nadfun_buy
+  - mcp__pragma__nadfun_sell
   - AskUserQuestion
   - Read
   - Task
@@ -199,6 +203,10 @@ Before executing multiple operations, calculate total gas needed:
 | Activity | `explain_transaction` | Decode and explain any tx (x402 only) - **USE SUBAGENT** |
 | Activity | `get_onchain_activity` | Transaction history for address (x402 only) - **USE SUBAGENT** |
 | Analysis | `explain_contract` | Analyze smart contract details (x402 only) - **USE SUBAGENT** |
+| nad.fun | `nadfun_status` | Check token graduation status |
+| nad.fun | `nadfun_quote` | Quote for bonding curve buy/sell |
+| nad.fun | `nadfun_buy` | Buy tokens on curve (Touch ID) |
+| nad.fun | `nadfun_sell` | Sell tokens on curve (Touch ID) |
 
 ### Context-Optimized Operations (IMPORTANT)
 
@@ -333,6 +341,57 @@ For multiple independent swaps (e.g., "swap 1 MON to USDC and 1 MON to AUSD"):
 4. If needsFunding - `fund_session_key`
 5. `stake`
 6. Report result
+
+### nad.fun Trading
+
+**CRITICAL: Always check token status first.** Tokens on nad.fun bonding curve require different tools than regular DEX tokens.
+
+#### When to Use nad.fun Tools
+
+| Scenario | Tools to Use |
+|----------|--------------|
+| Token on bonding curve (not graduated) | `nadfun_*` tools |
+| Token graduated to DEX | Regular `get_swap_quote` + `execute_swap` |
+| Unknown token status | `nadfun_status` first to check |
+
+#### Status Check
+1. `nadfun_status` - Check if token is on bonding curve
+2. If `isGraduated: true` → Use regular swap tools instead
+3. If `isLocked: true` → Cannot trade, wait for graduation
+
+#### Buy Flow (MON → Tokens)
+1. `nadfun_status` - Verify token not graduated
+2. `get_balance` (MON) - Check available funds
+3. `nadfun_quote` with `isBuy: true`
+4. **Use `AskUserQuestion`:**
+   - Header: "nad.fun Buy"
+   - Question: "Buy ~X tokens for Y MON on nad.fun?"
+   - Options: ["Confirm buy", "Cancel"]
+   - Description: Include graduation progress
+5. If confirmed: `check_session_key_balance` (operationType: "swap")
+6. If needsFunding - `fund_session_key` → **WAIT**
+7. `nadfun_buy`
+8. Report result with tx hash and progress
+
+#### Sell Flow (Tokens → MON)
+1. `nadfun_status` - Verify token not graduated
+2. `get_balance` (token) - Check holdings
+3. `nadfun_quote` with `isBuy: false`
+4. **Use `AskUserQuestion`:**
+   - Header: "nad.fun Sell"
+   - Question: "Sell X tokens for ~Y MON on nad.fun?"
+   - Options: ["Confirm sell", "Cancel"]
+   - Description: Include graduation progress
+5. If confirmed: `check_session_key_balance` (operationType: "swap")
+6. If needsFunding - `fund_session_key` → **WAIT**
+7. `nadfun_sell`
+8. Report result with tx hash and progress
+
+**Note:** Sell may require multiple Touch ID prompts if token approval is needed.
+
+#### Graduation Warnings
+- If progress >= 90%, warn user: "Token is near graduation. Large trades may trigger graduation."
+- Once graduated, tokens trade on regular DEX with different liquidity
 
 ### Relative Amounts ("all", "half", "max", percentages)
 1. `get_balance` FIRST to get actual amount

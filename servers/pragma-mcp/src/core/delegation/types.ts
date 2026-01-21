@@ -41,7 +41,7 @@ export interface Execution {
 export interface DelegationBundle {
   delegation: SignedDelegation;
   execution: Execution;
-  kind: "approve" | "swap" | "transfer" | "wrap" | "unwrap";
+  kind: "approve" | "swap" | "transfer" | "wrap" | "unwrap" | "nadfun_buy" | "nadfun_sell";
 }
 
 // MARK: - EIP-712 Types

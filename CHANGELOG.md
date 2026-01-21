@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-01-21
+
+### Added
+- **nad.fun bonding curve trading** - 4 new MCP tools for trading on nad.fun
+  - `nadfun_status`: Check token graduation status, progress, and trading venue
+  - `nadfun_quote`: Get buy/sell quotes with slippage control (5-min expiry)
+  - `nadfun_buy`: Buy tokens on bonding curve (Touch ID required)
+  - `nadfun_sell`: Sell tokens on bonding curve (Touch ID required)
+- **Exact output mode** - Specify desired output instead of input amount
+  - `nadfun_quote` supports `exactOutput: true` parameter
+  - Example: "buy me 500 tokens" calculates required MON
+- Token metadata in status - Shows token name/symbol from on-chain ERC20
+- Works in both BYOK and x402 modes (RPC only, no external API)
+
+### Fixed
+- Delegation routing - Uses Lens-returned router for correct contract targeting
+
 ## [0.3.16] - 2026-01-20
 
 ### Changed
