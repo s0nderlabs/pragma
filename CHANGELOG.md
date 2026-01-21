@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-01-21
+
+### Added
+- **nad.fun P2 Discovery Tools** - 3 new MCP tools for token discovery and analytics:
+  - `nadfun_discover`: Find trending/new tokens sorted by market cap, newest, or most active
+  - `nadfun_token_info`: Detailed token info including metadata, market data, and graduation progress
+  - `nadfun_positions`: View nad.fun token holdings with PnL analysis
+- All P2 tools use public nad.fun HTTP API and work in both BYOK and x402 modes
+
 ## [0.4.0] - 2026-01-21
 
 ### Added

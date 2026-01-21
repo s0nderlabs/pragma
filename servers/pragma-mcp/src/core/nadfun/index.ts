@@ -16,7 +16,7 @@ export {
   GRADUATION_PROGRESS,
 } from "./constants.js";
 
-// Types
+// Types (RPC/Contract types)
 export type {
   TradingVenue,
   NadFunTokenStatus,
@@ -34,12 +34,48 @@ export type {
   NadFunExecuteResponse,
 } from "./types.js";
 
+// Types (HTTP API types)
+export type {
+  // Raw API types
+  NadFunApiTokenInfo,
+  NadFunApiMarketInfo,
+  NadFunApiTokenListing,
+  NadFunApiListingResponse,
+  NadFunApiPosition,
+  NadFunApiPositionResponse,
+  NadFunApiSwapRecord,
+  NadFunApiSwapResponse,
+  NadFunApiTokenMetadataResponse,
+  NadFunApiTokenMarketResponse,
+  // Transformed types
+  DiscoveredToken,
+  NadFunTokenFullInfo,
+  UserPosition,
+  // Tool response types
+  NadFunDiscoverResponse,
+  NadFunTokenInfoResponse,
+  NadFunPositionsResponse,
+} from "./api-types.js";
+
 // Client (Lens contract reads)
 export {
   getTokenStatus,
   getAmountOut,
   getAvailableBuyTokens,
 } from "./client.js";
+
+// HTTP API Client (public nad.fun API)
+export {
+  NADFUN_API_BASE,
+  MONAD_EXPLORER_URL,
+  fetchNadFunApi,
+  formatPriceChange,
+  formatPrice,
+  formatAmount,
+  buildExplorerUrl,
+  formatProgress,
+  truncateAddress,
+} from "./api-client.js";
 
 // Quote caching
 export {

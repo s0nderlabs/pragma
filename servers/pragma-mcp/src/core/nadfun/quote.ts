@@ -201,10 +201,13 @@ export async function buildNadFunQuote(
   const direction: NadFunDirection = isBuy ? "BUY" : "SELL";
   const quoteId = generateQuoteId();
 
+  // Use symbol from status (ERC20 call) if available, otherwise fallback to param
+  const resolvedSymbol = status.tokenSymbol || tokenSymbol;
+
   const cachedQuote: CachedNadFunQuote = {
     quoteId,
     token,
-    tokenSymbol,
+    tokenSymbol: resolvedSymbol,
     tokenDecimals,
     direction,
     amountIn: isBuy ? formatUnits(maxInputWei, 18) : formatUnits(maxInputWei, tokenDecimals),

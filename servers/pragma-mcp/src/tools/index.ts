@@ -28,6 +28,9 @@ import { registerNadFunStatus } from "./nadfun-status.js";
 import { registerNadFunQuote } from "./nadfun-quote.js";
 import { registerNadFunBuy } from "./nadfun-buy.js";
 import { registerNadFunSell } from "./nadfun-sell.js";
+import { registerNadFunDiscover } from "./nadfun-discover.js";
+import { registerNadFunTokenInfo } from "./nadfun-token-info.js";
+import { registerNadFunPositions } from "./nadfun-positions.js";
 
 export function registerTools(server: McpServer): void {
   // Wallet checks (safe, read-only)
@@ -84,4 +87,9 @@ export function registerTools(server: McpServer): void {
   registerNadFunQuote(server);
   registerNadFunBuy(server);
   registerNadFunSell(server);
+
+  // nad.fun discovery tools (HTTP API - work in both BYOK and x402 modes)
+  registerNadFunDiscover(server);
+  registerNadFunTokenInfo(server);
+  registerNadFunPositions(server);
 }

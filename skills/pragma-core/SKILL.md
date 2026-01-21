@@ -29,6 +29,9 @@ allowed-tools:
   - mcp__pragma__nadfun_quote
   - mcp__pragma__nadfun_buy
   - mcp__pragma__nadfun_sell
+  - mcp__pragma__nadfun_discover
+  - mcp__pragma__nadfun_token_info
+  - mcp__pragma__nadfun_positions
   - AskUserQuestion
   - Read
   - Task
@@ -207,6 +210,9 @@ Before executing multiple operations, calculate total gas needed:
 | nad.fun | `nadfun_quote` | Quote for bonding curve buy/sell |
 | nad.fun | `nadfun_buy` | Buy tokens on curve (Touch ID) |
 | nad.fun | `nadfun_sell` | Sell tokens on curve (Touch ID) |
+| nad.fun | `nadfun_discover` | Find trending/new tokens |
+| nad.fun | `nadfun_token_info` | Detailed token info |
+| nad.fun | `nadfun_positions` | User's holdings with PnL |
 
 ### Context-Optimized Operations (IMPORTANT)
 
@@ -388,6 +394,20 @@ For multiple independent swaps (e.g., "swap 1 MON to USDC and 1 MON to AUSD"):
 8. Report result with tx hash and progress
 
 **Note:** Sell may require multiple Touch ID prompts if token approval is needed.
+
+#### Discovery Flow
+1. `nadfun_discover` - Find tokens (sortBy: market_cap, new, or active)
+2. Review tokens, pick one to trade
+3. `nadfun_token_info` - Get detailed info before trading
+4. Follow Buy/Sell flow above
+
+#### Check Holdings
+1. `nadfun_positions` - See all nad.fun token holdings
+2. Shows PnL for each position
+3. Use to decide which tokens to sell
+
+#### Token Research
+1. `nadfun_token_info` - Full metadata and market data
 
 #### Graduation Warnings
 - If progress >= 90%, warn user: "Token is near graduation. Large trades may trigger graduation."

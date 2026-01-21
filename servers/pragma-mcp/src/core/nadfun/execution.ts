@@ -2,20 +2,19 @@
 // Executes buy/sell on bonding curve via delegation framework
 // Copyright (c) 2026 s0nderlabs
 
-import type { Address, Hex, PublicClient, WalletClient } from "viem";
+import type { Address } from "viem";
 import {
   createPublicClient,
   createWalletClient,
   encodeFunctionData,
   erc20Abi,
-  formatUnits,
 } from "viem";
 import {
   redeemDelegations,
   createExecution,
   ExecutionMode,
 } from "@metamask/smart-accounts-kit";
-import type { SignedDelegation, DelegationBundle, Execution } from "../delegation/types.js";
+import type { SignedDelegation, DelegationBundle } from "../delegation/types.js";
 import {
   createNadFunBuyDelegation,
   createNadFunSellDelegation,
@@ -39,7 +38,7 @@ import {
   getMinBalanceForOperation,
   formatSessionKeyBalance,
 } from "../session/manager.js";
-import type { NadFunExecutionResult, NadFunQuote } from "./types.js";
+import type { NadFunExecutionResult } from "./types.js";
 
 // ============================================================================
 // Buy Execution
