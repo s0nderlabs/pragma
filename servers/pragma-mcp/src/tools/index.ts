@@ -35,6 +35,8 @@ import { registerLeverUpGetQuote } from "./leverup-get-quote.js";
 import { registerLeverUpOpenTrade } from "./leverup-open-trade.js";
 import { registerLeverUpCloseTrade } from "./leverup-close-trade.js";
 import { registerLeverUpUpdateMargin } from "./leverup-update-margin.js";
+import { registerLeverUpGetMarketStats } from "./leverup-get-market-stats.js";
+import { registerMarketGetChart } from "./market-get-chart.js";
 
 export function registerTools(server: McpServer): void {
   registerHasWallet(server);
@@ -74,4 +76,6 @@ export function registerTools(server: McpServer): void {
   registerLeverUpOpenTrade(server);
   registerLeverUpCloseTrade(server);
   registerLeverUpUpdateMargin(server);
+  registerLeverUpGetMarketStats(server);
+  registerMarketGetChart(server);
 }
