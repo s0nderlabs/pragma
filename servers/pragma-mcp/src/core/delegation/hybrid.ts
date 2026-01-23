@@ -213,24 +213,6 @@ function buildTransferEnforcement(
   ];
 }
 
-/**
- * Build AllowedCalldata config for DEX aggregate swap
- * Enforces only destination (offset 132)
- *
- * Other params not enforced because:
- * - tokenIn/tokenOut: Protected by target whitelisting
- * - amountIn: Balance validation prevents over-spending
- * - minAmountOut: We patch this for slippage (cannot enforce)
- */
-function buildSwapEnforcement(destination: Address): AllowedCalldataConfig[] {
-  return [
-    {
-      startIndex: CALLDATA_OFFSETS.aggregate.destination,
-      value: pad(destination, { size: 32 }),
-    },
-  ];
-}
-
 // ============================================================================
 // Caveat Builders (DTK format)
 // ============================================================================
@@ -891,6 +873,44 @@ export interface NadFunCreateDelegationContext {
 }
 
 /**
+ * Context needed to create a LeverUp open trade delegation
+ */
+export interface LeverUpOpenDelegationContext {
+  diamond: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+  value: bigint; // Pyth update fee
+}
+
+/**
+ * Context needed to create a LeverUp close trade delegation
+ */
+export interface LeverUpCloseDelegationContext {
+  diamond: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+}
+
+/**
+ * Context needed to create a LeverUp update margin delegation
+ */
+export interface LeverUpUpdateMarginDelegationContext {
+  diamond: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+  value: bigint; // Native MON being added (if any)
+}
+
+/**
  * Create a nad.fun token creation delegation using DTK's createDelegation with scope
  *
  * create() is payable - requires deploy fee (10 MON on mainnet) and optional initial buy.
@@ -957,6 +977,181 @@ export function createNadFunCreateDelegation(
   });
 
   // Build EIP-712 typed data for signing
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a LeverUp open trade delegation using DTK's createDelegation with scope
+ */
+export function createLeverUpOpenDelegation(
+  context: LeverUpOpenDelegationContext
+): DelegationResult {
+  const {
+    diamond,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+    value,
+  } = context;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+  const selector = calldata.slice(0, 10) as Hex;
+
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(diamond)],
+    selectors: [selector],
+    valueLte: { maxValue: value },
+  };
+
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+  const environment = getDTKEnvironment();
+
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a LeverUp close trade delegation
+ */
+export function createLeverUpCloseDelegation(
+  context: LeverUpCloseDelegationContext
+): DelegationResult {
+  const {
+    diamond,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+  } = context;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+  const selector = calldata.slice(0, 10) as Hex;
+
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(diamond)],
+    selectors: [selector],
+  };
+
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+  const environment = getDTKEnvironment();
+
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a LeverUp update margin delegation
+ */
+export function createLeverUpUpdateMarginDelegation(
+  context: LeverUpUpdateMarginDelegationContext
+): DelegationResult {
+  const {
+    diamond,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+    value,
+  } = context;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+  const selector = calldata.slice(0, 10) as Hex;
+
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(diamond)],
+    selectors: [selector],
+    valueLte: { maxValue: value },
+  };
+
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+  const environment = getDTKEnvironment();
+
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
   const typedData = buildDelegationTypedData(
     delegation,
     chainId,

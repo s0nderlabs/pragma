@@ -33,6 +33,12 @@ allowed-tools:
   - mcp__pragma__nadfun_token_info
   - mcp__pragma__nadfun_positions
   - mcp__pragma__nadfun_create
+  - mcp__pragma__leverup_list_pairs
+  - mcp__pragma__leverup_list_positions
+  - mcp__pragma__leverup_get_quote
+  - mcp__pragma__leverup_open_trade
+  - mcp__pragma__leverup_close_trade
+  - mcp__pragma__leverup_update_margin
   - AskUserQuestion
   - Read
   - Task
@@ -215,6 +221,12 @@ Before executing multiple operations, calculate total gas needed:
 | nad.fun | `nadfun_token_info` | Detailed token info |
 | nad.fun | `nadfun_positions` | User's holdings with PnL |
 | nad.fun | `nadfun_create` | Create new token on bonding curve |
+| LeverUp | `leverup_list_pairs` | List tradeable perps markets |
+| LeverUp | `leverup_list_positions` | Active trades with PnL & Health |
+| LeverUp | `leverup_get_quote` | High-precision risk simulation |
+| LeverUp | `leverup_open_trade` | Open market order (Touch ID) |
+| LeverUp | `leverup_close_trade` | Close position (Touch ID) |
+| LeverUp | `leverup_update_margin` | Add/remove collateral (Touch ID) |
 
 ### Context-Optimized Operations (IMPORTANT)
 
@@ -528,7 +540,87 @@ description: |
 - If progress >= 90%, warn user: "Token is near graduation. Large trades may trigger graduation."
 - Once graduated, tokens trade on regular DEX with different liquidity
 
+### LeverUp Perpetuals Trading
+
+**CRITICAL: Always perform a risk simulation first.** Perpetual trading involves significant risk and on-chain minimums.
+
+#### Two Trading Modes
+
+| Feature | Normal Mode (1-100x) | Zero-Fee Mode (500x/750x/1001x) |
+|---------|---------------------|--------------------------------|
+| **Pairs** | All standard pairs (BTC, ETH, MON, etc.) | 500BTC/USD, 500ETH/USD only |
+| **Open/Close Fees** | 0.045% | 0% if PnL < 0, profit sharing if profitable |
+| **Order Types** | Market + Limit | **Market only** |
+| **Add/Remove Margin** | ✅ Yes | ❌ **Not allowed** |
+| **Leverage Values** | Any from 1-100 | **Exactly 500, 750, or 1001** |
+
+**CRITICAL:** If user requests 500BTC or 500ETH, they MUST use exactly 500x, 750x, or 1001x leverage. Any other value will fail with "Below degen mode min leverage" error.
+
+#### Minimum Trade Thresholds
+LeverUp enforces the following limits. Always inform the user if their trade is near or below these thresholds.
+- **HARD LIMIT - Minimum Position Size**: $200.00 USD (Margin × Leverage) - **Contract will reject trades below this**
+- **Soft Guideline - Minimum Margin**: $10.00 USD (recommended but not strictly enforced)
+
+#### Stop Loss (SL) and Take Profit (TP)
+
+SL and TP can be set when opening a position. Both are optional (set to 0 to disable).
+
+**TP Limits (Contract-Enforced):**
+| Leverage | Max Take Profit |
+|----------|-----------------|
+| < 50x | 500% profit |
+| ≥ 50x | 300% profit |
+
+**SL/TP Rules:**
+- Stop Loss: Must be BELOW entry price (Long) or ABOVE entry price (Short)
+- Take Profit: Must be ABOVE entry price (Long) or BELOW entry price (Short)
+- **Cannot be cancelled** once set, but can be edited
+- Prices are in USD (e.g., "85000" for $85,000)
+
+**Example - Long BTC at $90,000:**
+- Valid SL: $85,000 (below entry)
+- Valid TP: $100,000 (above entry, within 500%/300% limit)
+
+**Example - Short BTC at $90,000:**
+- Valid SL: $95,000 (above entry)
+- Valid TP: $80,000 (below entry)
+
+#### Trading Flow
+1. `leverup_list_pairs` - Find the correct pair base (e.g. BTC/USD)
+2. `leverup_get_quote` - **MANDATORY**: Get a precise quote to see liquidation price and health factor.
+3. Review quote warnings - especially for:
+   - High-leverage pairs requiring specific leverage values
+   - Margin/position size below minimums
+   - `canAddMargin: false` for Zero-Fee leverage
+4. **Use `AskUserQuestion`:**
+   - Header: "LeverUp Trade"
+   - Question: "Open Xx [Long/Short] on [SYMBOL]?"
+   - Options: ["Confirm trade (Touch ID)", "Cancel"]
+   - Description: Include margin, position size, liq price, and warnings
+5. If confirmed: `check_session_key_balance` (operationType: "swap")
+6. If needsFunding - `fund_session_key` → **WAIT**
+7. `leverup_open_trade` - include SL/TP if user specified
+8. Report result with tx hash and explorer link
+
+#### Collateral Options
+- **MON** (native) - Default, 18 decimals
+- **USDC** - Stablecoin, 6 decimals
+- **LVUSD** - LeverUp vault USD token, 18 decimals
+- **LVMON** - LeverUp vault MON token, 18 decimals
+
+#### Managing Positions
+1. `leverup_list_positions` - Check Health Factor of active trades.
+2. If Health < 20%: Suggest `leverup_update_margin` to add collateral.
+   - **NOTE:** This does NOT work for 500x/750x/1001x positions!
+3. To lock in profit: Use `leverup_close_trade`.
+
+#### Update Margin Limitations
+`leverup_update_margin` only works for normal leverage (1-100x) positions.
+- **Zero-Fee positions (500x/750x/1001x) CANNOT add or remove margin.**
+- The tool will show a warning, and the contract will reject the transaction if attempted.
+
 ### Relative Amounts ("all", "half", "max", percentages)
+
 1. `get_balance` FIRST to get actual amount
 2. Calculate relative value
 3. Proceed with operation flow

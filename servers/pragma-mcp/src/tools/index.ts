@@ -1,6 +1,3 @@
-// pragma Tool Registration
-// Registers all MCP tools with the server
-
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerHasWallet } from "./has-wallet.js";
 import { registerHasProviders } from "./has-providers.js";
@@ -32,68 +29,49 @@ import { registerNadFunDiscover } from "./nadfun-discover.js";
 import { registerNadFunTokenInfo } from "./nadfun-token-info.js";
 import { registerNadFunPositions } from "./nadfun-positions.js";
 import { registerNadFunCreate } from "./nadfun-create.js";
+import { registerLeverUpListPairs } from "./leverup-list-pairs.js";
+import { registerLeverUpListPositions } from "./leverup-list-positions.js";
+import { registerLeverUpGetQuote } from "./leverup-get-quote.js";
+import { registerLeverUpOpenTrade } from "./leverup-open-trade.js";
+import { registerLeverUpCloseTrade } from "./leverup-close-trade.js";
+import { registerLeverUpUpdateMargin } from "./leverup-update-margin.js";
 
 export function registerTools(server: McpServer): void {
-  // Wallet checks (safe, read-only)
   registerHasWallet(server);
   registerHasProviders(server);
-
-  // Wallet setup
   registerSetupWallet(server);
-
-  // Mode switching (BYOK vs x402)
   registerSetMode(server);
-
-  // Balance checking
   registerGetBalance(server);
   registerGetAllBalances(server);
-
-  // Token discovery
   registerListVerifiedTokens(server);
   registerGetTokenInfo(server);
-
-  // Account info
   registerGetAccountInfo(server);
-
-  // Session key management
   registerCheckSessionKeyBalance(server);
   registerFundSessionKey(server);
   registerWithdrawSessionKey(server);
-
-  // Swap operations
   registerGetSwapQuote(server);
   registerExecuteSwap(server);
-
-  // Transfer operations
   registerTransfer(server);
-
-  // Wrap/unwrap operations
   registerWrap(server);
   registerUnwrap(server);
-
-  // Staking operations
   registerStake(server);
-
-  // Direct RPC tools (work in both BYOK and x402 modes)
   registerGetBlock(server);
   registerGetGasPrice(server);
-
-  // On-chain activity tools (x402 mode only - require API infrastructure)
   registerExplainTransaction(server);
   registerGetOnchainActivity(server);
   registerExplainContract(server);
-
-  // nad.fun bonding curve tools (work in both BYOK and x402 modes)
   registerNadFunStatus(server);
   registerNadFunQuote(server);
   registerNadFunBuy(server);
   registerNadFunSell(server);
-
-  // nad.fun discovery tools (HTTP API - work in both BYOK and x402 modes)
   registerNadFunDiscover(server);
   registerNadFunTokenInfo(server);
   registerNadFunPositions(server);
-
-  // nad.fun token creation (HTTP API + on-chain - works in both BYOK and x402 modes)
   registerNadFunCreate(server);
+  registerLeverUpListPairs(server);
+  registerLeverUpListPositions(server);
+  registerLeverUpGetQuote(server);
+  registerLeverUpOpenTrade(server);
+  registerLeverUpCloseTrade(server);
+  registerLeverUpUpdateMargin(server);
 }

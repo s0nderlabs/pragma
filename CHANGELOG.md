@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-23
+
+### Added
+- **LeverUp Perpetuals Trading** - 6 new MCP tools for leveraged trading on Monad:
+  - `leverup_list_pairs`: Browse 20 supported markets (Crypto, Stocks, Forex, Indices, Commodities)
+  - `leverup_get_quote`: Risk simulation with liquidation price, health factor, and fee estimates
+  - `leverup_open_trade`: Open market positions with optional Stop Loss and Take Profit
+  - `leverup_close_trade`: Close positions to realize PnL
+  - `leverup_list_positions`: View active trades with real-time PnL analysis
+  - `leverup_update_margin`: Add or remove collateral (normal leverage only)
+- **Zero-Fee Perpetuals** - Support for 500BTC/500ETH high-leverage pairs (500x, 750x, 1001x)
+- **Stop Loss & Take Profit** - Set SL/TP when opening positions with automatic validation
+- **Multi-collateral support** - Trade with MON, USDC, LVUSD, or LVMON
+
+### Changed
+- Extracted reusable helpers for leverage validation and collateral handling
+
 ## [0.5.0] - 2026-01-22
 
 ### Added
