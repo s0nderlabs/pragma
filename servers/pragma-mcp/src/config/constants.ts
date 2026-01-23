@@ -32,7 +32,7 @@ export const getDTKEnvironment = () => getSmartAccountsEnvironment(DTK_CHAIN_ID_
 // Gas Thresholds (in wei - same across all chains)
 export const MIN_SESSION_KEY_BALANCE = BigInt("40000000000000000"); // 0.04 native
 export const SESSION_KEY_FUNDING_AMOUNT = BigInt("500000000000000000"); // 0.5 native
-export const MIN_GAS_FOR_DELEGATION = BigInt("20000000000000000"); // 0.02 native
+export const MIN_GAS_FOR_DELEGATION = BigInt("50000000000000000"); // 0.05 native (delegation tx needs more gas)
 
 // Gas per operation (in wei - estimates, may vary by chain)
 export const GAS_PER_OPERATION = {

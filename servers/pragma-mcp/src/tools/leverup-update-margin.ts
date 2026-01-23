@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { getCollateralDecimals } from "../core/leverup/client.js";
-import { executeUpdateMargin } from "../core/leverup/execution.js";
+import { executeAddMargin, type CollateralToken } from "../core/leverup/execution.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -10,35 +10,67 @@ import { createSyncHttpTransport } from "../core/x402/client.js";
 import { waitForReceiptSync } from "../core/rpc/index.js";
 import { DELEGATION_FRAMEWORK } from "../config/constants.js";
 import { getCurrentNonce } from "../core/delegation/nonce.js";
-import { createLeverUpUpdateMarginDelegation } from "../core/delegation/hybrid.js";
+import {
+  createLeverUpUpdateMarginDelegation,
+  createApproveDelegation
+} from "../core/delegation/hybrid.js";
+import {
+  WMON_ADDRESS,
+  USDC_ADDRESS,
+  LVUSD_ADDRESS,
+  LVMON_ADDRESS,
+  LEVERUP_DIAMOND
+} from "../core/leverup/constants.js";
 import {
   createPublicClient,
   createWalletClient,
   parseUnits,
+  erc20Abi,
   type Address,
   type Hex,
 } from "viem";
-import { 
-  redeemDelegations, 
-  createExecution, 
-  ExecutionMode 
+import {
+  redeemDelegations,
+  createExecution,
+  ExecutionMode
 } from "@metamask/smart-accounts-kit";
+import { withRetryOrThrow } from "../core/utils/retry.js";
 
 const LeverUpUpdateMarginSchema = z.object({
   tradeHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/).describe("The unique identifier of the position."),
-  amount: z.string().describe("Amount of collateral to add or remove (e.g. '5' for 5 MON)."),
-  isAdd: z.boolean().describe("true to add collateral, false to remove."),
+  amount: z.string().describe("Amount of collateral to add (e.g. '5' for 5 MON)."),
   collateralToken: z.enum(["MON", "USDC", "LVUSD", "LVMON"]).default("MON").describe(
     "Collateral token matching the position's collateral. IMPORTANT: Positions opened with 500x, 750x, or 1001x leverage " +
-    "(Zero-Fee mode) CANNOT add or remove margin - this operation will fail for those positions."
+    "(Zero-Fee mode) CANNOT add margin - this operation will fail for those positions."
   )
 });
+
+/**
+ * Get the token address for a given collateral type
+ * For MON collateral positions, use WMON address (contract wraps internally)
+ */
+function getCollateralTokenAddress(collateralToken: CollateralToken): Address {
+  switch (collateralToken) {
+    case "USDC":
+      return USDC_ADDRESS;
+    case "LVUSD":
+      return LVUSD_ADDRESS;
+    case "LVMON":
+      return LVMON_ADDRESS;
+    case "MON":
+    default:
+      // For native MON: pass WMON address to the contract
+      // The contract identifies MON positions by WMON address
+      return WMON_ADDRESS;
+  }
+}
 
 export function registerLeverUpUpdateMargin(server: McpServer): void {
   server.tool(
     "leverup_update_margin",
-    "Add or remove collateral from an existing LeverUp position. Requires Touch ID confirmation. " +
-    "NOTE: This does NOT work for Zero-Fee positions (500x/750x/1001x leverage) - those positions cannot adjust margin.",
+    "Add collateral to an existing LeverUp position. Requires Touch ID confirmation. " +
+    "NOTE: Only ADDING margin is supported - the contract does not allow margin withdrawal. " +
+    "This does NOT work for Zero-Fee positions (500x/750x/1001x leverage).",
     LeverUpUpdateMarginSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       try {
@@ -52,8 +84,17 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
         const chainId = config.network.chainId;
         const rpcUrl = await getRpcUrl(config);
 
-        const amountWei = parseUnits(params.amount, getCollateralDecimals(params.collateralToken));
-        const execution = await executeUpdateMargin(params.tradeHash as Hex, amountWei, params.isAdd);
+        const collateralToken = (params.collateralToken || "MON") as CollateralToken;
+        const tokenAddress = getCollateralTokenAddress(collateralToken);
+        const isNativeMon = collateralToken === "MON";
+        const amountWei = parseUnits(params.amount, getCollateralDecimals(collateralToken));
+
+        const execution = executeAddMargin(
+          params.tradeHash as Hex,
+          tokenAddress,
+          amountWei,
+          isNativeMon
+        );
 
         const chain = buildViemChain(chainId, rpcUrl);
         const publicClient = createPublicClient({
@@ -61,26 +102,79 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
           transport: createSyncHttpTransport(rpcUrl, config),
         });
 
-        const nonce = await getCurrentNonce(publicClient, userAddress);
-        const delegationResult = createLeverUpUpdateMarginDelegation({
+        // Build delegations list
+        const delegations: any[] = [];
+        let currentNonce = await withRetryOrThrow(
+          () => getCurrentNonce(publicClient, userAddress),
+          { operationName: "get-delegation-nonce" }
+        );
+
+        // If using ERC20 collateral (not native MON), check and create approval if needed
+        if (!isNativeMon) {
+          const allowance = await withRetryOrThrow(
+            async () => publicClient.readContract({
+              address: tokenAddress,
+              abi: erc20Abi,
+              functionName: "allowance",
+              args: [userAddress, LEVERUP_DIAMOND]
+            }),
+            { operationName: "check-allowance" }
+          );
+
+          if (allowance < amountWei) {
+            const approveDelegation = createApproveDelegation({
+              tokenAddress,
+              spender: LEVERUP_DIAMOND,
+              amount: amountWei,
+              delegator: userAddress,
+              sessionKey: sessionKeyAddress,
+              nonce: currentNonce,
+              chainId,
+            });
+            delegations.push({
+              delegation: approveDelegation.delegation,
+              execution: {
+                target: tokenAddress,
+                value: 0n,
+                callData: `0x095ea7b3${LEVERUP_DIAMOND.slice(2).padStart(64, '0')}${amountWei.toString(16).padStart(64, '0')}` as Hex
+              }
+            });
+          // NOTE: Do NOT increment nonce - multiple delegations in same batch use same nonce
+          }
+        }
+
+        // Create add margin delegation
+        const marginDelegation = createLeverUpUpdateMarginDelegation({
           diamond: execution.to,
           delegator: userAddress,
           sessionKey: sessionKeyAddress,
-          nonce,
+          nonce: currentNonce,
           chainId,
           calldata: execution.data as Hex,
           value: execution.value,
         });
+        delegations.push({
+          delegation: marginDelegation.delegation,
+          execution: {
+            target: execution.to,
+            value: execution.value,
+            callData: execution.data as Hex
+          }
+        });
 
-        const actionLabel = `${params.isAdd ? 'Add' : 'Remove'} ${params.amount} ${params.collateralToken || 'MON'} Margin to ${params.tradeHash.slice(0, 10)}...`;
-        const signature = await signDelegationWithP256(
-          delegationResult.delegation,
-          chainId,
-          config.wallet!.keyId,
-          actionLabel
-        );
-        delegationResult.delegation.signature = signature;
+        // Sign all delegations with Touch ID
+        const actionLabel = `Add ${params.amount} ${collateralToken} Margin to ${params.tradeHash.slice(0, 10)}...`;
+        for (const d of delegations) {
+          const signature = await signDelegationWithP256(
+            d.delegation,
+            chainId,
+            config.wallet!.keyId,
+            actionLabel
+          );
+          d.delegation.signature = signature;
+        }
 
+        // Execute via session key
         const sessionKey = await getSessionKey();
         const sessionAccount = getSessionAccount(sessionKey!);
         const sessionWallet = createWalletClient({
@@ -93,15 +187,11 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
           sessionWallet,
           publicClient,
           DELEGATION_FRAMEWORK.delegationManager,
-          [{
-            permissionContext: [delegationResult.delegation],
-            executions: [createExecution({
-              target: execution.to,
-              value: execution.value,
-              callData: execution.data as Hex
-            })],
+          delegations.map(d => ({
+            permissionContext: [d.delegation],
+            executions: [createExecution(d.execution)],
             mode: ExecutionMode.SingleDefault
-          }]
+          }))
         );
 
         const receipt = await waitForReceiptSync(publicClient, txHash);
@@ -111,8 +201,8 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
             type: "text",
             text: JSON.stringify({
               success: receipt.status === "success",
-              message: receipt.status === "success" 
-                ? `Successfully ${params.isAdd ? 'added' : 'removed'} ${params.amount} margin`
+              message: receipt.status === "success"
+                ? `Successfully added ${params.amount} ${collateralToken} margin`
                 : "Transaction reverted on-chain",
               txHash,
               explorerUrl: `https://monadvision.com/tx/${txHash}`
@@ -120,12 +210,14 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
           }]
         };
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               success: false,
-              message: error instanceof Error ? error.message : "Unknown error"
+              message: "Failed to add margin",
+              error: errorMessage
             }, null, 2)
           }]
         };

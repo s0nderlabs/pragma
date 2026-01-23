@@ -35,6 +35,7 @@ import { registerLeverUpGetQuote } from "./leverup-get-quote.js";
 import { registerLeverUpOpenTrade } from "./leverup-open-trade.js";
 import { registerLeverUpCloseTrade } from "./leverup-close-trade.js";
 import { registerLeverUpUpdateMargin } from "./leverup-update-margin.js";
+import { registerLeverUpUpdateTpSl } from "./leverup-update-tpsl.js";
 import { registerLeverUpGetMarketStats } from "./leverup-get-market-stats.js";
 import { registerLeverUpOpenLimitOrder } from "./leverup-open-limit-order.js";
 import { registerLeverUpListLimitOrders } from "./leverup-list-limit-orders.js";
@@ -79,6 +80,7 @@ export function registerTools(server: McpServer): void {
   registerLeverUpOpenTrade(server);
   registerLeverUpCloseTrade(server);
   registerLeverUpUpdateMargin(server);
+  registerLeverUpUpdateTpSl(server);
   registerLeverUpGetMarketStats(server);
   registerLeverUpOpenLimitOrder(server);
   registerLeverUpListLimitOrders(server);

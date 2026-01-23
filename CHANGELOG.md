@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.7.1] - 2026-01-24
+
+### Added
+- **LeverUp TP/SL Management** - New `leverup_update_tpsl` tool to update take profit and stop loss on existing positions
+  - Update TP and/or SL prices on any position
+  - Set price to '0' to disable TP or SL trigger
+  - Nonpayable operation (no gas value required)
+
+### Fixed
+- **LeverUp Add Margin** - Fixed `leverup_update_margin` tool that was failing with "Diamond: Function does not exist"
+  - Root cause: Using wrong function signature `updateMargin(bytes32,uint96,bool)` instead of `addMargin(bytes32,address,uint96)`
+  - Now correctly passes token address parameter
+  - Removed `isAdd` parameter (only adding margin is supported by contract)
+  - Added ERC20 approval handling for non-MON collateral
+  - Fixed nonce increment bug for multi-delegation batches
+- **Session Key Funding** - Fixed funding failures when session key balance is low
+  - Raised `MIN_GAS_FOR_DELEGATION` threshold (0.02 → 0.05 MON) for proper UserOp fallback
+  - Added custom MON amount support in `fund_session_key` tool
+  - Increased max auto-funding from 3 to 10 MON
+
 ## [0.7.0] - 2026-01-23
 
 ### Added

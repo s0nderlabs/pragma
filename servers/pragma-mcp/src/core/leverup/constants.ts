@@ -113,13 +113,29 @@ export const TRADING_PORTAL_ABI = [
     outputs: []
   },
   {
-    name: "updateMargin",
+    // addMargin(bytes32,address,uint96) - selector 0xe1379570
+    // Discovered from frontend tx: 0x442a3a14efd64312bd06f18ba9446bcd19d1de08f97969af41749b641e5c238e
+    // NOTE: Only adding margin is supported - withdrawal not allowed by contract
+    name: "addMargin",
     type: "function",
     stateMutability: "payable",
     inputs: [
       { name: "tradeHash", type: "bytes32" },
-      { name: "amount", type: "uint96" },
-      { name: "isAdd", type: "bool" }
+      { name: "token", type: "address" },
+      { name: "amount", type: "uint96" }
+    ],
+    outputs: []
+  },
+  {
+    // updateTradeTpAndSl(bytes32,uint128,uint128) - selector 0x2f745df6
+    // Discovered from frontend tx: 0xed96b394b1938b163b1de31b994b8851b7038df9de82f5c324c8e93709a8ccaa
+    name: "updateTradeTpAndSl",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "tradeHash", type: "bytes32" },
+      { name: "takeProfit", type: "uint128" },
+      { name: "stopLoss", type: "uint128" }
     ],
     outputs: []
   }

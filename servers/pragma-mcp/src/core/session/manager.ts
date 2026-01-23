@@ -3,7 +3,7 @@
 // Adapted from pragma-v2-stable (H2)
 // Copyright (c) 2026 s0nderlabs
 
-import type { Address, PublicClient, Hex } from "viem";
+import type { Address, Hex, PublicClient } from "viem";
 import { formatEther, getAddress } from "viem";
 import {
   GAS_PER_OPERATION,
@@ -11,7 +11,6 @@ import {
   SESSION_KEY_FUNDING_AMOUNT,
   MIN_GAS_FOR_DELEGATION,
 } from "../../config/constants.js";
-import type { PragmaConfig } from "../../types/index.js";
 
 // MARK: - Types
 
@@ -84,8 +83,8 @@ export const BATCH_SAFETY_BUFFER = 20_000_000_000_000_000n; // 0.02 MON
 /** Margin added to funding calculation */
 export const FUNDING_SAFETY_MARGIN = 100_000_000_000_000_000n; // 0.1 MON
 
-/** Maximum funding in a single operation */
-export const MAX_FUNDING_AMOUNT = 3_000_000_000_000_000_000n; // 3.0 MON
+/** Maximum funding in a single operation (for auto-calculation only) */
+export const MAX_FUNDING_AMOUNT = 10_000_000_000_000_000_000n; // 10.0 MON
 
 // MARK: - Operation-Specific Gas Functions
 
@@ -201,13 +200,11 @@ export function calculateFundingAmount(
  *
  * @param sessionKeyAddress - Session key public address
  * @param publicClient - Viem public client
- * @param config - Current Pragma configuration
  * @returns Balance information and funding recommendation
  */
 export async function checkSessionKeyBalance(
   sessionKeyAddress: Address,
-  publicClient: PublicClient,
-  config: PragmaConfig
+  publicClient: PublicClient
 ): Promise<SessionKeyBalance> {
   const balance = await publicClient.getBalance({
     address: getAddress(sessionKeyAddress),
@@ -225,7 +222,6 @@ export async function checkSessionKeyBalance(
  *
  * @param sessionKeyAddress - Session key public address
  * @param publicClient - Viem public client
- * @param config - Current Pragma configuration
  * @param operationType - Optional specific operation type
  * @param estimatedOperations - Optional number of operations
  * @returns Detailed balance check result
@@ -233,7 +229,6 @@ export async function checkSessionKeyBalance(
 export async function checkSessionKeyBalanceForOperation(
   sessionKeyAddress: Address,
   publicClient: PublicClient,
-  config: PragmaConfig,
   operationType?: OperationType,
   estimatedOperations?: number
 ): Promise<SessionKeyBalanceCheck> {

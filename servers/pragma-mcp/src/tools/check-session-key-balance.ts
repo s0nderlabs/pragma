@@ -133,7 +133,6 @@ async function checkSessionKeyBalanceHandler(
     const balanceCheck = await checkSessionKeyBalanceForOperation(
       sessionKeyAddress,
       publicClient,
-      config,
       params.operationType as OperationType | undefined,
       params.estimatedOperations
     );

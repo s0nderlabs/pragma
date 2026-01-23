@@ -39,6 +39,7 @@ allowed-tools:
   - mcp__pragma__leverup_open_trade
   - mcp__pragma__leverup_close_trade
   - mcp__pragma__leverup_update_margin
+  - mcp__pragma__leverup_update_tpsl
   - mcp__pragma__leverup_get_market_stats
   - mcp__pragma__leverup_open_limit_order
   - mcp__pragma__leverup_list_limit_orders
@@ -240,7 +241,8 @@ Before executing multiple operations, calculate total gas needed:
 | LeverUp   | `leverup_get_quote`         | High-precision risk simulation                                 |
 | LeverUp   | `leverup_open_trade`        | Open market order (Touch ID)                                   |
 | LeverUp   | `leverup_close_trade`       | Close position (Touch ID)                                      |
-| LeverUp   | `leverup_update_margin`     | Add/remove collateral (Touch ID)                               |
+| LeverUp   | `leverup_update_margin`     | Add collateral to position (Touch ID)                          |
+| LeverUp   | `leverup_update_tpsl`       | Update TP/SL on position (Touch ID)                            |
 | LeverUp   | `leverup_get_market_stats`  | Real-time prices for all LeverUp pairs                         |
 | LeverUp   | `leverup_open_limit_order`  | Place limit order at trigger price (Touch ID)                  |
 | LeverUp   | `leverup_list_limit_orders` | View pending limit orders                                      |
@@ -677,14 +679,25 @@ SL and TP can be set when opening a position. Both are optional (set to 0 to dis
 1. `leverup_list_positions` - Check Health Factor of active trades.
 2. If Health < 20%: Suggest `leverup_update_margin` to add collateral.
    - **NOTE:** This does NOT work for 500x/750x/1001x positions!
-3. To lock in profit: Use `leverup_close_trade`.
+3. To update TP/SL: Use `leverup_update_tpsl`.
+4. To lock in profit: Use `leverup_close_trade`.
 
 #### Update Margin Limitations
 
 `leverup_update_margin` only works for normal leverage (1-100x) positions.
 
-- **Zero-Fee positions (500x/750x/1001x) CANNOT add or remove margin.**
+- **Only ADDING margin is supported** - the contract does not allow margin withdrawal.
+- **Zero-Fee positions (500x/750x/1001x) CANNOT add margin.**
 - The tool will show a warning, and the contract will reject the transaction if attempted.
+
+#### Update TP/SL
+
+Use `leverup_update_tpsl` to modify take profit and stop loss on existing positions:
+
+- Pass price in USD (e.g., '110000' for $110,000)
+- Set to '0' to disable TP or SL
+- At least one of `takeProfit` or `stopLoss` must be provided
+- Works for all position types including Zero-Fee positions
 
 #### Limit Order Flow
 

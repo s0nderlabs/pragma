@@ -150,9 +150,6 @@ const WMON_DEPOSIT_SELECTOR = "0xd0e30db0" as Hex;
 /** WMON withdraw function selector (unwrap WMON → MON) */
 const WMON_WITHDRAW_SELECTOR = "0x2e1a7d4d" as Hex;
 
-/** DEX aggregate function selector */
-const DEX_AGGREGATE_SELECTOR = "0xf99cae99" as Hex;
-
 // Byte offsets for AllowedCalldataEnforcer
 const CALLDATA_OFFSETS = {
   approve: {
@@ -162,9 +159,6 @@ const CALLDATA_OFFSETS = {
   transfer: {
     recipient: 4,  // After selector
     amount: 36,    // 4 + 32
-  },
-  aggregate: {
-    destination: 132, // Offset 132 in aggregate() calldata
   },
 } as const;
 
@@ -938,6 +932,19 @@ export interface LeverUpCancelLimitOrderDelegationContext {
 }
 
 /**
+ * Context needed to create a LeverUp update TP/SL delegation
+ * updateTradeTpAndSl() is nonpayable
+ */
+export interface LeverUpUpdateTpSlDelegationContext {
+  diamond: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+}
+
+/**
  * Create a nad.fun token creation delegation using DTK's createDelegation with scope
  *
  * create() is payable - requires deploy fee (10 MON on mainnet) and optional initial buy.
@@ -1307,6 +1314,74 @@ export function createLeverUpCancelLimitOrderDelegation(
     targets: [getAddress(diamond)],
     selectors: [selector],
     // No valueLte - cancelLimitOrder is nonpayable
+  };
+
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+  const environment = getDTKEnvironment();
+
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a LeverUp update TP/SL delegation using DTK's createDelegation with scope
+ *
+ * updateTradeTpAndSl() is nonpayable - no value required.
+ * Same pattern as createLeverUpCloseDelegation().
+ *
+ * Security properties:
+ * - 5 minute expiry (TimestampEnforcer)
+ * - Single use (LimitedCallsEnforcer limit=1)
+ * - Nonce-based revocation (NonceEnforcer)
+ * - Target enforcement (can only call the diamond)
+ * - Unique salt per delegation (prevents hash collisions)
+ */
+export function createLeverUpUpdateTpSlDelegation(
+  context: LeverUpUpdateTpSlDelegationContext
+): DelegationResult {
+  const {
+    diamond,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+  } = context;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+  const selector = calldata.slice(0, 10) as Hex;
+
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(diamond)],
+    selectors: [selector],
+    // No valueLte - updateTradeTpAndSl is nonpayable
   };
 
   const caveats = buildEphemeralCaveats(nonce, expiresAt);

@@ -23,7 +23,6 @@ import {
   fundSessionKeyViaUserOp,
   fundSessionKeyViaDelegation,
   fundUsdcViaDelegation,
-  SESSION_KEY_FUNDING_AMOUNT,
 } from "../core/execution/sessionKeyFunding.js";
 import {
   checkSessionKeyBalanceForOperation,
@@ -50,7 +49,7 @@ const FundSessionKeySchema = z.object({
   amount: z
     .string()
     .optional()
-    .describe("Amount to fund for USDC only (e.g., '1' for 1 USDC)."),
+    .describe("Amount to fund (e.g., '10' for 10 MON or 10 USDC). If not specified for MON, uses intelligent calculation based on operations."),
 });
 
 interface ToolResponse {
@@ -152,16 +151,19 @@ async function fundSessionKeyHandler(
       };
     }
 
-    // Default MON funding path (Intelligent)
+    // Default MON funding path
     const balanceCheck = await checkSessionKeyBalanceForOperation(
       sessionKeyAddress,
       publicClient,
-      config,
       params.operationType as OperationType,
       params.estimatedOperations
     );
 
-    if (!balanceCheck.needsFunding) {
+    // If user specified a custom amount, use that instead of calculated amount
+    // Otherwise, check if funding is needed based on operations
+    const hasCustomAmount = params.amount && params.amount.trim() !== "";
+
+    if (!hasCustomAmount && !balanceCheck.needsFunding) {
       return {
         success: true,
         message: "Session key already has sufficient balance",
@@ -177,7 +179,10 @@ async function fundSessionKeyHandler(
       };
     }
 
-    const fundingAmount = balanceCheck.recommendedFundingAmount;
+    // Use custom amount if specified, otherwise use calculated recommendation
+    const fundingAmount = hasCustomAmount
+      ? parseUnits(params.amount!, 18)
+      : balanceCheck.recommendedFundingAmount;
     const fundingMethod = balanceCheck.fundingMethod;
     const touchIdMessage = `Fund session key: ${formatEther(fundingAmount)} MON (${fundingMethod})`;
 

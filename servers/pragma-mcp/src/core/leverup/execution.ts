@@ -142,21 +142,65 @@ export async function executeCloseTrade(tradeHash: Hex) {
   };
 }
 
-export async function executeUpdateMargin(
+/**
+ * Build execution data for adding margin to a position.
+ * Uses addMargin(bytes32,address,uint96) - selector 0xe1379570
+ *
+ * NOTE: Only ADDING margin is supported. The contract does not allow margin withdrawal.
+ *
+ * @param tradeHash - Position hash
+ * @param tokenAddress - Address of the margin token (WMON for MON collateral, USDC/LVUSD/LVMON for others)
+ * @param amount - Amount to add (in token's native decimals)
+ * @param isNativeMon - Whether using native MON (affects msg.value)
+ */
+export function executeAddMargin(
   tradeHash: Hex,
+  tokenAddress: Address,
   amount: bigint,
-  isAdd: boolean
+  isNativeMon: boolean
 ) {
   const calldata = encodeFunctionData({
     abi: TRADING_PORTAL_ABI,
-    functionName: "updateMargin",
-    args: [tradeHash, amount, isAdd]
+    functionName: "addMargin",
+    args: [tradeHash, tokenAddress, amount]
+  });
+
+  // For native MON: send amount as msg.value
+  // For ERC20: msg.value is 0 (already approved)
+  return {
+    to: LEVERUP_DIAMOND,
+    data: calldata,
+    value: isNativeMon ? amount : 0n,
+    tokenIn: tokenAddress,
+    amountIn: amount
+  };
+}
+
+/**
+ * Build execution data for updating TP/SL on a position.
+ * Uses updateTradeTpAndSl(bytes32,uint128,uint128) - selector 0x2f745df6
+ *
+ * This is a nonpayable function - no msg.value required.
+ *
+ * @param tradeHash - Position hash
+ * @param takeProfit - New take profit price (18 decimals, 0 to disable)
+ * @param stopLoss - New stop loss price (18 decimals, 0 to disable)
+ */
+export function executeUpdateTpSl(
+  tradeHash: Hex,
+  takeProfit: bigint,
+  stopLoss: bigint
+) {
+  const calldata = encodeFunctionData({
+    abi: TRADING_PORTAL_ABI,
+    functionName: "updateTradeTpAndSl",
+    args: [tradeHash, takeProfit, stopLoss]
   });
 
   return {
     to: LEVERUP_DIAMOND,
     data: calldata,
-    value: isAdd ? amount : 0n
+    value: 0n
   };
 }
 
