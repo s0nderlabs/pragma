@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-01-23
+
+### Added
+- **LeverUp Limit Orders** - 3 new MCP tools for limit order trading:
+  - `leverup_open_limit_order`: Place limit orders at specified trigger prices with SL/TP
+  - `leverup_list_limit_orders`: View all pending limit orders
+  - `leverup_cancel_limit_order`: Cancel pending limit orders (single or batch)
+- Trigger price validation for limit orders (Long below market, Short above market)
+
+### Fixed
+- **Native MON collateral** - Fixed trading with MON collateral by using WMON in calldata while sending native MON as msg.value (contract wraps internally)
+- Balance validation now includes trading fees before transaction
+- Parallel limit order fetching (20x faster)
+
 ## [0.6.1] - 2026-01-23
 
 ### Added

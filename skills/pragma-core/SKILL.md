@@ -40,6 +40,9 @@ allowed-tools:
   - mcp__pragma__leverup_close_trade
   - mcp__pragma__leverup_update_margin
   - mcp__pragma__leverup_get_market_stats
+  - mcp__pragma__leverup_open_limit_order
+  - mcp__pragma__leverup_list_limit_orders
+  - mcp__pragma__leverup_cancel_limit_order
   - mcp__pragma__market_get_chart
   - AskUserQuestion
   - Read
@@ -239,6 +242,9 @@ Before executing multiple operations, calculate total gas needed:
 | LeverUp   | `leverup_close_trade`       | Close position (Touch ID)                                      |
 | LeverUp   | `leverup_update_margin`     | Add/remove collateral (Touch ID)                               |
 | LeverUp   | `leverup_get_market_stats`  | Real-time prices for all LeverUp pairs                         |
+| LeverUp   | `leverup_open_limit_order`  | Place limit order at trigger price (Touch ID)                  |
+| LeverUp   | `leverup_list_limit_orders` | View pending limit orders                                      |
+| LeverUp   | `leverup_cancel_limit_order`| Cancel pending limit orders (Touch ID)                         |
 | Market    | `market_get_chart`          | OHLCV candlestick data for any asset                           |
 
 ### Context-Optimized Operations (IMPORTANT)
@@ -594,6 +600,19 @@ description: |
 
 **CRITICAL:** If user requests 500BTC or 500ETH, they MUST use exactly 500x, 750x, or 1001x leverage. Any other value will fail with "Below degen mode min leverage" error.
 
+#### Order Types: Market vs Limit
+
+| Order Type | When to Use | Trigger Behavior |
+|------------|-------------|------------------|
+| **Market** (`leverup_open_trade`) | Execute immediately at current price | Fills instantly |
+| **Limit** (`leverup_open_limit_order`) | Wait for better entry price | Triggers when market reaches price |
+
+**Limit Order Trigger Rules:**
+- **Long limit orders:** Trigger price must be BELOW current market (buy the dip)
+- **Short limit orders:** Trigger price must be ABOVE current market (sell the top)
+
+**Limit orders are NOT available for Zero-Fee pairs (500BTC/500ETH).**
+
 #### Minimum Trade Thresholds
 
 LeverUp enforces the following limits. Always inform the user if their trade is near or below these thresholds.
@@ -666,6 +685,38 @@ SL and TP can be set when opening a position. Both are optional (set to 0 to dis
 
 - **Zero-Fee positions (500x/750x/1001x) CANNOT add or remove margin.**
 - The tool will show a warning, and the contract will reject the transaction if attempted.
+
+#### Limit Order Flow
+
+Use limit orders when user wants to enter a position at a specific price instead of current market.
+
+1. `leverup_get_market_stats` - Check current price for the asset
+2. Determine trigger price based on user intent:
+   - User wants to "buy the dip" → Long limit with trigger below current price
+   - User wants to "sell the top" → Short limit with trigger above current price
+3. `leverup_open_limit_order` with trigger price, leverage, margin, and optional SL/TP
+4. **Use `AskUserQuestion`:**
+   - Header: "Limit Order"
+   - Question: "Place [X]x [Long/Short] limit order on [SYMBOL] @ $[TRIGGER]?"
+   - Options: ["Confirm order (Touch ID)", "Cancel"]
+   - Description: Include current price vs trigger price, margin, position size
+5. If confirmed: `check_session_key_balance` (operationType: "swap")
+6. If needsFunding - `fund_session_key` → **WAIT**
+7. Execute the limit order
+8. Report result with tx hash
+
+**Note:** SL/TP for limit orders are validated against the TRIGGER price, not current market.
+
+#### Managing Limit Orders
+
+1. `leverup_list_limit_orders` - View all pending orders (not yet filled)
+2. `leverup_cancel_limit_order` - Cancel one or more pending orders
+   - Accepts single orderHash or array for batch cancel
+   - Use batch cancel when user wants to "cancel all orders"
+
+**Distinction:**
+- `leverup_list_positions` → FILLED positions (active trades)
+- `leverup_list_limit_orders` → PENDING orders (waiting to trigger)
 
 ### Relative Amounts ("all", "half", "max", percentages)
 

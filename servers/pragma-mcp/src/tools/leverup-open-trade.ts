@@ -22,11 +22,13 @@ import {
   createPublicClient,
   createWalletClient,
   parseUnits,
+  formatUnits,
   encodeFunctionData,
   erc20Abi,
   type Address,
   type Hex,
 } from "viem";
+import { LVUSD_ADDRESS, USDC_ADDRESS, LVMON_ADDRESS } from "../core/leverup/constants.js";
 import {
   redeemDelegations,
   createExecution,
@@ -166,15 +168,55 @@ export function registerLeverUpOpenTrade(server: McpServer): void {
           transport: createSyncHttpTransport(rpcUrl, config),
         });
 
+        // Validate balance for collateral (includes fee)
+        const decimals = getCollateralDecimals(collateral);
+
+        if (collateral === "MON") {
+          // For native MON collateral: execution.value includes both Pyth fee + collateral
+          // No wrapping or approval needed - just check native balance
+          const nativeBalance = await publicClient.getBalance({ address: userAddress });
+
+          if (nativeBalance < execution.value) {
+            const required = formatUnits(execution.amountIn, decimals);
+            const tradingFee = formatUnits(execution.amountIn - marginWei, decimals);
+            const totalRequired = formatUnits(execution.value, decimals);
+            throw new Error(
+              `Insufficient native MON balance. Required: ${totalRequired} MON (${params.marginAmount} margin + ${tradingFee} trading fee + Pyth fee). ` +
+              `Available: ${formatUnits(nativeBalance, decimals)} MON.`
+            );
+          }
+        } else {
+          // For ERC20 collateral: check token balance
+          const tokenAddress = collateral === "USDC" ? USDC_ADDRESS
+            : collateral === "LVUSD" ? LVUSD_ADDRESS
+            : LVMON_ADDRESS;
+
+          const userBalance = await publicClient.readContract({
+            address: tokenAddress,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [userAddress],
+          });
+
+          if (userBalance < execution.amountIn) {
+            const required = formatUnits(execution.amountIn, decimals);
+            const available = formatUnits(userBalance, decimals);
+            const fee = formatUnits(execution.amountIn - marginWei, decimals);
+            throw new Error(
+              `Insufficient ${collateral} balance. Required: ${required} ${collateral} (${params.marginAmount} margin + ${fee} fee), Available: ${available} ${collateral}.`
+            );
+          }
+        }
+
         const nonce = await getCurrentNonce(publicClient, userAddress);
 
         // Build delegation bundles
         const delegations: DelegationBundle[] = [];
 
-        // ERC20 collateral (USDC, LVUSD, LVMON) needs approval; native MON does not
-        const needsApproval = collateral !== "MON";
-
-        if (needsApproval) {
+        // For native MON collateral: no wrap or approval needed
+        // For ERC20 collateral: approve if needed
+        if (collateral !== "MON") {
+          // Non-MON collateral: just need approval if insufficient
           const tokenAddress = execution.tokenIn;
 
           // Check current allowance
@@ -264,9 +306,12 @@ export function registerLeverUpOpenTrade(server: McpServer): void {
 
         // Burst sign all delegations
         for (const bundle of delegations) {
-          const actionLabel = bundle.kind === "approve"
-            ? `Approve ${params.collateralToken} for LeverUp`
-            : `LeverUp: ${params.leverage}x ${params.isLong ? 'Long' : 'Short'} ${params.symbol}`;
+          let actionLabel: string;
+          if (bundle.kind === "approve") {
+            actionLabel = `Approve ${collateral} for LeverUp`;
+          } else {
+            actionLabel = `LeverUp: ${params.leverage}x ${params.isLong ? 'Long' : 'Short'} ${params.symbol}`;
+          }
 
           const signature = await signDelegationWithP256(
             bundle.delegation,
@@ -285,24 +330,76 @@ export function registerLeverUpOpenTrade(server: McpServer): void {
           transport: createSyncHttpTransport(rpcUrl, config),
         });
 
-        // Build redemptions
-        const redemptions = delegations.map((bundle) => ({
-          permissionContext: [bundle.delegation],
+        // Execute delegations sequentially: approve (if needed) -> trade
+        // For native MON, there are no approve delegations
+
+        // Step 1: Execute approve delegations separately (if any)
+        const approveBundles = delegations.filter(d => d.kind === "approve");
+        if (approveBundles.length > 0) {
+          const approveRedemptions = approveBundles.map((bundle) => ({
+            permissionContext: [bundle.delegation],
+            executions: [
+              createExecution({
+                target: bundle.execution.target,
+                value: bundle.execution.value,
+                callData: bundle.execution.callData,
+              }),
+            ],
+            mode: ExecutionMode.SingleDefault,
+          }));
+
+          const approveTxHash = await redeemDelegations(
+            sessionWallet,
+            publicClient,
+            DELEGATION_FRAMEWORK.delegationManager,
+            approveRedemptions
+          );
+
+          const approveReceipt = await waitForReceiptSync(publicClient, approveTxHash);
+          if (approveReceipt.status !== "success") {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  success: false,
+                  message: "Failed to approve token. Transaction reverted.",
+                }, null, 2)
+              }]
+            };
+          }
+        }
+
+        // Step 2: Execute the trade delegation
+        const tradeBundle = delegations.find(d => d.kind === "leverup_open");
+        if (!tradeBundle) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: false,
+                message: "Internal error: trade delegation not found.",
+              }, null, 2)
+            }]
+          };
+        }
+
+        const tradeRedemption = [{
+          permissionContext: [tradeBundle.delegation],
           executions: [
             createExecution({
-              target: bundle.execution.target,
-              value: bundle.execution.value,
-              callData: bundle.execution.callData,
+              target: tradeBundle.execution.target,
+              value: tradeBundle.execution.value,
+              callData: tradeBundle.execution.callData,
             }),
           ],
           mode: ExecutionMode.SingleDefault,
-        }));
+        }];
 
         const txHash = await redeemDelegations(
           sessionWallet,
           publicClient,
           DELEGATION_FRAMEWORK.delegationManager,
-          redemptions
+          tradeRedemption
         );
 
         const receipt = await waitForReceiptSync(publicClient, txHash);
@@ -312,7 +409,7 @@ export function registerLeverUpOpenTrade(server: McpServer): void {
             type: "text",
             text: JSON.stringify({
               success: receipt.status === "success",
-              message: receipt.status === "success" 
+              message: receipt.status === "success"
                 ? `Successfully opened ${params.leverage}x ${params.isLong ? 'Long' : 'Short'} on ${params.symbol}`
                 : "Transaction reverted on-chain",
               txHash,

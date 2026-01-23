@@ -11,6 +11,7 @@ import { isX402Mode, x402HttpOptions } from "../x402/client.js";
 import {
   LEVERUP_DIAMOND,
   READER_ABI,
+  LIMIT_ORDER_READER_ABI,
   SUPPORTED_PAIRS,
   LIQUIDATION_LOSS_RATE,
   DEGEN_MODE_LEVERAGE_OPTIONS,
@@ -20,8 +21,10 @@ import {
 } from "./constants.js";
 import {
   LeverUpPosition,
+  LeverUpLimitOrder,
   PositionAnalysis,
-  LeverUpQuote
+  LeverUpQuote,
+  LimitOrderQuote
 } from "./types.js";
 import { fetchPythPriceData } from "./pyth-client.js";
 import { withRetryOrThrow } from "../utils/retry.js";
@@ -171,10 +174,14 @@ export async function getLeverUpQuote(
   const minNotionalUsd = 200; // Hard limit
 
   const warnings: string[] = [];
+  let hasHardFailure = false;
+
   if (Number(formatUnits(positionValueUsd, 18)) < minNotionalUsd) {
     warnings.push(`Position size is below the protocol minimum of $200.00 USD (Current: $${Number(formatUnits(positionValueUsd, 18)).toFixed(2)}). This will be rejected by the contract.`);
+    hasHardFailure = true;
   }
   if (Number(marginUsdFormatted) < minMarginUsd) {
+    // Soft warning only - don't set hasHardFailure
     warnings.push(`Margin is below the recommended $10.00 USD (Current: $${Number(marginUsdFormatted).toFixed(2)}). This may work but is not recommended.`);
   }
 
@@ -183,6 +190,7 @@ export async function getLeverUpQuote(
       `${pairMetadata.pair} is a high-leverage (Zero-Fee) pair that ONLY supports ${DEGEN_MODE_LEVERAGE_OPTIONS.join(', ')}x leverage. ` +
       `Current leverage (${leverage}x) will be rejected by the protocol.`
     );
+    hasHardFailure = true;
   }
 
   return {
@@ -198,7 +206,7 @@ export async function getLeverUpQuote(
     openFee: Number(formatUnits(openFeeUsd, 18)).toFixed(4),
     healthFactor: Math.max(0, Math.min(100, Number(distance))),
     distanceToLiq: `${(Number(distance) / 100).toFixed(2)}%`,
-    meetsMinimums: warnings.length === 0,
+    meetsMinimums: !hasHardFailure,
     warnings,
     isHighLeveragePair: pairMetadata.isHighLeverage ?? false,
     maxTpPercent: getMaxTpPercent(leverage),
@@ -209,8 +217,8 @@ export async function getLeverUpQuote(
 function analyzePosition(pos: LeverUpPosition, currentPrice: bigint): PositionAnalysis {
   const isLong = pos.isLong;
   const entryPrice = pos.entryPrice;
-  const qty = pos.qty; 
-  const margin = pos.margin; 
+  const qty = pos.qty;
+  const margin = pos.margin;
 
   let pnl: bigint;
   if (isLong) {
@@ -224,7 +232,7 @@ function analyzePosition(pos: LeverUpPosition, currentPrice: bigint): PositionAn
 
   const collateralFactor = (margin * LIQUIDATION_LOSS_RATE) / 10000n;
   const buffer = collateralFactor - totalFees;
-  
+
   let liqPrice: bigint;
   if (isLong) {
     liqPrice = entryPrice - (buffer * (10n ** 10n) / qty);
@@ -232,7 +240,7 @@ function analyzePosition(pos: LeverUpPosition, currentPrice: bigint): PositionAn
     liqPrice = entryPrice + (buffer * (10n ** 10n) / qty);
   }
 
-  const distance = isLong 
+  const distance = isLong
     ? (currentPrice - liqPrice) * 10000n / currentPrice
     : (liqPrice - currentPrice) * 10000n / currentPrice;
 
@@ -243,5 +251,116 @@ function analyzePosition(pos: LeverUpPosition, currentPrice: bigint): PositionAn
     distanceToLiq: `${(Number(distance) / 100).toFixed(2)}%`,
     healthFactor: Math.max(0, Math.min(100, Number(distance))),
     isLiquidatable: distance <= 0
+  };
+}
+
+// ========== LIMIT ORDER FUNCTIONS ==========
+
+/**
+ * Get all pending limit orders for a user across all supported pairs.
+ * Note: These are PENDING orders that haven't been filled yet.
+ * For filled positions, use getUserPositions() instead.
+ */
+export async function getUserLimitOrders(
+  userAddress: Address
+): Promise<LeverUpLimitOrder[]> {
+  const config = await loadConfig();
+  if (!config || !isWalletConfigured(config)) {
+    throw new Error("Wallet not configured.");
+  }
+
+  const client = await createLeverUpClient(config);
+
+  // Fetch all pairs in parallel (Monad doesn't have Multicall3)
+  const results = await Promise.all(
+    SUPPORTED_PAIRS.map(async (pairMetadata) => {
+      try {
+        const rawOrders = await withRetryOrThrow(
+          async () => client.readContract({
+            address: LEVERUP_DIAMOND,
+            abi: LIMIT_ORDER_READER_ABI as any,
+            functionName: "getLimitOrders",
+            args: [userAddress, pairMetadata.pairBase]
+          }),
+          { operationName: `leverup-get-limit-orders-${pairMetadata.pair}` }
+        );
+
+        if (rawOrders && (rawOrders as any[]).length > 0) {
+          return (rawOrders as any[]).map(order => ({
+            ...order,
+            pair: pairMetadata.pair,
+          })) as LeverUpLimitOrder[];
+        }
+        return [];
+      } catch {
+        // If one pair fails, don't break the whole query
+        return [];
+      }
+    })
+  );
+
+  return results.flat();
+}
+
+/**
+ * Get a quote for a limit order with trigger price validation.
+ *
+ * Trigger price rules:
+ * - Long orders: trigger price must be BELOW current market price
+ * - Short orders: trigger price must be ABOVE current market price
+ */
+export async function getLimitOrderQuote(
+  symbol: string,
+  isLong: boolean,
+  marginAmount: string,
+  leverage: number,
+  triggerPrice: string,
+  collateralToken = "MON"
+): Promise<LimitOrderQuote> {
+  // Get base quote calculations
+  const baseQuote = await getLeverUpQuote(symbol, isLong, marginAmount, leverage, collateralToken);
+
+  const triggerPriceBigInt = parseUnits(triggerPrice, 18);
+  const currentPriceBigInt = parseUnits(baseQuote.entryPrice, 18);
+
+  // Validate trigger price direction
+  let isTriggerValid: boolean;
+  let triggerValidationMessage: string;
+
+  if (isLong) {
+    // Long orders: trigger must be BELOW current market
+    isTriggerValid = triggerPriceBigInt < currentPriceBigInt;
+    if (isTriggerValid) {
+      const diffPercent = ((currentPriceBigInt - triggerPriceBigInt) * 10000n / currentPriceBigInt);
+      triggerValidationMessage = `Valid: Trigger price is ${(Number(diffPercent) / 100).toFixed(2)}% below current market.`;
+    } else {
+      triggerValidationMessage = `Invalid: Long limit orders require trigger price BELOW current market ($${baseQuote.entryPrice}).`;
+    }
+  } else {
+    // Short orders: trigger must be ABOVE current market
+    isTriggerValid = triggerPriceBigInt > currentPriceBigInt;
+    if (isTriggerValid) {
+      const diffPercent = ((triggerPriceBigInt - currentPriceBigInt) * 10000n / currentPriceBigInt);
+      triggerValidationMessage = `Valid: Trigger price is ${(Number(diffPercent) / 100).toFixed(2)}% above current market.`;
+    } else {
+      triggerValidationMessage = `Invalid: Short limit orders require trigger price ABOVE current market ($${baseQuote.entryPrice}).`;
+    }
+  }
+
+  // Add warning if trigger is invalid
+  const warnings = [...baseQuote.warnings];
+  if (!isTriggerValid) {
+    warnings.unshift(triggerValidationMessage);
+  }
+
+  return {
+    ...baseQuote,
+    triggerPrice: triggerPrice,
+    triggerPriceUsd: `$${Number(triggerPrice).toFixed(2)}`,
+    currentPrice: baseQuote.entryPrice,
+    isTriggerValid,
+    triggerValidationMessage,
+    warnings,
+    meetsMinimums: baseQuote.meetsMinimums && isTriggerValid,
   };
 }

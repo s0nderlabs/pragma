@@ -7,13 +7,14 @@ import {
 import {
   LEVERUP_DIAMOND,
   TRADING_PORTAL_ABI,
+  LIMIT_ORDER_ABI,
   SUPPORTED_PAIRS,
   PYTH_CONTRACT,
   PYTH_ABI,
   USDC_ADDRESS,
   LVUSD_ADDRESS,
   LVMON_ADDRESS,
-  NATIVE_MON_ADDRESS
+  WMON_ADDRESS
 } from "./constants.js";
 import { fetchPythPriceData } from "./pyth-client.js";
 import { createLeverUpClient } from "./client.js";
@@ -82,7 +83,10 @@ export async function executeOpenTrade(
       break;
     case "MON":
     default:
-      tokenIn = NATIVE_MON_ADDRESS;
+      // For native MON: use WMON as tokenIn but send native MON as msg.value
+      // The LeverUp contract internally wraps MON to WMON
+      // Verified from frontend tx: 0x35a55ef9be400cbf6aacc3cb7154fdd1c543b714fb8721e6f52ce9ea934735b8
+      tokenIn = WMON_ADDRESS;
       lvToken = LVMON_ADDRESS;
       break;
   }
@@ -110,8 +114,10 @@ export async function executeOpenTrade(
     args: [openData, priceUpdateData]
   });
 
-  // Only send native MON value if using native MON collateral
-  const msgValue = updateFee + (params.collateralToken === "MON" ? totalAmountIn : 0n);
+  // For native MON: msg.value = Pyth fee + collateral amount (native MON is payable)
+  // For ERC20 collaterals: msg.value is only the Pyth fee
+  const isNativeMon = params.collateralToken === "MON";
+  const msgValue = isNativeMon ? updateFee + totalAmountIn : updateFee;
 
   return {
     to: LEVERUP_DIAMOND,
@@ -151,5 +157,156 @@ export async function executeUpdateMargin(
     to: LEVERUP_DIAMOND,
     data: calldata,
     value: isAdd ? amount : 0n
+  };
+}
+
+// ========== LIMIT ORDER EXECUTION ==========
+
+export interface OpenLimitOrderParams {
+  symbol: string;
+  isLong: boolean;
+  amountIn: bigint;
+  leverage: number;
+  qty: bigint;
+  triggerPrice: bigint; // Price at which order fills
+  stopLoss?: bigint;
+  takeProfit?: bigint;
+  collateralToken: CollateralToken;
+}
+
+/**
+ * Build execution data for opening a limit order.
+ * Same as market order but uses triggerPrice instead of slippage protection price.
+ *
+ * Trigger price rules:
+ * - Long orders: trigger when price drops BELOW limit price
+ * - Short orders: trigger when price rises ABOVE limit price
+ */
+export async function executeOpenLimitOrder(
+  params: OpenLimitOrderParams,
+  config: any
+) {
+  const pairMetadata = SUPPORTED_PAIRS.find(p => p.pair === `${params.symbol}/USD` || p.pair === params.symbol);
+  if (!pairMetadata) throw new Error(`Unsupported pair: ${params.symbol}`);
+
+  const client = await createLeverUpClient(config);
+
+  const priceIds = [pairMetadata.pythId];
+  const monMetadata = SUPPORTED_PAIRS.find(p => p.pair === "MON/USD");
+  // Fetch MON price for MON or LVMON collateral
+  if ((params.collateralToken === "MON" || params.collateralToken === "LVMON") && monMetadata) {
+    priceIds.push(monMetadata.pythId);
+  }
+
+  const pythUpdate = await fetchPythPriceData(priceIds);
+  const priceUpdateData = pythUpdate.binary.data.map(d => d.startsWith("0x") ? d : `0x${d}` as Hex);
+
+  const updateFee = await withRetryOrThrow(
+    async () => client.readContract({
+      address: PYTH_CONTRACT,
+      abi: PYTH_ABI,
+      functionName: "getUpdateFee",
+      args: [priceUpdateData]
+    }),
+    { operationName: "leverup-limit-pyth-fee" }
+  );
+
+  // Determine tokenIn and lvToken based on collateral type
+  let tokenIn: Address;
+  let lvToken: Address;
+
+  switch (params.collateralToken) {
+    case "USDC":
+      tokenIn = USDC_ADDRESS;
+      lvToken = LVUSD_ADDRESS;
+      break;
+    case "LVUSD":
+      tokenIn = LVUSD_ADDRESS;
+      lvToken = LVUSD_ADDRESS;
+      break;
+    case "LVMON":
+      tokenIn = LVMON_ADDRESS;
+      lvToken = LVMON_ADDRESS;
+      break;
+    case "MON":
+    default:
+      // For native MON: use WMON as tokenIn but send native MON as msg.value
+      // The LeverUp contract internally wraps MON to WMON
+      // Verified from frontend tx: 0x35a55ef9be400cbf6aacc3cb7154fdd1c543b714fb8721e6f52ce9ea934735b8
+      tokenIn = WMON_ADDRESS;
+      lvToken = LVMON_ADDRESS;
+      break;
+  }
+
+  const openFeeBps = 45n;
+  const openFee = (params.amountIn * BigInt(params.leverage) * openFeeBps) / 100000n;
+  const totalAmountIn = params.amountIn + openFee;
+
+  const openData = {
+    pairBase: getAddress(pairMetadata.pairBase),
+    isLong: params.isLong,
+    tokenIn,
+    lvToken,
+    amountIn: totalAmountIn,
+    qty: params.qty,
+    price: params.triggerPrice, // TRIGGER price for limit orders
+    stopLoss: params.stopLoss || 0n,
+    takeProfit: params.takeProfit || 0n,
+    broker: 0
+  };
+
+  const calldata = encodeFunctionData({
+    abi: LIMIT_ORDER_ABI,
+    functionName: "openLimitOrderWithPyth",
+    args: [openData, priceUpdateData]
+  });
+
+  // For native MON: msg.value = Pyth fee + collateral amount (native MON is payable)
+  // For ERC20 collaterals: msg.value is only the Pyth fee
+  const isNativeMon = params.collateralToken === "MON";
+  const msgValue = isNativeMon ? updateFee + totalAmountIn : updateFee;
+
+  return {
+    to: LEVERUP_DIAMOND,
+    data: calldata,
+    value: msgValue,
+    tokenIn,
+    amountIn: totalAmountIn
+  };
+}
+
+/**
+ * Build execution data for canceling a single limit order.
+ * Note: This is a nonpayable function (no value required).
+ */
+export function executeCancelLimitOrder(orderHash: Hex) {
+  const calldata = encodeFunctionData({
+    abi: LIMIT_ORDER_ABI,
+    functionName: "cancelLimitOrder",
+    args: [orderHash]
+  });
+
+  return {
+    to: LEVERUP_DIAMOND,
+    data: calldata,
+    value: 0n
+  };
+}
+
+/**
+ * Build execution data for canceling multiple limit orders in a single transaction.
+ * Note: This is a nonpayable function (no value required).
+ */
+export function executeBatchCancelLimitOrders(orderHashes: Hex[]) {
+  const calldata = encodeFunctionData({
+    abi: LIMIT_ORDER_ABI,
+    functionName: "batchCancelLimitOrders",
+    args: [orderHashes]
+  });
+
+  return {
+    to: LEVERUP_DIAMOND,
+    data: calldata,
+    value: 0n
   };
 }

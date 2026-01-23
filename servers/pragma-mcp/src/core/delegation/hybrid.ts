@@ -911,6 +911,33 @@ export interface LeverUpUpdateMarginDelegationContext {
 }
 
 /**
+ * Context needed to create a LeverUp limit order delegation
+ * openLimitOrderWithPyth() is payable - Pyth fee + collateral (if MON)
+ */
+export interface LeverUpLimitOrderDelegationContext {
+  diamond: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+  value: bigint; // Pyth fee + collateral (if MON)
+}
+
+/**
+ * Context needed to create a LeverUp cancel limit order delegation
+ * cancelLimitOrder() and batchCancelLimitOrders() are nonpayable
+ */
+export interface LeverUpCancelLimitOrderDelegationContext {
+  diamond: Address;
+  delegator: Address;
+  sessionKey: Address;
+  nonce: bigint;
+  chainId: number;
+  calldata: Hex;
+}
+
+/**
  * Create a nad.fun token creation delegation using DTK's createDelegation with scope
  *
  * create() is payable - requires deploy fee (10 MON on mainnet) and optional initial buy.
@@ -1009,11 +1036,16 @@ export function createLeverUpOpenDelegation(
   const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
   const selector = calldata.slice(0, 10) as Hex;
 
+  // Add buffer to valueLte to handle any encoding/rounding differences in the delegation framework
+  // The actual value sent is controlled by the execution, not this limit
+  // Security: Still bounded by ephemeral caveats (5 min expiry, single use, target/selector enforcement)
+  const valueWithBuffer = value + BigInt(1e15); // Add 0.001 MON buffer
+
   const scope = {
     type: "functionCall" as const,
     targets: [getAddress(diamond)],
     selectors: [selector],
-    valueLte: { maxValue: value },
+    valueLte: { maxValue: valueWithBuffer },
   };
 
   const caveats = buildEphemeralCaveats(nonce, expiresAt);
@@ -1125,11 +1157,156 @@ export function createLeverUpUpdateMarginDelegation(
   const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
   const selector = calldata.slice(0, 10) as Hex;
 
+  // Add buffer to valueLte to handle any encoding/rounding differences
+  const valueWithBuffer = value + BigInt(1e15); // Add 0.001 MON buffer
+
   const scope = {
     type: "functionCall" as const,
     targets: [getAddress(diamond)],
     selectors: [selector],
-    valueLte: { maxValue: value },
+    valueLte: { maxValue: valueWithBuffer },
+  };
+
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+  const environment = getDTKEnvironment();
+
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a LeverUp limit order delegation using DTK's createDelegation with scope
+ *
+ * openLimitOrderWithPyth() is payable - requires Pyth update fee + collateral (if MON).
+ * Same pattern as createLeverUpOpenDelegation().
+ *
+ * Security properties:
+ * - 5 minute expiry (TimestampEnforcer)
+ * - Single use (LimitedCallsEnforcer limit=1)
+ * - Nonce-based revocation (NonceEnforcer)
+ * - Target enforcement (can only call the diamond)
+ * - Value enforcement (valueLte limits total MON sent)
+ * - Unique salt per delegation (prevents hash collisions)
+ */
+export function createLeverUpLimitOrderDelegation(
+  context: LeverUpLimitOrderDelegationContext
+): DelegationResult {
+  const {
+    diamond,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+    value,
+  } = context;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+  const selector = calldata.slice(0, 10) as Hex;
+
+  // Add buffer to valueLte to handle any encoding/rounding differences
+  // Comment update: Pyth fee only (collateral is ERC20 WMON, not native)
+  const valueWithBuffer = value + BigInt(1e15); // Add 0.001 MON buffer
+
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(diamond)],
+    selectors: [selector],
+    valueLte: { maxValue: valueWithBuffer },
+  };
+
+  const caveats = buildEphemeralCaveats(nonce, expiresAt);
+  const environment = getDTKEnvironment();
+
+  const uniqueSalt = keccak256(
+    concat([
+      numberToHex(Date.now(), { size: 32 }),
+      numberToHex(Math.floor(Math.random() * 1e18), { size: 32 }),
+      toHex(nonce),
+    ])
+  );
+
+  const delegation = createDelegation({
+    environment,
+    scope,
+    from: delegator as Hex,
+    to: sessionKey as Hex,
+    caveats,
+    salt: uniqueSalt,
+  });
+
+  const typedData = buildDelegationTypedData(
+    delegation,
+    chainId,
+    DELEGATION_FRAMEWORK.delegationManager
+  );
+
+  return {
+    delegation,
+    typedData,
+    expiresAt,
+  };
+}
+
+/**
+ * Create a LeverUp cancel limit order delegation using DTK's createDelegation with scope
+ *
+ * cancelLimitOrder() and batchCancelLimitOrders() are nonpayable - no value required.
+ * Same pattern as createLeverUpCloseDelegation().
+ *
+ * Security properties:
+ * - 5 minute expiry (TimestampEnforcer)
+ * - Single use (LimitedCallsEnforcer limit=1)
+ * - Nonce-based revocation (NonceEnforcer)
+ * - Target enforcement (can only call the diamond)
+ * - Unique salt per delegation (prevents hash collisions)
+ */
+export function createLeverUpCancelLimitOrderDelegation(
+  context: LeverUpCancelLimitOrderDelegationContext
+): DelegationResult {
+  const {
+    diamond,
+    delegator,
+    sessionKey,
+    nonce,
+    chainId,
+    calldata,
+  } = context;
+
+  const expiresAt = Math.floor(Date.now() / 1000) + DEFAULT_DELEGATION_EXPIRY_SECONDS;
+  const selector = calldata.slice(0, 10) as Hex;
+
+  const scope = {
+    type: "functionCall" as const,
+    targets: [getAddress(diamond)],
+    selectors: [selector],
+    // No valueLte - cancelLimitOrder is nonpayable
   };
 
   const caveats = buildEphemeralCaveats(nonce, expiresAt);

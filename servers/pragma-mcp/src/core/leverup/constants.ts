@@ -9,6 +9,25 @@ export const USDC_ADDRESS = "0x754704Bc059F8C67012fEd69BC8A327a5aafb603" as Addr
 export const LVUSD_ADDRESS = "0xFD44B35139Ae53FFF7d8F2A9869c503D987f00d1" as Address;
 export const LVMON_ADDRESS = "0x91b81bfbe3A747230F0529Aa28d8b2Bc898E6D56" as Address;
 export const NATIVE_MON_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
+export const WMON_ADDRESS = "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A" as Address;
+
+// WMON ABI for wrapping/unwrapping native MON
+export const WMON_ABI = [
+  {
+    name: "deposit",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: []
+  },
+  {
+    name: "withdraw",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "wad", type: "uint256" }],
+    outputs: []
+  }
+] as const;
 
 export const LIQUIDATION_LOSS_RATE = 8500n;
 
@@ -103,6 +122,84 @@ export const TRADING_PORTAL_ABI = [
       { name: "isAdd", type: "bool" }
     ],
     outputs: []
+  }
+] as const;
+
+// Limit Order ABI - uses same OpenDataInput struct as market orders
+// The only difference: `price` field = trigger price (order fills when market reaches this)
+export const LIMIT_ORDER_ABI = [
+  {
+    inputs: [
+      {
+        components: [
+          { type: "address", name: "pairBase" },
+          { type: "bool", name: "isLong" },
+          { type: "address", name: "tokenIn" },
+          { type: "address", name: "lvToken" },
+          { type: "uint96", name: "amountIn" },
+          { type: "uint128", name: "qty" },
+          { type: "uint128", name: "price" }, // TRIGGER price for limit orders
+          { type: "uint128", name: "stopLoss" },
+          { type: "uint128", name: "takeProfit" },
+          { type: "uint24", name: "broker" }
+        ],
+        name: "data",
+        type: "tuple"
+      },
+      { type: "bytes[]", name: "priceUpdateData" }
+    ],
+    name: "openLimitOrderWithPyth",
+    outputs: [{ type: "bytes32", name: "orderHash" }],
+    stateMutability: "payable",
+    type: "function"
+  },
+  {
+    name: "cancelLimitOrder",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "orderHash", type: "bytes32" }],
+    outputs: []
+  },
+  {
+    name: "batchCancelLimitOrders",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "orderHashes", type: "bytes32[]" }],
+    outputs: []
+  }
+] as const;
+
+// Limit Order Reader ABI - for fetching pending limit orders
+export const LIMIT_ORDER_READER_ABI = [
+  {
+    type: "function",
+    inputs: [
+      { type: "address", name: "user" },
+      { type: "address", name: "pairBase" }
+    ],
+    name: "getLimitOrders",
+    outputs: [
+      {
+        components: [
+          { type: "bytes32", name: "orderHash" },
+          { type: "string", name: "pair" },
+          { type: "address", name: "pairBase" },
+          { type: "bool", name: "isLong" },
+          { type: "address", name: "tokenIn" },
+          { type: "address", name: "lvToken" },
+          { type: "uint96", name: "amountIn" },
+          { type: "uint128", name: "qty" },
+          { type: "uint128", name: "limitPrice" },
+          { type: "uint128", name: "stopLoss" },
+          { type: "uint128", name: "takeProfit" },
+          { type: "uint24", name: "broker" },
+          { type: "uint32", name: "timestamp" }
+        ],
+        type: "tuple[]",
+        name: ""
+      }
+    ],
+    stateMutability: "view"
   }
 ] as const;
 
