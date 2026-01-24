@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-01-24
+
+### Added
+- **Universal Intelligence MCP Tools** - 7 new market intelligence tools (x402 mode):
+  - `market_get_fx_reference`: ECB exchange rates with configurable base currency
+  - `market_get_currency_strength`: 28-pair currency strength matrix with momentum signals
+  - `market_get_economic_events`: High-impact economic events from Forex Factory
+  - `market_get_weekly_calendar`: Weekly economic calendar grouped by day
+  - `market_get_critical_news`: Critical news via 5-layer red detection
+  - `market_search_news`: Keyword search in news (last 7 days)
+  - `market_get_cb_speeches`: Central bank speeches and policy announcements
+
 ## [0.7.2] - 2026-01-24
 
 ### Changed

@@ -45,6 +45,13 @@ allowed-tools:
   - mcp__pragma__leverup_list_limit_orders
   - mcp__pragma__leverup_cancel_limit_order
   - mcp__pragma__market_get_chart
+  - mcp__pragma__market_get_fx_reference
+  - mcp__pragma__market_get_currency_strength
+  - mcp__pragma__market_get_economic_events
+  - mcp__pragma__market_get_weekly_calendar
+  - mcp__pragma__market_get_critical_news
+  - mcp__pragma__market_search_news
+  - mcp__pragma__market_get_cb_speeches
   - AskUserQuestion
   - Read
   - Task
@@ -248,6 +255,13 @@ Before executing multiple operations, calculate total gas needed:
 | LeverUp   | `leverup_list_limit_orders` | View pending limit orders                                      |
 | LeverUp   | `leverup_cancel_limit_order`| Cancel pending limit orders (Touch ID)                         |
 | Market    | `market_get_chart`          | OHLCV candlestick data for any asset                           |
+| Market    | `market_get_fx_reference`   | ECB exchange rates with configurable base currency             |
+| Market    | `market_get_currency_strength` | Currency strength matrix with momentum signals              |
+| Market    | `market_get_economic_events` | High-impact economic events for the week                      |
+| Market    | `market_get_weekly_calendar` | Economic calendar grouped by day                              |
+| Market    | `market_get_critical_news`  | Critical market news (5-layer red detection)                   |
+| Market    | `market_search_news`        | Search news by keyword (last 7 days)                           |
+| Market    | `market_get_cb_speeches`    | Central bank speeches and policy announcements                 |
 
 ### Context-Optimized Operations (IMPORTANT)
 

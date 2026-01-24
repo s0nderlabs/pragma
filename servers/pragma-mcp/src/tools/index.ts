@@ -41,6 +41,13 @@ import { registerLeverUpOpenLimitOrder } from "./leverup-open-limit-order.js";
 import { registerLeverUpListLimitOrders } from "./leverup-list-limit-orders.js";
 import { registerLeverUpCancelLimitOrder } from "./leverup-cancel-limit-order.js";
 import { registerMarketGetChart } from "./market-get-chart.js";
+import { registerMarketGetFxReference } from "./market-get-fx-reference.js";
+import { registerMarketGetCurrencyStrength } from "./market-get-currency-strength.js";
+import { registerMarketGetEconomicEvents } from "./market-get-economic-events.js";
+import { registerMarketGetWeeklyCalendar } from "./market-get-weekly-calendar.js";
+import { registerMarketGetCriticalNews } from "./market-get-critical-news.js";
+import { registerMarketSearchNews } from "./market-search-news.js";
+import { registerMarketGetCbSpeeches } from "./market-get-cb-speeches.js";
 
 export function registerTools(server: McpServer): void {
   registerHasWallet(server);
@@ -86,4 +93,11 @@ export function registerTools(server: McpServer): void {
   registerLeverUpListLimitOrders(server);
   registerLeverUpCancelLimitOrder(server);
   registerMarketGetChart(server);
+  registerMarketGetFxReference(server);
+  registerMarketGetCurrencyStrength(server);
+  registerMarketGetEconomicEvents(server);
+  registerMarketGetWeeklyCalendar(server);
+  registerMarketGetCriticalNews(server);
+  registerMarketSearchNews(server);
+  registerMarketGetCbSpeeches(server);
 }
