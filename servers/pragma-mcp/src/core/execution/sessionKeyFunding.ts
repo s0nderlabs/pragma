@@ -6,13 +6,12 @@ import {
   type Address,
   type Hex,
   type PublicClient,
+  type WalletClient,
   encodeFunctionData,
   formatEther,
   formatUnits,
   createWalletClient,
-  createPublicClient,
-  type WalletClient,
-  erc20Abi
+  erc20Abi,
 } from "viem";
 import { formatUserOperationRequest, type UserOperationRequest } from "viem/account-abstraction";
 import type { HybridDelegatorHandle } from "../account/hybridDelegator.js";
@@ -287,14 +286,17 @@ async function sendUserOperation(
     }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Send UserOp failed: ${response.status}`);
-  }
-
   const data = (await response.json()) as {
     result?: Hex;
-    error?: { message: string };
+    error?: { code?: number; message: string };
+    jsonrpc?: string;
   };
+
+  // Handle HTTP errors (including 403 from API validation)
+  if (!response.ok) {
+    const errorMsg = data.error?.message || `HTTP ${response.status}`;
+    throw new Error(`Send UserOp failed: ${errorMsg}`);
+  }
 
   if (data.error) {
     throw new Error(`UserOp error: ${data.error.message}`);

@@ -114,14 +114,6 @@ export function isX402Endpoint(url: string): boolean {
 }
 
 /**
- * Extract route type from pragma-api URL for logging
- */
-function getRouteType(url: string): string {
-  const match = url.match(/\/\d+\/(\w+)/);
-  return match?.[1] || "unknown";
-}
-
-/**
  * Check if request headers already contain a payment header
  */
 function hasPaymentHeader(headers: RequestInit["headers"]): boolean {
@@ -169,8 +161,29 @@ export async function x402Fetch(
     return fetchWithRetry(input, init, "x402-paid");
   }
 
-  // Step 1: Make initial request (with retry for transient errors)
-  const initialResponse = await fetchWithRetry(input, init, "x402-initial");
+  // Load config to get wallet/session for bootstrap quota
+  const config = await loadConfig();
+  const walletAddress = config?.wallet?.smartAccountAddress;
+  const sessionAddress = config?.wallet?.sessionKeyAddress;
+
+  // Build headers with bootstrap identification (for free quota)
+  const originalHeaders = init?.headers instanceof Headers
+    ? Object.fromEntries(init.headers.entries())
+    : (init?.headers as Record<string, string>) || {};
+
+  const bootstrapHeaders: Record<string, string> = {
+    ...originalHeaders,
+    ...(walletAddress && { "X-PRAGMA-WALLET": walletAddress }),
+    ...(sessionAddress && { "X-PRAGMA-SESSION": sessionAddress }),
+  };
+
+  const initWithBootstrap: RequestInit = {
+    ...init,
+    headers: bootstrapHeaders,
+  };
+
+  // Step 1: Make initial request with bootstrap headers (with retry for transient errors)
+  const initialResponse = await fetchWithRetry(input, initWithBootstrap, "x402-initial");
 
   // If not 402, return as-is (success or other error)
   if (initialResponse.status !== 402) {
@@ -192,8 +205,7 @@ export async function x402Fetch(
   // Use first accepted payment method
   const requirements = paymentRequired.accepts[0];
 
-  // Step 3: Load config for chain info
-  const config = await loadConfig();
+  // Step 3: Verify config for payment (reuse from earlier, but require it now)
   if (!config) {
     throw new Error("Config not loaded. Run setup_wallet first.");
   }
@@ -222,15 +234,11 @@ export async function x402Fetch(
     paymentRequired.resource
   );
 
-  // Step 6: Retry with payment header
-  const originalHeaders = init?.headers instanceof Headers
-    ? Object.fromEntries(init.headers.entries())
-    : (init?.headers as Record<string, string>) || {};
-
+  // Step 6: Retry with payment header (include bootstrap headers for consistency)
   const paidInit: RequestInit = {
     ...init,
     headers: {
-      ...originalHeaders,
+      ...bootstrapHeaders,
       [X_PAYMENT_HEADER]: paymentHeader,
     },
   };

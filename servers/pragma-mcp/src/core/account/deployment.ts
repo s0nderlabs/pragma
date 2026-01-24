@@ -144,13 +144,17 @@ function applySponsorshipToUserOp(target: SignableUserOp, update: PimlicoSponsor
 async function sponsorUserOperation(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
-  entryPoint: Address
+  entryPoint: Address,
+  sessionKeyAddress?: Address
 ): Promise<PimlicoSponsorship> {
   return withRetryOrThrow(
     async () => {
       const response = await fetch(bundlerUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(sessionKeyAddress && { "X-SESSION-KEY": sessionKeyAddress }),
+        },
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "pm_sponsorUserOperation",
@@ -206,7 +210,10 @@ async function sponsorUserOperation(
  * Get gas price recommendations from Pimlico
  * Includes retry for transient errors (idempotent read operation)
  */
-async function getGasPrice(bundlerUrl: string): Promise<{
+async function getGasPrice(
+  bundlerUrl: string,
+  sessionKeyAddress?: Address
+): Promise<{
   maxFeePerGas: bigint;
   maxPriorityFeePerGas: bigint;
 }> {
@@ -214,7 +221,10 @@ async function getGasPrice(bundlerUrl: string): Promise<{
     async () => {
       const response = await fetch(bundlerUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(sessionKeyAddress && { "X-SESSION-KEY": sessionKeyAddress }),
+        },
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "pimlico_getUserOperationGasPrice",
@@ -260,7 +270,8 @@ async function getGasPrice(bundlerUrl: string): Promise<{
 async function estimateUserOpGas(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
-  entryPoint: Address
+  entryPoint: Address,
+  sessionKeyAddress?: Address
 ): Promise<{
   callGasLimit?: bigint;
   verificationGasLimit?: bigint;
@@ -270,7 +281,10 @@ async function estimateUserOpGas(
     async () => {
       const response = await fetch(bundlerUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(sessionKeyAddress && { "X-SESSION-KEY": sessionKeyAddress }),
+        },
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "eth_estimateUserOperationGas",
@@ -314,11 +328,15 @@ async function estimateUserOpGas(
 async function sendUserOperation(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
-  entryPoint: Address
+  entryPoint: Address,
+  sessionKeyAddress?: Address
 ): Promise<Hex> {
   const response = await fetch(bundlerUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(sessionKeyAddress && { "X-SESSION-KEY": sessionKeyAddress }),
+    },
     body: JSON.stringify({
       jsonrpc: "2.0",
       method: "eth_sendUserOperation",
@@ -353,14 +371,18 @@ async function sendUserOperation(
 async function waitForUserOperationReceipt(
   bundlerUrl: string,
   userOpHash: Hex,
-  timeoutMs: number = 60000
+  timeoutMs: number = 60000,
+  sessionKeyAddress?: Address
 ): Promise<{ transactionHash?: Hex }> {
   const startTime = Date.now();
 
   while (Date.now() - startTime < timeoutMs) {
     const response = await fetch(bundlerUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(sessionKeyAddress && { "X-SESSION-KEY": sessionKeyAddress }),
+      },
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "eth_getUserOperationReceipt",
@@ -397,10 +419,12 @@ async function waitForUserOperationReceipt(
  * Deploy the smart account via bundler
  * Uses paymaster for gasless deployment
  * Follows H2's deployment flow exactly
+ * @param sessionKeyAddress - Optional session key address for bootstrap registration
  */
 export async function deploySmartAccount(
   handle: HybridDelegatorHandle,
-  config: PragmaConfig
+  config: PragmaConfig,
+  sessionKeyAddress?: Address
 ): Promise<DeploymentResult> {
   // Check if already deployed
   if (await isSmartAccountDeployed(handle)) {
@@ -435,7 +459,7 @@ export async function deploySmartAccount(
   const nonce = await getAccountNonce(handle);
 
   // Get gas price from bundler
-  const gasPrices = await getGasPrice(bundlerUrl);
+  const gasPrices = await getGasPrice(bundlerUrl, sessionKeyAddress);
 
   // Step 1: Build baseUserOp with 0n gas values (let paymaster estimate)
   const baseUserOp: SignableUserOp = {
@@ -459,7 +483,8 @@ export async function deploySmartAccount(
   let sponsorship = await sponsorUserOperation(
     bundlerUrl,
     buildSponsorRequest(baseUserOp),
-    entryPoint
+    entryPoint,
+    sessionKeyAddress
   );
   applySponsorshipToUserOp(userOp, sponsorship);
 
@@ -486,7 +511,8 @@ export async function deploySmartAccount(
       const estimation = await estimateUserOpGas(
         bundlerUrl,
         estimationRequest,
-        entryPoint
+        entryPoint,
+        sessionKeyAddress
       );
 
       setGasValue("callGasLimit", estimation.callGasLimit);
@@ -514,7 +540,8 @@ export async function deploySmartAccount(
     sponsorship = await sponsorUserOperation(
       bundlerUrl,
       buildSponsorRequest(userOp),
-      entryPoint
+      entryPoint,
+      sessionKeyAddress
     );
     applySponsorshipToUserOp(userOp, sponsorship);
 
@@ -531,11 +558,11 @@ export async function deploySmartAccount(
     signature,
   } as unknown as UserOperationRequest);
 
-  const userOpHash = await sendUserOperation(bundlerUrl, rpcUserOperation, entryPoint);
+  const userOpHash = await sendUserOperation(bundlerUrl, rpcUserOperation, entryPoint, sessionKeyAddress);
 
   // Step 8: Wait for receipt
   try {
-    const receipt = await waitForUserOperationReceipt(bundlerUrl, userOpHash);
+    const receipt = await waitForUserOperationReceipt(bundlerUrl, userOpHash, 60000, sessionKeyAddress);
     return {
       success: true,
       userOpHash,

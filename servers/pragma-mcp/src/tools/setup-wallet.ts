@@ -167,12 +167,19 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
     // This uses native P-256 signing - private key NEVER leaves Keychain
     const handle = await createHybridDelegatorHandle(config);
 
-    // Step 7: Check if smart account is deployed
+    // Step 7: Generate or retrieve session key (BEFORE deployment for bootstrap registration)
+    let sessionKey = await getSessionKey();
+    if (!sessionKey) {
+      sessionKey = generateSessionKey();
+      await storeSessionKey(sessionKey);
+    }
+
+    // Step 8: Check if smart account is deployed
     const deployed = await isSmartAccountDeployed(handle);
 
     if (!deployed) {
-      // Step 8: Deploy smart account via bundler
-      const deployResult = await deploySmartAccount(handle, config);
+      // Step 9: Deploy smart account via bundler (pass session key for bootstrap)
+      const deployResult = await deploySmartAccount(handle, config, sessionKey.address);
 
       if (!deployResult.success) {
         return {
@@ -181,13 +188,6 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
           error: deployResult.error || "Unknown deployment error",
         };
       }
-    }
-
-    // Step 9: Generate or retrieve session key
-    let sessionKey = await getSessionKey();
-    if (!sessionKey) {
-      sessionKey = generateSessionKey();
-      await storeSessionKey(sessionKey);
     }
 
     // Step 10: Save config with wallet addresses and keyId

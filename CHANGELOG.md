@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-01-24
+
+### Changed
+- **Bootstrap Registration** - Session key is now registered during wallet setup for automatic free API quota
+  - Session key generated before smart account deployment
+  - Bundler calls include `X-SESSION-KEY` header for bootstrap association
+- **x402 Bootstrap Headers** - API requests now include wallet/session headers for free quota tracking
+
+### Fixed
+- Improved HTTP error handling in session key funding (extracts error message from response body)
+- Removed unused `createPublicClient` import and `getRouteType` function
+
 ## [0.7.1] - 2026-01-24
 
 ### Added
