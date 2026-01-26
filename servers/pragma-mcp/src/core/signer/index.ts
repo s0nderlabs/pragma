@@ -392,3 +392,70 @@ export async function listProviders(): Promise<string[]> {
   }
   return data.providers.split(",");
 }
+
+// ============================================================================
+// Sub-Agent Key Operations (Keychain) - Autonomous Mode Wallet Pool
+// ============================================================================
+
+/**
+ * Store a sub-agent key in Keychain
+ * @param uuid - Unique identifier for the sub-agent wallet
+ * @param privateKey - Private key as hex string (with or without 0x prefix)
+ */
+export async function storeSubagentKeyInKeychain(uuid: string, privateKey: Hex): Promise<void> {
+  const response = await execSigner(["store-subagent", uuid, privateKey]);
+  handleResponse(response);
+}
+
+/**
+ * Get sub-agent key from Keychain
+ * @param uuid - Unique identifier for the sub-agent wallet
+ * @returns Private key as hex string (with 0x prefix) or null if not found
+ */
+export async function getSubagentKeyFromKeychain(uuid: string): Promise<Hex | null> {
+  try {
+    const response = await execSigner(["get-subagent", uuid]);
+    const data = handleResponse<{ privateKey: string }>(response, ["privateKey"]);
+    return data.privateKey as Hex;
+  } catch (error) {
+    // Key not found is not an error condition
+    if (error instanceof Error && error.message.includes("not found")) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Delete sub-agent key from Keychain
+ * @param uuid - Unique identifier for the sub-agent wallet
+ */
+export async function deleteSubagentKeyFromKeychain(uuid: string): Promise<void> {
+  const response = await execSigner(["delete-subagent", uuid]);
+  handleResponse(response);
+}
+
+/**
+ * Check if sub-agent key exists in Keychain
+ * @param uuid - Unique identifier to check
+ */
+export async function hasSubagentKey(uuid: string): Promise<boolean> {
+  const response = await execSigner(["has-subagent", uuid]);
+  const data = handleResponse<{ exists: string }>(response, ["exists"]);
+  return data.exists === "true";
+}
+
+/**
+ * List all sub-agent UUIDs stored in Keychain
+ * @returns Array of UUID strings for all stored sub-agent keys
+ */
+export async function listSubagentKeysFromKeychain(): Promise<string[]> {
+  const response = await execSigner(["list-subagents"]);
+  const data = handleResponse<{ subagents: string }>(response, ["subagents"]);
+
+  // Parse comma-separated list
+  if (!data.subagents || data.subagents === "") {
+    return [];
+  }
+  return data.subagents.split(",");
+}

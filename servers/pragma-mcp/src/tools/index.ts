@@ -48,6 +48,13 @@ import { registerMarketGetWeeklyCalendar } from "./market-get-weekly-calendar.js
 import { registerMarketGetCriticalNews } from "./market-get-critical-news.js";
 import { registerMarketSearchNews } from "./market-search-news.js";
 import { registerMarketGetCbSpeeches } from "./market-get-cb-speeches.js";
+// Autonomous mode & Sub-agent management
+import { registerCreateRootDelegation } from "./create-root-delegation.js";
+import { registerCreateSubAgent } from "./create-sub-agent.js";
+import { registerFundSubAgent } from "./fund-sub-agent.js";
+import { registerListSubAgents } from "./list-sub-agents.js";
+import { registerRevokeSubAgent } from "./revoke-sub-agent.js";
+import { registerGetSubAgentState } from "./get-sub-agent-state.js";
 
 export function registerTools(server: McpServer): void {
   registerHasWallet(server);
@@ -100,4 +107,11 @@ export function registerTools(server: McpServer): void {
   registerMarketGetCriticalNews(server);
   registerMarketSearchNews(server);
   registerMarketGetCbSpeeches(server);
+  // Autonomous mode & Sub-agent management
+  registerCreateRootDelegation(server);
+  registerCreateSubAgent(server);
+  registerFundSubAgent(server);
+  registerListSubAgents(server);
+  registerRevokeSubAgent(server);
+  registerGetSubAgentState(server);
 }

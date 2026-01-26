@@ -34,6 +34,7 @@ struct Keychain {
     private static let sessionService = "xyz.pragma.session-key"
     private static let sessionAccount = "session-key"
     private static let providerService = "xyz.pragma.providers"
+    private static let subagentService = "xyz.pragma.subagent"
 
     /// Human-readable labels for Keychain access dialogs
     private static func providerLabel(for type: String) -> String {
@@ -257,5 +258,132 @@ struct Keychain {
         let knownTypes = ["rpc", "pimlico", "monorail", "0x"]
 
         return knownTypes.filter { hasProvider($0) }
+    }
+
+    // MARK: - Sub-Agent Operations (Autonomous Mode Wallet Pool)
+
+    /// Store sub-agent key (hex string) in Keychain
+    /// - Parameters:
+    ///   - uuid: Unique identifier for the sub-agent wallet
+    ///   - privateKeyHex: Private key as hex string (with or without 0x prefix)
+    static func storeSubagentKey(_ uuid: String, _ privateKeyHex: String) throws {
+        // Normalize hex string (remove 0x prefix if present)
+        let normalized = privateKeyHex.hasPrefix("0x")
+            ? String(privateKeyHex.dropFirst(2))
+            : privateKeyHex
+
+        guard let data = normalized.data(using: .utf8) else {
+            throw KeychainError.encodingError
+        }
+
+        // Delete existing key if present
+        try? deleteSubagentKey(uuid)
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: subagentService,
+            kSecAttrAccount as String: uuid,
+            kSecAttrLabel as String: "pragma Sub-Agent \(uuid.prefix(8))...",
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+
+        let status = SecItemAdd(query as CFDictionary, nil)
+
+        switch status {
+        case errSecSuccess:
+            return
+        case errSecDuplicateItem:
+            throw KeychainError.duplicateItem
+        default:
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Retrieve sub-agent key from Keychain
+    /// - Parameter uuid: Unique identifier for the sub-agent wallet
+    /// - Returns: Private key as hex string (without 0x prefix)
+    static func getSubagentKey(_ uuid: String) throws -> String {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: subagentService,
+            kSecAttrAccount as String: uuid,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data,
+                  let hexString = String(data: data, encoding: .utf8) else {
+                throw KeychainError.invalidData
+            }
+            return hexString
+        case errSecItemNotFound:
+            throw KeychainError.itemNotFound
+        default:
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Delete sub-agent key from Keychain
+    /// - Parameter uuid: Unique identifier for the sub-agent wallet
+    static func deleteSubagentKey(_ uuid: String) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: subagentService,
+            kSecAttrAccount as String: uuid
+        ]
+
+        let status = SecItemDelete(query as CFDictionary)
+
+        switch status {
+        case errSecSuccess, errSecItemNotFound:
+            // Success or already deleted
+            return
+        default:
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Check if sub-agent key exists
+    /// - Parameter uuid: Unique identifier to check
+    /// - Returns: true if sub-agent key exists
+    static func hasSubagentKey(_ uuid: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: subagentService,
+            kSecAttrAccount as String: uuid,
+            kSecReturnData as String: false
+        ]
+
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        return status == errSecSuccess
+    }
+
+    /// List all sub-agent UUIDs stored in Keychain
+    /// - Returns: Array of UUID strings for all stored sub-agent keys
+    static func listSubagentIds() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: subagentService,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess,
+              let items = result as? [[String: Any]] else {
+            return []
+        }
+
+        return items.compactMap { item in
+            item[kSecAttrAccount as String] as? String
+        }
     }
 }

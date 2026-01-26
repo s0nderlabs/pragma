@@ -61,6 +61,12 @@ enum Command: String {
     case deleteProvider = "delete-provider"
     case hasProvider = "has-provider"
     case listProviders = "list-providers"
+    // Sub-agent commands (wallet pool for autonomous mode)
+    case storeSubagent = "store-subagent"
+    case getSubagent = "get-subagent"
+    case deleteSubagent = "delete-subagent"
+    case hasSubagent = "has-subagent"
+    case listSubagents = "list-subagents"
 }
 
 // MARK: - Command Handlers
@@ -198,6 +204,48 @@ func handleListProviders() {
     output(.success(["providers": providers.joined(separator: ",")]))
 }
 
+// MARK: - Sub-Agent Handlers (Autonomous Mode)
+
+func handleStoreSubagent(_ uuid: String, _ privateKeyHex: String) {
+    do {
+        try Keychain.storeSubagentKey(uuid, privateKeyHex)
+        output(.success())
+    } catch {
+        output(.failure(error.localizedDescription))
+    }
+}
+
+func handleGetSubagent(_ uuid: String) {
+    do {
+        let privateKey = try Keychain.getSubagentKey(uuid)
+        // Return with 0x prefix for consistency
+        let hexKey = privateKey.hasPrefix("0x") ? privateKey : "0x" + privateKey
+        output(.success(["privateKey": hexKey]))
+    } catch {
+        output(.failure(error.localizedDescription))
+    }
+}
+
+func handleDeleteSubagent(_ uuid: String) {
+    do {
+        try Keychain.deleteSubagentKey(uuid)
+        output(.success())
+    } catch {
+        output(.failure(error.localizedDescription))
+    }
+}
+
+func handleHasSubagent(_ uuid: String) {
+    let exists = Keychain.hasSubagentKey(uuid)
+    output(.success(["exists": exists ? "true" : "false"]))
+}
+
+func handleListSubagents() {
+    let subagents = Keychain.listSubagentIds()
+    // Return as comma-separated list for easy parsing
+    output(.success(["subagents": subagents.joined(separator: ",")]))
+}
+
 // MARK: - Hex String Extension
 
 extension Data {
@@ -239,6 +287,13 @@ func printUsage() {
         pragma-signer delete-session                Delete session key from Keychain
         pragma-signer has-session                   Check if session key exists
 
+      Sub-Agent Commands (Keychain, Autonomous Mode):
+        pragma-signer store-subagent <uuid> <hex>   Store sub-agent key in Keychain
+        pragma-signer get-subagent <uuid>           Get sub-agent key from Keychain
+        pragma-signer delete-subagent <uuid>        Delete sub-agent key from Keychain
+        pragma-signer has-subagent <uuid>           Check if sub-agent key exists
+        pragma-signer list-subagents                List all sub-agent UUIDs
+
       Provider Commands (Keychain, API keys):
         pragma-signer store-provider <type> <value> Store provider (rpc/pimlico/monorail)
         pragma-signer get-provider <type>           Get provider value
@@ -253,6 +308,7 @@ func printUsage() {
       Private keys NEVER leave the Keychain. Only signatures are returned.
       All signing operations require Touch ID authentication.
       Provider values (API keys) are stored encrypted in Keychain.
+      Sub-agent keys are stored per-UUID for wallet pool management.
 
     Output:
       All commands output JSON to stdout:
@@ -269,8 +325,8 @@ func printUsage() {
       pragma-signer create-passkey -m "Create wallet for trading"
       pragma-signer sign 0x<32-byte-hash> -m "Approve swap: 1 ETH -> 2000 USDC"
       pragma-signer store-provider rpc https://rpc.monad.xyz
-      pragma-signer store-provider pimlico pim_xxx123
-      pragma-signer list-providers
+      pragma-signer store-subagent a1b2c3d4-e5f6-7890-abcd-ef1234567890 0xprivatekey
+      pragma-signer list-subagents
     """
     print(usage)
 }
@@ -380,6 +436,38 @@ func main() {
 
     case .listProviders:
         handleListProviders()
+
+    // Sub-agent commands
+    case .storeSubagent:
+        guard args.count >= 4 else {
+            output(.failure("Usage: store-subagent <uuid> <privateKeyHex>"))
+            exit(1)
+        }
+        handleStoreSubagent(args[2], args[3])
+
+    case .getSubagent:
+        guard args.count >= 3 else {
+            output(.failure("Usage: get-subagent <uuid>"))
+            exit(1)
+        }
+        handleGetSubagent(args[2])
+
+    case .deleteSubagent:
+        guard args.count >= 3 else {
+            output(.failure("Usage: delete-subagent <uuid>"))
+            exit(1)
+        }
+        handleDeleteSubagent(args[2])
+
+    case .hasSubagent:
+        guard args.count >= 3 else {
+            output(.failure("Usage: has-subagent <uuid>"))
+            exit(1)
+        }
+        handleHasSubagent(args[2])
+
+    case .listSubagents:
+        handleListSubagents()
     }
 }
 

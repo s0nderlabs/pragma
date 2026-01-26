@@ -8,3 +8,5 @@ export {
   type RetryOptions,
   type RetryResult,
 } from "./retry.js";
+
+export { formatTimeRemaining } from "./format.js";

@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-01-26
+
+### Added
+- **Autonomous Mode Foundation (Phase A)** - Multi-agent sub-delegation infrastructure:
+  - Wallet pool for sub-agent key management (macOS Keychain)
+  - Persistent sub-delegation with DTK redelegation support
+  - Agent state management (`~/.pragma/agents/`)
+  - `create_sub_agent` - Create specialized trading sub-agents (kairos, thymos, pragma)
+  - `fund_sub_agent` - Fund sub-agent with gas from session key
+  - `list_sub_agents` - List active sub-agents and status
+  - `revoke_sub_agent` - Revoke delegation, sweep balance, cleanup
+  - `get_sub_agent_state` - Read detailed sub-agent state
+
+- **Root Delegation (Phase A.1)** - Touch-ID-once authorization for autonomous mode:
+  - `create_root_delegation` - Create persistent root delegation (User → Main Agent)
+  - Root delegation stored at `~/.pragma/root-delegation.json`
+  - Scope includes all trading contracts (LeverUp, nad.fun, DEX, WMON)
+  - Time-bound (1-30 days) and trade-count limited
+  - Sub-agents now require valid root delegation before creation
+  - Delegation chain stored in sub-agent for execution
+
+- **Swift Binary Extensions** - Sub-agent Keychain commands:
+  - `store-subagent` - Store sub-agent private key
+  - `get-subagent` - Retrieve sub-agent private key
+  - `delete-subagent` - Delete sub-agent key
+  - `has-subagent` - Check if sub-agent key exists
+  - `list-subagents` - List all sub-agent UUIDs
+
+- **Agent Definitions** - Markdown personality profiles:
+  - Kairos: Strategic macro trader for perpetuals
+  - Thymos: Momentum trader for memecoins
+  - Pragma: General-purpose flexible agent
+
+- **Core Modules**:
+  - `src/core/subagent/keys.ts` - Sub-agent key generation
+  - `src/core/subagent/wallet-pool.ts` - Wallet pool management with file locking
+  - `src/core/subagent/state.ts` - File-based state management with flexible token tracking
+  - `src/core/subagent/loop.ts` - Loop enforcement configuration
+  - `src/core/delegation/subagent.ts` - Persistent delegation builder
+  - `src/core/delegation/root.ts` - Root delegation builder and storage
+
+### Fixed
+- Type safety in `StoredDelegation` (uses `SignedDelegation` type instead of `unknown`)
+- Race condition in wallet pool operations (added file locking for concurrent access)
+- ERC-20 budget tracking now supports all tokens by address (not just MON/USDC)
+
+### Changed
+- `releaseWallet()` is now async
+- Budget structure uses `tokenSpent` map for flexible token tracking
+
 ## [0.7.3] - 2026-01-24
 
 ### Added
