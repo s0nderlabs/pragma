@@ -4,8 +4,10 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { formatEther, formatUnits, type Address } from "viem";
-import { loadConfig } from "../config/pragma-config.js";
+import { formatEther, formatUnits, createPublicClient, http, type Address } from "viem";
+import { loadConfig, getRpcUrl } from "../config/pragma-config.js";
+import { buildViemChain } from "../config/chains.js";
+import { x402HttpOptions } from "../core/x402/client.js";
 import {
   loadAgentState,
   loadTrades,
@@ -40,6 +42,7 @@ interface GetSubAgentStateResult {
     agentType: string;
     status: string;
     walletAddress: string;
+    walletBalance: string; // Actual MON balance for gas
     taskId: string;
     budget: {
       // Native MON (on-chain enforced via valueLte)
@@ -130,6 +133,23 @@ async function getSubAgentStateHandler(
       };
     }
 
+    // Fetch actual wallet balance (gas)
+    const rpcUrl = await getRpcUrl(config);
+    const chain = buildViemChain(config.network.chainId, rpcUrl);
+    const publicClient = createPublicClient({
+      chain,
+      transport: http(rpcUrl, x402HttpOptions(config)),
+    });
+
+    let walletBalance = 0n;
+    try {
+      walletBalance = await publicClient.getBalance({
+        address: state.walletAddress as Address,
+      });
+    } catch {
+      // Balance fetch failed, continue with 0
+    }
+
     // Calculate budget values
     const monAllocated = BigInt(state.budget.monAllocated);
     const monSpent = BigInt(state.budget.monSpent);
@@ -196,6 +216,7 @@ async function getSubAgentStateHandler(
         agentType: state.agentType,
         status: state.status,
         walletAddress: state.walletAddress,
+        walletBalance: formatEther(walletBalance) + " MON",
         taskId: state.taskId,
         budget: {
           monAllocated: formatEther(monAllocated) + " MON",

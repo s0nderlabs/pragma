@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { executeUpdateTpSl } from "../core/leverup/execution.js";
+import { executeAutonomousLeverUpUpdateTpSl } from "../core/execution/autonomous.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -31,13 +32,22 @@ const LeverUpUpdateTpSlSchema = z.object({
   ),
   stopLoss: z.string().optional().describe(
     "New stop loss price in USD (e.g. '95000' for $95,000). Set to '0' or omit to disable SL."
-  )
+  ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 export function registerLeverUpUpdateTpSl(server: McpServer): void {
   server.tool(
     "leverup_update_tpsl",
-    "Update take profit and/or stop loss on an existing LeverUp position. Requires Touch ID confirmation. " +
+    "Update take profit and/or stop loss on an existing LeverUp position. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID). " +
     "Set a price to '0' to disable that trigger. At least one of takeProfit or stopLoss must be provided.",
     LeverUpUpdateTpSlSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
@@ -52,6 +62,24 @@ export function registerLeverUpUpdateTpSl(server: McpServer): void {
           throw new Error("At least one of takeProfit or stopLoss must be provided.");
         }
 
+        // DUAL-MODE: Check if autonomous execution requested
+        if (params.agentId) {
+          // Autonomous path: use pre-signed delegation chain, no Touch ID
+          const result = await executeAutonomousLeverUpUpdateTpSl(
+            params.agentId,
+            params.tradeHash as Hex,
+            params.takeProfit,
+            params.stopLoss
+          );
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // Assistant path: existing implementation with Touch ID
         const userAddress = config.wallet!.smartAccountAddress as Address;
         const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
         const chainId = config.network.chainId;

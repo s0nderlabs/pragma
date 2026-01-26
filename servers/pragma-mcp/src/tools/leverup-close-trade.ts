@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { executeCloseTrade } from "../core/leverup/execution.js";
+import { executeAutonomousLeverUpClose } from "../core/execution/autonomous.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -16,20 +17,29 @@ import {
   type Address,
   type Hex,
 } from "viem";
-import { 
-  redeemDelegations, 
-  createExecution, 
-  ExecutionMode 
+import {
+  redeemDelegations,
+  createExecution,
+  ExecutionMode
 } from "@metamask/smart-accounts-kit";
 
 const LeverUpCloseTradeSchema = z.object({
   tradeHash: z.string().regex(/^0x[a-fA-F0-9]{64}$/).describe("The unique identifier of the position to close."),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 export function registerLeverUpCloseTrade(server: McpServer): void {
   server.tool(
     "leverup_close_trade",
-    "Close an existing LeverUp perpetual position. Requires Touch ID confirmation.",
+    "Close an existing LeverUp perpetual position. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID).",
     LeverUpCloseTradeSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       try {
@@ -38,6 +48,19 @@ export function registerLeverUpCloseTrade(server: McpServer): void {
           throw new Error("Wallet not configured.");
         }
 
+        // DUAL-MODE: Check if autonomous execution requested
+        if (params.agentId) {
+          // Autonomous path: use pre-signed delegation chain, no Touch ID
+          const result = await executeAutonomousLeverUpClose(params.agentId, params.tradeHash as Hex);
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // Assistant path: existing implementation with Touch ID
         const userAddress = config.wallet!.smartAccountAddress as Address;
         const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
         const chainId = config.network.chainId;

@@ -90,6 +90,8 @@ export interface TradeRecord {
     amountIn?: string; // Input amount as string (for budget tracking)
     amountOut?: string;
     positionId?: string;
+    // Extended fields for detailed trade logging
+    [key: string]: string | Address | undefined;
   };
   txHash: Hex;
   success: boolean;

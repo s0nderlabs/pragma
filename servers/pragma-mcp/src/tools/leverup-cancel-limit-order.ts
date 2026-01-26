@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { executeCancelLimitOrder, executeBatchCancelLimitOrders } from "../core/leverup/execution.js";
+import { executeAutonomousLeverUpCancelLimitOrder } from "../core/execution/autonomous.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -29,6 +30,13 @@ const LeverUpCancelLimitOrderSchema = z.object({
     .describe(
       "Array of limit order hashes to cancel. Use leverup_list_limit_orders to get the orderHashes of your pending orders."
     ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 interface LeverUpCancelLimitOrderResult {
@@ -46,7 +54,8 @@ export function registerLeverUpCancelLimitOrder(server: McpServer): void {
   server.tool(
     "leverup_cancel_limit_order",
     "Cancel one or more pending LeverUp limit orders. " +
-      "Requires Touch ID confirmation. " +
+      "If agentId provided: uses autonomous mode (no Touch ID). " +
+      "If no agentId: uses assistant mode (requires Touch ID). " +
       "Use leverup_list_limit_orders first to see your pending orders and their orderHashes.",
     LeverUpCancelLimitOrderSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
@@ -77,6 +86,26 @@ async function leverUpCancelLimitOrderHandler(
       };
     }
 
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      const result = await executeAutonomousLeverUpCancelLimitOrder(
+        params.agentId,
+        params.orderHashes as Hex[]
+      );
+      return {
+        success: result.success,
+        message: result.message,
+        data: result.txHash ? {
+          cancelledOrders: params.orderHashes,
+          txHash: result.txHash,
+          explorerUrl: result.explorerUrl!,
+        } : undefined,
+        error: result.error,
+      };
+    }
+
+    // Assistant path: existing implementation with Touch ID
     const userAddress = config.wallet!.smartAccountAddress as Address;
     const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
     const chainId = config.network.chainId;

@@ -5,6 +5,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { executeWrap, executeUnwrap } from "../core/execution/wrap.js";
+import { executeAutonomousWrap, executeAutonomousUnwrap } from "../core/execution/autonomous.js";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
 
@@ -12,12 +13,26 @@ const WrapSchema = z.object({
   amount: z
     .string()
     .describe("Amount of MON to wrap in human-readable format (e.g., '10' for 10 MON)"),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 const UnwrapSchema = z.object({
   amount: z
     .string()
     .describe("Amount of WMON to unwrap in human-readable format (e.g., '10' for 10 WMON)"),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 interface WrapResult {
@@ -40,7 +55,10 @@ interface WrapResult {
 export function registerWrap(server: McpServer): void {
   server.tool(
     "wrap",
-    "Wrap MON to WMON. Requires user confirmation via passkey (Touch ID). WMON is useful for DeFi operations that require ERC20 tokens.",
+    "Wrap MON to WMON. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID). " +
+    "WMON is useful for DeFi operations that require ERC20 tokens.",
     WrapSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await wrapHandler(params as z.infer<typeof WrapSchema>);
@@ -59,7 +77,10 @@ export function registerWrap(server: McpServer): void {
 export function registerUnwrap(server: McpServer): void {
   server.tool(
     "unwrap",
-    "Unwrap WMON back to MON. Requires user confirmation via passkey (Touch ID). Converts wrapped MON back to native MON.",
+    "Unwrap WMON back to MON. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID). " +
+    "Converts wrapped MON back to native MON.",
     UnwrapSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await unwrapHandler(params as z.infer<typeof UnwrapSchema>);
@@ -90,6 +111,30 @@ async function wrapHandler(params: z.infer<typeof WrapSchema>): Promise<WrapResu
       };
     }
 
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      const result = await executeAutonomousWrap(params.agentId, params.amount);
+      const chainConfig = getChainConfig(config.network.chainId);
+      return {
+        success: result.success,
+        message: result.message,
+        transaction: result.txHash ? {
+          hash: result.txHash,
+          explorerUrl: result.explorerUrl || `${chainConfig.blockExplorer}/tx/${result.txHash}`,
+          status: "success",
+        } : undefined,
+        wrap: result.wrap ? {
+          direction: result.wrap.direction,
+          amount: result.wrap.amount,
+          from: "MON",
+          to: "WMON",
+        } : undefined,
+        error: result.error,
+      };
+    }
+
+    // Assistant path: existing implementation with Touch ID
     // Step 2: Validate amount
     const amount = parseFloat(params.amount);
     if (isNaN(amount) || amount <= 0) {
@@ -184,6 +229,30 @@ async function unwrapHandler(params: z.infer<typeof UnwrapSchema>): Promise<Wrap
       };
     }
 
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      const result = await executeAutonomousUnwrap(params.agentId, params.amount);
+      const chainConfig = getChainConfig(config.network.chainId);
+      return {
+        success: result.success,
+        message: result.message,
+        transaction: result.txHash ? {
+          hash: result.txHash,
+          explorerUrl: result.explorerUrl || `${chainConfig.blockExplorer}/tx/${result.txHash}`,
+          status: "success",
+        } : undefined,
+        wrap: result.wrap ? {
+          direction: result.wrap.direction,
+          amount: result.wrap.amount,
+          from: "WMON",
+          to: "MON",
+        } : undefined,
+        error: result.error,
+      };
+    }
+
+    // Assistant path: existing implementation with Touch ID
     // Step 2: Validate amount
     const amount = parseFloat(params.amount);
     if (isNaN(amount) || amount <= 0) {

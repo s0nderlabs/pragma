@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { Address } from "viem";
 import { executeBatchSwap } from "../core/execution/swap.js";
+import { executeAutonomousSwap } from "../core/execution/autonomous.js";
 import { getCachedQuote, isQuoteExpired, getQuoteTimeRemaining } from "../core/aggregator/index.js";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
@@ -22,6 +23,13 @@ const ExecuteSwapSchema = z.object({
     .number()
     .optional()
     .describe("Max slippage in basis points. NOTE: Slippage is already baked into the quote - set slippage at quote time via get_swap_quote instead."),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 interface ExecuteSwapResult {
@@ -51,7 +59,10 @@ interface ExecuteSwapResult {
 export function registerExecuteSwap(server: McpServer): void {
   server.tool(
     "execute_swap",
-    "Execute one or more swaps. Requires user confirmation via passkey (Touch ID). Handles approvals automatically. Supports parallel batch execution.",
+    "Execute one or more swaps. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID). " +
+    "Handles approvals automatically. Supports parallel batch execution.",
     ExecuteSwapSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await executeSwapHandler(params as z.infer<typeof ExecuteSwapSchema>);
@@ -85,8 +96,19 @@ async function executeSwapHandler(
       };
     }
 
-    const chainId = config.network.chainId;
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      const slippageBps = params.slippageBps ?? DEFAULT_SLIPPAGE_BPS;
+      const result = await executeAutonomousSwap(
+        params.agentId,
+        params.quoteIds,
+        slippageBps
+      );
+      return result;
+    }
 
+    // Assistant path: existing implementation with Touch ID
     for (const quoteId of params.quoteIds) {
       const quote = await getCachedQuote(quoteId);
       if (!quote) {

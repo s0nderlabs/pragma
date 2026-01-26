@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { executeNadFunBuy } from "../core/nadfun/execution.js";
+import { executeAutonomousNadFunBuy } from "../core/execution/autonomous.js";
 import { getCachedNadFunQuote } from "../core/nadfun/quote.js";
 import { getTokenStatus } from "../core/nadfun/client.js";
 import type { NadFunExecuteResponse } from "../core/nadfun/types.js";
@@ -17,15 +18,22 @@ const NadFunBuySchema = z.object({
       "Quote ID from nadfun_quote for a BUY operation. " +
       "The quote must not be expired and must be a BUY direction quote."
     ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 export function registerNadFunBuy(server: McpServer): void {
   server.tool(
     "nadfun_buy",
     "Execute a buy on nad.fun bonding curve using a quote. " +
-    "Requires Touch ID confirmation. " +
-    "The quote must be obtained from nadfun_quote with isBuy=true. " +
-    "Make sure to check session key balance before executing.",
+    "If agentId provided: uses autonomous mode (no Touch ID, pre-signed delegation). " +
+    "If no agentId: uses assistant mode (requires Touch ID confirmation). " +
+    "The quote must be obtained from nadfun_quote with isBuy=true.",
     NadFunBuySchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await nadFunBuyHandler(params as z.infer<typeof NadFunBuySchema>);
@@ -58,8 +66,13 @@ async function nadFunBuyHandler(
       };
     }
 
-    const chainId = config.network.chainId;
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      return await executeAutonomousNadFunBuy(params.agentId, params.quoteId);
+    }
 
+    // Assistant path: existing implementation with Touch ID
     // Get quote to include in response
     const quote = getCachedNadFunQuote(params.quoteId);
     if (!quote) {
@@ -84,7 +97,7 @@ async function nadFunBuyHandler(
     // Get updated token status for progress
     let progressPercent = quote.progressPercent;
     try {
-      const status = await getTokenStatus(quote.token, chainId);
+      const status = await getTokenStatus(quote.token, config.network.chainId);
       progressPercent = status.progressPercent;
     } catch {
       // Use quote's progress if fresh fetch fails

@@ -7,7 +7,8 @@ import {
   getMaxTpPercent,
   getCollateralDecimals
 } from "../core/leverup/client.js";
-import { executeOpenLimitOrder } from "../core/leverup/execution.js";
+import { executeOpenLimitOrder, type CollateralToken } from "../core/leverup/execution.js";
+import { executeAutonomousLeverUpLimitOrder } from "../core/execution/autonomous.js";
 import { SUPPORTED_PAIRS, DEGEN_MODE_LEVERAGE_OPTIONS } from "../core/leverup/constants.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -73,6 +74,14 @@ const LeverUpOpenLimitOrderSchema = z.object({
     "For Long orders, must be above the trigger price. For Short orders, must be below the trigger price. " +
     "Max TP: 500% for leverage <50x, 300% for leverage ≥50x."
   ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation. " +
+      "Note: For ERC20 collateral, approval must be set via assistant mode first."
+    ),
 });
 
 interface LeverUpOpenLimitOrderResult {
@@ -102,7 +111,8 @@ export function registerLeverUpOpenLimitOrder(server: McpServer): void {
     "Place a limit order on LeverUp that will trigger when the market reaches your specified price. " +
       "For Long orders, the trigger price must be BELOW current market (buy the dip). " +
       "For Short orders, the trigger price must be ABOVE current market (sell the top). " +
-      "Requires Touch ID confirmation.",
+      "If agentId provided: uses autonomous mode (no Touch ID). " +
+      "If no agentId: uses assistant mode (requires Touch ID).",
     LeverUpOpenLimitOrderSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await leverUpOpenLimitOrderHandler(
@@ -132,6 +142,42 @@ async function leverUpOpenLimitOrderHandler(
       };
     }
 
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      const result = await executeAutonomousLeverUpLimitOrder(params.agentId, {
+        symbol: params.symbol,
+        isLong: params.isLong,
+        marginAmount: params.marginAmount,
+        leverage: params.leverage,
+        triggerPrice: params.triggerPrice,
+        collateralToken: (params.collateralToken as CollateralToken) || "MON",
+        stopLoss: params.stopLoss,
+        takeProfit: params.takeProfit,
+      });
+      return {
+        success: result.success,
+        message: result.message,
+        data: result.success ? {
+          quote: {
+            symbol: params.symbol,
+            side: params.isLong ? "LONG" : "SHORT",
+            leverage: params.leverage,
+            triggerPrice: `$${params.triggerPrice}`,
+            currentPrice: "N/A (autonomous)",
+            marginAmount: params.marginAmount,
+            positionSize: "N/A (autonomous)",
+            stopLoss: params.stopLoss ? `$${params.stopLoss}` : undefined,
+            takeProfit: params.takeProfit ? `$${params.takeProfit}` : undefined,
+          },
+          txHash: result.txHash!,
+          explorerUrl: result.explorerUrl!,
+        } : undefined,
+        error: result.error,
+      };
+    }
+
+    // Assistant path: existing implementation with Touch ID
     const userAddress = config.wallet!.smartAccountAddress as Address;
     const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
     const chainId = config.network.chainId;

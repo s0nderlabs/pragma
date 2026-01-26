@@ -7,7 +7,8 @@ import {
   getMaxTpPercent,
   getCollateralDecimals
 } from "../core/leverup/client.js";
-import { executeOpenTrade } from "../core/leverup/execution.js";
+import { executeOpenTrade, type CollateralToken } from "../core/leverup/execution.js";
+import { executeAutonomousLeverUpOpen } from "../core/execution/autonomous.js";
 import { SUPPORTED_PAIRS, DEGEN_MODE_LEVERAGE_OPTIONS } from "../core/leverup/constants.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -65,12 +66,22 @@ const LeverUpOpenTradeSchema = z.object({
     "Take Profit price in USD (e.g. '100000' for $100,000). Set to automatically close position at this price to secure profits. " +
     "Max TP: 500% for leverage <50x, 300% for leverage ≥50x. Cannot be cancelled once set, but can be edited."
   ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation. " +
+      "Note: For ERC20 collateral, approval must be set via assistant mode first."
+    ),
 });
 
 export function registerLeverUpOpenTrade(server: McpServer): void {
   server.tool(
     "leverup_open_trade",
-    "Open a market perpetual position on LeverUp. Requires Touch ID confirmation.",
+    "Open a market perpetual position on LeverUp. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID).",
     LeverUpOpenTradeSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       try {
@@ -79,6 +90,28 @@ export function registerLeverUpOpenTrade(server: McpServer): void {
           throw new Error("Wallet not configured.");
         }
 
+        // DUAL-MODE: Check if autonomous execution requested
+        if (params.agentId) {
+          // Autonomous path: use pre-signed delegation chain, no Touch ID
+          const result = await executeAutonomousLeverUpOpen(params.agentId, {
+            symbol: params.symbol,
+            isLong: params.isLong,
+            marginAmount: params.marginAmount,
+            leverage: params.leverage,
+            collateralToken: (params.collateralToken as CollateralToken) || "MON",
+            slippageBps: params.slippageBps,
+            stopLoss: params.stopLoss,
+            takeProfit: params.takeProfit,
+          });
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // Assistant path: existing implementation with Touch ID
         const userAddress = config.wallet!.smartAccountAddress as Address;
         const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
         const chainId = config.network.chainId;

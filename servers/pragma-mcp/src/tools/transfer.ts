@@ -8,6 +8,7 @@ import { z } from "zod";
 import type { Address } from "viem";
 import { getAddress, isAddress } from "viem";
 import { executeTransfer } from "../core/execution/transfer.js";
+import { executeAutonomousTransfer } from "../core/execution/autonomous.js";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
 
@@ -21,6 +22,13 @@ const TransferSchema = z.object({
   amount: z
     .string()
     .describe("Amount to transfer in human-readable format (e.g., '1.5' for 1.5 tokens)"),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 interface TransferResult {
@@ -44,7 +52,10 @@ interface TransferResult {
 export function registerTransfer(server: McpServer): void {
   server.tool(
     "transfer",
-    "Transfer tokens to another address. Supports both native MON and ERC20 tokens. Requires user confirmation via passkey (Touch ID). Always verify the recipient address with the user before executing.",
+    "Transfer tokens to another address. Supports both native MON and ERC20 tokens. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID). " +
+    "Always verify the recipient address with the user before executing.",
     TransferSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await transferHandler(params as z.infer<typeof TransferSchema>);
@@ -77,6 +88,43 @@ async function transferHandler(
       };
     }
 
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Validate recipient address first
+      if (!params.to || !isAddress(params.to)) {
+        return {
+          success: false,
+          message: "Invalid recipient address",
+          error: "Please provide a valid recipient address (0x...)",
+        };
+      }
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      const result = await executeAutonomousTransfer(
+        params.agentId,
+        params.token,
+        getAddress(params.to) as Address,
+        params.amount
+      );
+      return {
+        success: result.success,
+        message: result.message,
+        transaction: result.txHash ? {
+          hash: result.txHash,
+          explorerUrl: result.explorerUrl!,
+          status: "success",
+        } : undefined,
+        transfer: result.transfer ? {
+          token: result.transfer.token,
+          tokenAddress: result.transfer.isNative ? "native" : result.transfer.token,
+          isNative: result.transfer.isNative,
+          recipient: result.transfer.recipient,
+          amount: result.transfer.amount,
+        } : undefined,
+        error: result.error,
+      };
+    }
+
+    // Assistant path: existing implementation with Touch ID
     // Step 2: Validate recipient address
     if (!params.to || !isAddress(params.to)) {
       return {

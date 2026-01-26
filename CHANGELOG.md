@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-01-26
+
+### Added
+- **Autonomous Execution (Phase B)** - Dual-mode support for trading tools:
+  - 11 tools now accept optional `agentId` parameter for autonomous execution
+  - Supported tools: `execute_swap`, `transfer`, `wrap`, `unwrap`, `nadfun_buy`, `nadfun_sell`, `leverup_open_trade`, `leverup_close_trade`, `leverup_open_limit_order`, `leverup_cancel_limit_order`, `leverup_update_tpsl`, `leverup_update_margin`
+  - New `autonomous.ts` module with delegation chain execution
+  - Sub-agents can now trade without Touch ID using pre-signed delegations
+
+- `get_sub_agent_state` now returns `walletBalance` field showing actual MON balance for gas monitoring
+
+### Changed
+- Agent definitions moved from `pragma/agents/` to `agents/` (follows Claude Code plugin conventions)
+- `TradeRecord.details` extended with index signature for flexible trade logging
+
 ## [0.8.0] - 2026-01-26
 
 ### Added

@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { executeNadFunSell } from "../core/nadfun/execution.js";
+import { executeAutonomousNadFunSell } from "../core/execution/autonomous.js";
 import { getCachedNadFunQuote } from "../core/nadfun/quote.js";
 import { getTokenStatus } from "../core/nadfun/client.js";
 import type { NadFunExecuteResponse } from "../core/nadfun/types.js";
@@ -17,15 +18,22 @@ const NadFunSellSchema = z.object({
       "Quote ID from nadfun_quote for a SELL operation. " +
       "The quote must not be expired and must be a SELL direction quote."
     ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "Note: Sell requires token approval. First sell should use assistant mode to set approval."
+    ),
 });
 
 export function registerNadFunSell(server: McpServer): void {
   server.tool(
     "nadfun_sell",
     "Execute a sell on nad.fun bonding curve using a quote. " +
-    "Requires Touch ID confirmation (may require multiple if approval is needed). " +
-    "The quote must be obtained from nadfun_quote with isBuy=false. " +
-    "Make sure to check session key balance before executing.",
+    "If agentId provided: uses autonomous mode (no Touch ID, pre-signed delegation). " +
+    "If no agentId: uses assistant mode (requires Touch ID, handles approval). " +
+    "The quote must be obtained from nadfun_quote with isBuy=false.",
     NadFunSellSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await nadFunSellHandler(params as z.infer<typeof NadFunSellSchema>);
@@ -58,8 +66,14 @@ async function nadFunSellHandler(
       };
     }
 
-    const chainId = config.network.chainId;
+    // DUAL-MODE: Check if autonomous execution requested
+    if (params.agentId) {
+      // Autonomous path: use pre-signed delegation chain, no Touch ID
+      // Note: Requires pre-existing approval for the token
+      return await executeAutonomousNadFunSell(params.agentId, params.quoteId);
+    }
 
+    // Assistant path: existing implementation with Touch ID
     // Get quote to include in response
     const quote = getCachedNadFunQuote(params.quoteId);
     if (!quote) {
@@ -84,7 +98,7 @@ async function nadFunSellHandler(
     // Get updated token status for progress
     let progressPercent = quote.progressPercent;
     try {
-      const status = await getTokenStatus(quote.token, chainId);
+      const status = await getTokenStatus(quote.token, config.network.chainId);
       progressPercent = status.progressPercent;
     } catch {
       // Use quote's progress if fresh fetch fails

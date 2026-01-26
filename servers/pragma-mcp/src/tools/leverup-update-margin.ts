@@ -3,6 +3,7 @@ import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { getCollateralDecimals } from "../core/leverup/client.js";
 import { executeAddMargin, type CollateralToken } from "../core/leverup/execution.js";
+import { executeAutonomousLeverUpUpdateMargin } from "../core/execution/autonomous.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -25,6 +26,7 @@ import {
   createPublicClient,
   createWalletClient,
   parseUnits,
+  encodeFunctionData,
   erc20Abi,
   type Address,
   type Hex,
@@ -42,7 +44,14 @@ const LeverUpUpdateMarginSchema = z.object({
   collateralToken: z.enum(["MON", "USDC", "LVUSD", "LVMON"]).default("MON").describe(
     "Collateral token matching the position's collateral. IMPORTANT: Positions opened with 500x, 750x, or 1001x leverage " +
     "(Zero-Fee mode) CANNOT add margin - this operation will fail for those positions."
-  )
+  ),
+  agentId: z
+    .string()
+    .optional()
+    .describe(
+      "Sub-agent ID for autonomous execution (no Touch ID). " +
+      "If omitted, uses assistant mode with Touch ID confirmation."
+    ),
 });
 
 /**
@@ -68,9 +77,10 @@ function getCollateralTokenAddress(collateralToken: CollateralToken): Address {
 export function registerLeverUpUpdateMargin(server: McpServer): void {
   server.tool(
     "leverup_update_margin",
-    "Add collateral to an existing LeverUp position. Requires Touch ID confirmation. " +
-    "NOTE: Only ADDING margin is supported - the contract does not allow margin withdrawal. " +
-    "This does NOT work for Zero-Fee positions (500x/750x/1001x leverage).",
+    "Add collateral to an existing LeverUp position. " +
+    "If agentId provided: uses autonomous mode (no Touch ID). " +
+    "If no agentId: uses assistant mode (requires Touch ID). " +
+    "NOTE: Only ADDING margin is supported. This does NOT work for Zero-Fee positions (500x/750x/1001x leverage).",
     LeverUpUpdateMarginSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       try {
@@ -79,6 +89,24 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
           throw new Error("Wallet not configured.");
         }
 
+        // DUAL-MODE: Check if autonomous execution requested
+        if (params.agentId) {
+          // Autonomous path: use pre-signed delegation chain, no Touch ID
+          const result = await executeAutonomousLeverUpUpdateMargin(
+            params.agentId,
+            params.tradeHash as Hex,
+            params.amount,
+            (params.collateralToken || "MON") as CollateralToken
+          );
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // Assistant path: existing implementation with Touch ID
         const userAddress = config.wallet!.smartAccountAddress as Address;
         const sessionKeyAddress = config.wallet!.sessionKeyAddress as Address;
         const chainId = config.network.chainId;
@@ -136,8 +164,12 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
               execution: {
                 target: tokenAddress,
                 value: 0n,
-                callData: `0x095ea7b3${LEVERUP_DIAMOND.slice(2).padStart(64, '0')}${amountWei.toString(16).padStart(64, '0')}` as Hex
-              }
+                callData: encodeFunctionData({
+                  abi: erc20Abi,
+                  functionName: "approve",
+                  args: [LEVERUP_DIAMOND, amountWei],
+                }),
+              },
             });
           // NOTE: Do NOT increment nonce - multiple delegations in same batch use same nonce
           }
