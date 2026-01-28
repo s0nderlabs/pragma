@@ -29,6 +29,7 @@ export {
   cleanupIdleWallets,
   syncPoolWithKeychain,
   getFullWallet,
+  validateAndHealPool,
 } from "./wallet-pool.js";
 
 // Agent state

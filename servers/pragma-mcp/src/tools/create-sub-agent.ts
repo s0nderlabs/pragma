@@ -93,6 +93,7 @@ interface CreateSubAgentResult {
   subAgent?: {
     id: string;
     walletAddress: string;
+    walletBalance: string;
     agentType: string;
     budget: {
       mon: string;
@@ -102,6 +103,12 @@ interface CreateSubAgentResult {
     maxTrades: number;
     expiresAt: string;
     expiresIn: string;
+    funding: {
+      requested: string;
+      existingBalance: string;
+      transferred: string;
+      decision: "skipped" | "partial" | "full" | "none";
+    };
     fundingTx?: string;
   };
   error?: string;
@@ -330,44 +337,48 @@ async function createSubAgentHandler(
       };
       await storeDelegation(agentId, storedDelegation);
 
-      // Fund sub-agent if requested (but check existing balance first)
+      // Check wallet balance and fund if needed
+      const rpcUrl = await getRpcUrl(config);
+      const chain = buildViemChain(chainId, rpcUrl);
+
+      const publicClient = createPublicClient({
+        chain,
+        transport: http(rpcUrl, x402HttpOptions(config)),
+      });
+
+      // Check sub-agent wallet's existing balance
+      const existingBalanceResult = await withRetry(
+        async () => publicClient.getBalance({ address: poolWallet.address as Address }),
+        { operationName: "check-wallet-balance" }
+      );
+      const existingBalance = existingBalanceResult.success ? (existingBalanceResult.data ?? 0n) : 0n;
+
       let fundingTxHash: string | undefined;
-      let existingBalance = 0n;
+      let amountTransferred = 0n;
+      let fundingDecision: "skipped" | "partial" | "full" | "none" = "none";
+
       if (params.fundAmount > 0) {
-        const rpcUrl = await getRpcUrl(config);
-        const chain = buildViemChain(chainId, rpcUrl);
-
-        const publicClient = createPublicClient({
-          chain,
-          transport: http(rpcUrl, x402HttpOptions(config)),
-        });
-
-        // Check sub-agent wallet's existing balance (may have leftover from previous agent)
-        const existingBalanceResult = await withRetry(
-          async () => publicClient.getBalance({ address: poolWallet.address as Address }),
-          { operationName: "check-wallet-balance" }
-        );
-        existingBalance = existingBalanceResult.success ? existingBalanceResult.data ?? 0n : 0n;
-
         const fundAmountWei = parseEther(params.fundAmount.toString());
 
-        // Only fund if existing balance is less than requested amount
-        if (existingBalance < fundAmountWei) {
+        if (existingBalance >= fundAmountWei) {
+          // Wallet already has enough - skip funding
+          fundingDecision = "skipped";
+        } else {
+          // Need to fund - calculate how much
+          const amountNeeded = fundAmountWei - existingBalance;
+
           const walletClient = createWalletClient({
             account: sessionAccount,
             chain,
             transport: http(rpcUrl, x402HttpOptions(config)),
           });
 
-          // Check session key balance (with retry)
+          // Check session key balance
           const sessionKeyBalanceResult = await withRetry(
             async () => publicClient.getBalance({ address: sessionKey.address }),
             { operationName: "check-session-key-balance" }
           );
-          const sessionKeyBalance = sessionKeyBalanceResult.success ? sessionKeyBalanceResult.data ?? 0n : 0n;
-
-          // Calculate how much more is needed
-          const amountNeeded = fundAmountWei - existingBalance;
+          const sessionKeyBalance = sessionKeyBalanceResult.success ? (sessionKeyBalanceResult.data ?? 0n) : 0n;
 
           if (sessionKeyBalance >= amountNeeded) {
             fundingTxHash = await walletClient.sendTransaction({
@@ -375,12 +386,15 @@ async function createSubAgentHandler(
               value: amountNeeded,
             });
 
-            // Wait for confirmation
             await publicClient.waitForTransactionReceipt({ hash: fundingTxHash as `0x${string}` });
+            amountTransferred = amountNeeded;
+            fundingDecision = existingBalance > 0n ? "partial" : "full";
           }
         }
-        // If existingBalance >= fundAmountWei, skip funding (wallet already has enough)
       }
+
+      // Calculate final wallet balance
+      const finalBalance = existingBalance + amountTransferred;
 
       // Calculate human-readable expiry
       const expiresAtMs = delegationResult.expiresAt * 1000;
@@ -393,6 +407,7 @@ async function createSubAgentHandler(
         subAgent: {
           id: agentId,
           walletAddress: poolWallet.address,
+          walletBalance: formatEther(finalBalance) + " MON",
           agentType: params.agentType,
           budget: {
             mon: params.budgetMon + " MON",
@@ -402,6 +417,12 @@ async function createSubAgentHandler(
           maxTrades: params.maxTrades,
           expiresAt: expiresAt.toISOString(),
           expiresIn,
+          funding: {
+            requested: params.fundAmount + " MON",
+            existingBalance: formatEther(existingBalance) + " MON",
+            transferred: formatEther(amountTransferred) + " MON",
+            decision: fundingDecision,
+          },
           fundingTx: fundingTxHash,
         },
       };

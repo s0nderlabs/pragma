@@ -105,16 +105,22 @@ async function revokeSubAgentHandler(
     // Get sub-agent wallet
     const subAgentWallet = await getFullWallet(state.walletId);
     if (!subAgentWallet) {
-      // Wallet not found but state exists - delete state and return
+      // Wallet not found in Keychain - clean up state and release from pool
+      try {
+        await releaseWallet(state.walletId);
+      } catch {
+        // Pool entry might not exist
+      }
       await deleteAgentState(params.subAgentId);
+
       return {
         success: true,
-        message: "Sub-agent cleaned up (wallet not found)",
+        message: "Sub-agent cleaned up (wallet not found in Keychain)",
         revocation: {
           subAgentId: params.subAgentId,
           previousStatus,
           balanceSwept: "0 MON",
-          walletReturnedToPool: false,
+          walletReturnedToPool: true,
         },
       };
     }
@@ -134,36 +140,32 @@ async function revokeSubAgentHandler(
 
     // Sweep balance if requested
     if (params.sweepBalance && subAgentWallet.privateKey) {
-      // Get balance with retry
       const balanceResult = await withRetry(
         async () => publicClient.getBalance({ address: subAgentWallet.address as Address }),
         { operationName: "check-subagent-balance" }
       );
-      const balance = balanceResult.success ? balanceResult.data ?? 0n : 0n;
+      const balance = balanceResult.success ? (balanceResult.data ?? 0n) : 0n;
 
       if (balance > 0n) {
-        // Get sub-agent account for signing
-        const subAgentAccount = privateKeyToAccount(
-          subAgentWallet.privateKey as `0x${string}`
-        );
-
-        const walletClient = createWalletClient({
-          account: subAgentAccount,
-          chain,
-          transport: http(rpcUrl, x402HttpOptions(config)),
-        });
-
-        // Estimate gas for transfer (with retry)
         const gasPriceResult = await withRetry(
           async () => publicClient.getGasPrice(),
           { operationName: "get-gas-price" }
         );
-        const gasPrice = gasPriceResult.success ? gasPriceResult.data ?? 0n : 0n;
-        const gasLimit = 21000n; // Standard transfer
-        const gasCost = gasPrice * gasLimit;
+        const gasPrice = gasPriceResult.success ? (gasPriceResult.data ?? 0n) : 0n;
+        const gasCost = gasPrice * 21000n; // Standard transfer gas limit
 
         // Only sweep if balance exceeds gas cost
         if (balance > gasCost) {
+          const subAgentAccount = privateKeyToAccount(
+            subAgentWallet.privateKey as `0x${string}`
+          );
+
+          const walletClient = createWalletClient({
+            account: subAgentAccount,
+            chain,
+            transport: http(rpcUrl, x402HttpOptions(config)),
+          });
+
           const sweepAmount = balance - gasCost;
 
           try {
@@ -172,7 +174,6 @@ async function revokeSubAgentHandler(
               value: sweepAmount,
             });
 
-            // Wait for confirmation
             await publicClient.waitForTransactionReceipt({
               hash: sweepTxHash as `0x${string}`,
             });

@@ -23,6 +23,7 @@ import {
   listSubAgentWalletIds,
   type SubAgentWallet,
 } from "./keys.js";
+import { agentExists } from "./state.js";
 
 /**
  * Pool wallet entry
@@ -240,11 +241,62 @@ export async function getOrCreateWallet(): Promise<PoolWallet> {
 }
 
 /**
+ * Validate pool consistency and auto-heal issues:
+ * - Fix wallets with status="active" but assignedTo=null
+ * - Release wallets assigned to non-existent agents
+ *
+ * Called automatically by assignWallet() to ensure pool health.
+ */
+export async function validateAndHealPool(): Promise<{
+  inconsistenciesFixed: number;
+  orphansFixed: number;
+}> {
+  return withLock(async () => {
+    const pool = loadWalletPool();
+    let inconsistenciesFixed = 0;
+    let orphansFixed = 0;
+    let modified = false;
+
+    for (const wallet of pool.wallets) {
+      if (wallet.status !== "active") continue;
+
+      // Fix inconsistent state (active but no assignedTo)
+      if (!wallet.assignedTo) {
+        wallet.status = "idle";
+        wallet.lastUsedAt = Date.now();
+        inconsistenciesFixed++;
+        modified = true;
+      } else {
+        // Fix orphaned wallets (assigned to non-existent agent)
+        const agentId = wallet.assignedTo.replace("subagent-", "");
+        if (!agentExists(agentId)) {
+          wallet.status = "idle";
+          wallet.assignedTo = null;
+          wallet.lastUsedAt = Date.now();
+          orphansFixed++;
+          modified = true;
+        }
+      }
+    }
+
+    if (modified) {
+      pool.version++;
+      saveWalletPool(pool);
+    }
+
+    return { inconsistenciesFixed, orphansFixed };
+  });
+}
+
+/**
  * Assign an idle wallet to a task/agent
  * @param assignTo - Task or agent ID to assign to
  * @returns The assigned pool wallet
  */
 export async function assignWallet(assignTo: string): Promise<PoolWallet> {
+  // Heal pool before assignment (catches orphans and inconsistencies)
+  await validateAndHealPool();
+
   return withLock(async () => {
     const pool = loadWalletPool();
 

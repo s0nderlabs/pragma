@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-01-28
+
+### Added
+- **Wallet balance in `create_sub_agent` response** - Shows existing balance and funding decision (skipped/partial/full/none)
+- **Mandatory status reporting** - Spawn prompt now instructs sub-agents to call `report_agent_status` before terminating
+
+### Fixed
+- **Wallet pool self-healing** - `validateAndHealPool()` auto-fixes inconsistent and orphaned wallets
+- **Cascade cleanup on root revocation** - `revokeRootDelegation()` now cleans up all sub-agents and releases wallets
+- **Wallet orphaned on revoke** - `revoke_sub_agent` now releases wallet even when Keychain entry missing
+
 ## [0.8.2] - 2026-01-28
 
 ### Added

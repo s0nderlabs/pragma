@@ -261,8 +261,22 @@ Task({
     CRITICAL RULES:
     1. ALWAYS pass agentId: "${agentId}" to ALL trading tools
     2. NEVER trigger Touch ID - if prompted, you forgot agentId
-    3. You CANNOT fund yourself - report if gas is low
+    3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
     4. Stop when budget depleted or max trades reached
+
+    BEFORE TERMINATING - MANDATORY:
+    You MUST call report_agent_status before finishing:
+    - status: "completed" → Task goal was ACHIEVED
+    - status: "failed" → Goal NOT achieved (budget depleted, max trades, errors)
+    - status: "paused" → Low gas, need funding to continue
+    Include a reason summarizing what happened and key results.
+
+    Example:
+    report_agent_status(
+      agentId: "${agentId}",
+      status: "completed",
+      reason: "Sold 5 tokens for 0.22 MON, kept pragma and WAVE as requested"
+    )
 
     TASK: ${userTask}
 
@@ -292,14 +306,15 @@ This enables resuming the agent after gas top-up.
 
 ## Gas Depletion → Fund → Resume Flow
 
-When a sub-agent runs low on gas:
+When a sub-agent runs low on gas (< 0.1 MON):
 
-1. **Sub-agent reports:**
+1. **Sub-agent reports status and stops:**
    ```
-   STATUS: Pausing - low gas
-   GAS BALANCE: 0.08 MON
-   AGENT ID: [pragma agentId]
-   PROGRESS: [what was accomplished]
+   report_agent_status(
+     agentId: [agentId],
+     status: "paused",
+     reason: "Low gas (0.08 MON). Progress: [what was accomplished]"
+   )
    ```
 
 2. **Main Claude funds:**

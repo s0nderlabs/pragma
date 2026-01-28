@@ -22,6 +22,8 @@ import { SUPPORTED_CHAINS } from "../../config/chains.js";
 import { LEVERUP_DIAMOND, WMON_ADDRESS, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS } from "../leverup/constants.js";
 import { NADFUN_CONTRACTS } from "../nadfun/constants.js";
 import { formatTimeRemaining } from "../utils/index.js";
+import { listAgentStates, deleteAgentState, loadAgentState } from "../subagent/state.js";
+import { releaseWallet } from "../subagent/wallet-pool.js";
 import type { SignedDelegation } from "./types.js";
 import {
   LEVERUP_SELECTORS,
@@ -494,17 +496,49 @@ export function getRootDelegationStatus(): {
 /**
  * Revoke (delete) the stored root delegation
  *
- * Note: This only removes the local storage.
- * On-chain revocation happens automatically when:
- * - The delegation expires (timestamp caveat)
- * - The call limit is reached (limitedCalls caveat)
+ * Cascades cleanup to all sub-agents:
+ * - Releases all assigned wallets back to pool
+ * - Deletes all agent state directories
+ *
+ * Note: This only removes local storage. On-chain revocation happens
+ * automatically via delegation expiry or call limit exhaustion.
  */
-export function revokeRootDelegation(): void {
-  const filePath = getRootDelegationPath();
+export async function revokeRootDelegation(): Promise<{
+  subAgentsCleanedUp: number;
+  walletsReleased: number;
+}> {
+  let subAgentsCleanedUp = 0;
+  let walletsReleased = 0;
 
+  const agents = await listAgentStates();
+
+  for (const agent of agents) {
+    // Release wallet back to pool (ignore errors - wallet might not exist)
+    if (agent.walletId) {
+      try {
+        await releaseWallet(agent.walletId);
+        walletsReleased++;
+      } catch {
+        // Wallet might not exist in pool
+      }
+    }
+
+    // Delete agent state directory
+    try {
+      await deleteAgentState(agent.id);
+      subAgentsCleanedUp++;
+    } catch {
+      // State might already be deleted
+    }
+  }
+
+  // Delete root delegation file
+  const filePath = getRootDelegationPath();
   if (existsSync(filePath)) {
     unlinkSync(filePath);
   }
+
+  return { subAgentsCleanedUp, walletsReleased };
 }
 
 // ============================================================================
