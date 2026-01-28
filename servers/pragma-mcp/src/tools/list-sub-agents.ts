@@ -7,15 +7,15 @@ import { z } from "zod";
 import { formatEther } from "viem";
 import { loadConfig } from "../config/pragma-config.js";
 import { listAgentStates, type SubAgentState } from "../core/subagent/index.js";
-import { formatTimeRemaining } from "../core/utils/index.js";
+import { formatTimeRemaining, formatLocalTimestamp } from "../core/utils/index.js";
 
 const ListSubAgentsSchema = z.object({
   status: z
-    .enum(["all", "running", "completed", "failed", "revoked"])
+    .enum(["all", "running", "paused", "completed", "failed", "revoked"])
     .optional()
     .describe(
       "Filter by status. Default: 'all'. " +
-        "Options: all, running, completed, failed, revoked"
+        "Options: all, running, paused, completed, failed, revoked"
     ),
 });
 
@@ -23,6 +23,7 @@ interface SubAgentSummary {
   id: string;
   agentType: string;
   status: string;
+  taskAgentId?: string; // Claude Code Task agent ID for resume/lookup
   walletAddress: string;
   budget: {
     monRemaining: string;
@@ -43,6 +44,7 @@ interface ListSubAgentsResult {
   summary: {
     total: number;
     running: number;
+    paused: number;
     completed: number;
     failed: number;
     revoked: number;
@@ -84,6 +86,7 @@ function formatSubAgentSummary(state: SubAgentState): SubAgentSummary {
     id: state.id,
     agentType: state.agentType,
     status: state.status,
+    taskAgentId: state.taskAgentId,
     walletAddress: state.walletAddress,
     budget: {
       monRemaining: formatEther(monAllocated - monSpent) + " MON",
@@ -94,7 +97,7 @@ function formatSubAgentSummary(state: SubAgentState): SubAgentSummary {
       max: state.trades.maxAllowed,
     },
     expiresIn: formatTimeRemaining(state.expiresAt),
-    createdAt: new Date(state.createdAt).toISOString(),
+    createdAt: formatLocalTimestamp(new Date(state.createdAt)),
   };
 }
 
@@ -108,7 +111,7 @@ async function listSubAgentsHandler(
         success: false,
         message: "Wallet not configured",
         subAgents: [],
-        summary: { total: 0, running: 0, completed: 0, failed: 0, revoked: 0 },
+        summary: { total: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 },
         error: "Please run setup_wallet first",
       };
     }
@@ -125,14 +128,13 @@ async function listSubAgentsHandler(
     // Format summaries
     const subAgents = filteredStates.map(formatSubAgentSummary);
 
-    // Build summary counts
-    const summary = {
-      total: allStates.length,
-      running: allStates.filter((s) => s.status === "running").length,
-      completed: allStates.filter((s) => s.status === "completed").length,
-      failed: allStates.filter((s) => s.status === "failed").length,
-      revoked: allStates.filter((s) => s.status === "revoked").length,
-    };
+    // Build summary counts in single pass
+    const summary = { total: allStates.length, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 };
+    for (const s of allStates) {
+      if (s.status in summary) {
+        summary[s.status as keyof typeof summary]++;
+      }
+    }
 
     // Build message
     let message: string;
@@ -155,7 +157,7 @@ async function listSubAgentsHandler(
       success: false,
       message: "Failed to list sub-agents",
       subAgents: [],
-      summary: { total: 0, running: 0, completed: 0, failed: 0, revoked: 0 },
+      summary: { total: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 },
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }

@@ -52,6 +52,12 @@ allowed-tools:
   - mcp__pragma__market_get_critical_news
   - mcp__pragma__market_search_news
   - mcp__pragma__market_get_cb_speeches
+  - mcp__pragma__create_root_delegation
+  - mcp__pragma__create_sub_agent
+  - mcp__pragma__list_sub_agents
+  - mcp__pragma__revoke_sub_agent
+  - mcp__pragma__fund_sub_agent
+  - mcp__pragma__get_sub_agent_state
   - AskUserQuestion
   - Read
   - Task
@@ -884,3 +890,11 @@ User: "swap all my CHOG to MON"
 | Quote expired            | Get fresh quote automatically    |
 | Session key low          | `fund_session_key` first         |
 | Transaction failed       | Show error, suggest retry change |
+
+---
+
+## Autonomous Mode
+
+For autonomous trading with sub-agents, see the dedicated **autonomous-mode** skill.
+
+**Trigger keywords:** autonomous, sub-agent, background trading, AFK trading, spawn agent, delegate trading

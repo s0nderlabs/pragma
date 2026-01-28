@@ -17,18 +17,20 @@ import { buildViemChain } from "../config/chains.js";
 import { x402HttpOptions } from "../core/x402/client.js";
 import {
   loadAgentState,
-  updateAgentState,
+  deleteAgentState,
   getFullWallet,
   releaseWallet,
 } from "../core/subagent/index.js";
+import { withRetry } from "../core/utils/retry.js";
 
 const RevokeSubAgentSchema = z.object({
   subAgentId: z.string().describe("The sub-agent ID (UUID) to revoke"),
   sweepBalance: z
     .boolean()
-    .default(true)
+    .default(false)
     .describe(
-      "Sweep remaining gas balance back to session key. Default: true"
+      "Sweep remaining gas balance back to session key. " +
+        "Default: false (gas stays in wallet for reuse by future agents)"
     ),
 });
 
@@ -103,11 +105,11 @@ async function revokeSubAgentHandler(
     // Get sub-agent wallet
     const subAgentWallet = await getFullWallet(state.walletId);
     if (!subAgentWallet) {
-      // Wallet not found but state exists - just update status
-      await updateAgentState(params.subAgentId, { status: "revoked" });
+      // Wallet not found but state exists - delete state and return
+      await deleteAgentState(params.subAgentId);
       return {
         success: true,
-        message: "Sub-agent revoked (wallet not found)",
+        message: "Sub-agent cleaned up (wallet not found)",
         revocation: {
           subAgentId: params.subAgentId,
           previousStatus,
@@ -132,9 +134,12 @@ async function revokeSubAgentHandler(
 
     // Sweep balance if requested
     if (params.sweepBalance && subAgentWallet.privateKey) {
-      const balance = await publicClient.getBalance({
-        address: subAgentWallet.address as Address,
-      });
+      // Get balance with retry
+      const balanceResult = await withRetry(
+        async () => publicClient.getBalance({ address: subAgentWallet.address as Address }),
+        { operationName: "check-subagent-balance" }
+      );
+      const balance = balanceResult.success ? balanceResult.data ?? 0n : 0n;
 
       if (balance > 0n) {
         // Get sub-agent account for signing
@@ -148,8 +153,12 @@ async function revokeSubAgentHandler(
           transport: http(rpcUrl, x402HttpOptions(config)),
         });
 
-        // Estimate gas for transfer
-        const gasPrice = await publicClient.getGasPrice();
+        // Estimate gas for transfer (with retry)
+        const gasPriceResult = await withRetry(
+          async () => publicClient.getGasPrice(),
+          { operationName: "get-gas-price" }
+        );
+        const gasPrice = gasPriceResult.success ? gasPriceResult.data ?? 0n : 0n;
         const gasLimit = 21000n; // Standard transfer
         const gasCost = gasPrice * gasLimit;
 
@@ -177,15 +186,15 @@ async function revokeSubAgentHandler(
       }
     }
 
-    // Update agent status to revoked
-    await updateAgentState(params.subAgentId, { status: "revoked" });
-
     // Release wallet back to pool
     await releaseWallet(state.walletId);
 
+    // Delete agent state directory (no need to keep revoked agents)
+    await deleteAgentState(params.subAgentId);
+
     return {
       success: true,
-      message: `Revoked sub-agent ${state.agentType}`,
+      message: `Revoked and cleaned up sub-agent ${state.agentType}`,
       revocation: {
         subAgentId: params.subAgentId,
         previousStatus,

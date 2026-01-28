@@ -14,14 +14,22 @@ import {
   type Caveats,
 } from "@metamask/smart-accounts-kit";
 
-import { buildDelegationTypedData, hashDelegation } from "./typedData.js";
+import { buildDelegationTypedData } from "./typedData.js";
+import { hashDelegation } from "@metamask/delegation-core";
 import { signDelegationWithP256 } from "../signer/p256SignerConfig.js";
-import { getDTKEnvironment } from "../../config/constants.js";
+import { getDTKEnvironment, ALLOWED_TARGETS_ENFORCER, ALLOWED_METHODS_ENFORCER, VALUE_LTE_ENFORCER } from "../../config/constants.js";
 import { SUPPORTED_CHAINS } from "../../config/chains.js";
-import { LEVERUP_DIAMOND, WMON_ADDRESS } from "../leverup/constants.js";
+import { LEVERUP_DIAMOND, WMON_ADDRESS, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS } from "../leverup/constants.js";
 import { NADFUN_CONTRACTS } from "../nadfun/constants.js";
 import { formatTimeRemaining } from "../utils/index.js";
 import type { SignedDelegation } from "./types.js";
+import {
+  LEVERUP_SELECTORS,
+  NADFUN_SELECTORS,
+  WMON_SELECTORS,
+  DEX_SELECTORS,
+} from "./subagent.js";
+import { buildLogicalOrCaveat } from "./logical-or.js";
 
 // ============================================================================
 // Types
@@ -129,13 +137,23 @@ function getRootDelegationPath(): string {
 
 /**
  * Get all trading contract addresses for a chain
- * Root delegation scope includes ALL trading contracts
+ *
+ * For LogicalOrWrapperEnforcer Group 1 (TRADING), we whitelist:
+ * - Protocol addresses (for trade execution)
+ * - ERC20 tokens that protocols need direct access to (USDC, LVUSD, LVMON)
+ *
+ * Note: approve() on arbitrary tokens is handled by Group 0 (APPROVE)
+ * which has no AllowedTargetsEnforcer, allowing any token address.
  */
 export function getAllTradingTargets(chainId: number): Address[] {
   const targets: Address[] = [];
   const chainConfig = SUPPORTED_CHAINS[chainId];
 
-  // Always include WMON
+  // ============================================================
+  // Protocol Addresses (trade execution targets)
+  // ============================================================
+
+  // Always include WMON (wrap/unwrap)
   targets.push(WMON_ADDRESS);
 
   // LeverUp diamond
@@ -151,7 +169,41 @@ export function getAllTradingTargets(chainId: number): Address[] {
     targets.push(NADFUN_CONTRACTS[143].router);
   }
 
+  // ============================================================
+  // ERC20 Tokens used as collateral/input for trading
+  // These need to be in trading targets for transfer() calls
+  // ============================================================
+
+  // USDC - used as collateral for LeverUp, swap input
+  targets.push(USDC_ADDRESS);
+
+  // LVUSD - LeverUp vault USD token
+  targets.push(LVUSD_ADDRESS);
+
+  // LVMON - LeverUp vault MON token
+  targets.push(LVMON_ADDRESS);
+
   return targets;
+}
+
+/**
+ * Get all trading function selectors for Group 1 (TRADING)
+ *
+ * These are the allowed method selectors for trading operations.
+ * Note: ERC20 approve() is NOT included here - it's handled by
+ * Group 0 (APPROVE) which allows approve() on ANY token address.
+ */
+export function getAllTradingSelectors(): Hex[] {
+  return [
+    // LeverUp perps
+    ...Object.values(LEVERUP_SELECTORS),
+    // nad.fun memecoins
+    ...Object.values(NADFUN_SELECTORS),
+    // WMON wrap/unwrap
+    ...Object.values(WMON_SELECTORS),
+    // DEX aggregator (0x Exchange Proxy)
+    ...Object.values(DEX_SELECTORS),
+  ];
 }
 
 // ============================================================================
@@ -159,13 +211,15 @@ export function getAllTradingTargets(chainId: number): Address[] {
 // ============================================================================
 
 /**
- * Build caveats for root delegation (persistent, days expiry)
+ * Build additional caveats for root delegation (persistent, days expiry)
+ *
+ * These caveats are ADDED to the delegation after scope-based caveats are removed.
+ * We can't skip scope in DTK, so we create with scope then modify the caveats.
  *
  * Caveats include:
+ * - LogicalOrWrapperEnforcer: Flexible approve + trading permissions
  * - timestamp: Expiry in days
  * - limitedCalls: Max number of calls
- *
- * Note: valueLte is added in scope, not caveats, per DTK convention
  */
 function buildRootCaveats(
   expiryDays: number,
@@ -175,11 +229,13 @@ function buildRootCaveats(
   const expiresAt = now + expiryDays * SECONDS_PER_DAY;
 
   const caveats: unknown[] = [
+    // Timestamp: Delegation expiry
     {
       type: "timestamp" as const,
       afterThreshold: 0,
       beforeThreshold: expiresAt,
     },
+    // LimitedCalls: Max operations
     {
       type: "limitedCalls" as const,
       limit: maxCalls,
@@ -197,9 +253,18 @@ function buildRootCaveats(
  * Create a root delegation (unsigned)
  *
  * This delegation grants the session key (Main Agent) permission to:
- * - Execute trades on LeverUp, nad.fun, DEX aggregator
+ * - Execute approve() on ANY ERC20 token (Group 0)
+ * - Execute trades on LeverUp, nad.fun, DEX aggregator (Group 1)
  * - Wrap/unwrap MON
- * - Within the specified budget and time limits
+ * - Within the specified time and call limits
+ *
+ * Uses LogicalOrWrapperEnforcer for OR logic between groups:
+ * - Group 0 (APPROVE): approve() on any token address
+ * - Group 1 (TRADING): Trading calls to whitelisted protocols
+ *
+ * Implementation note: DTK requires scope, which generates AllowedTargets and
+ * AllowedMethods caveats. We create with scope, then replace those caveats
+ * with our LogicalOrWrapperEnforcer for flexible permissions.
  *
  * The delegation must be signed with Touch ID before use.
  */
@@ -219,42 +284,56 @@ export function createRootDelegation(
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + expiryDays * SECONDS_PER_DAY;
 
-  // Get all trading targets for scope
+  // Get all trading targets for Group 1 (TRADING)
   const allowedTargets = getAllTradingTargets(chainId);
 
-  // Build scope with valueLte
-  // DTK's functionCall scope with valueLte provides per-tx MON cap
-  const scope: {
-    type: "functionCall";
-    targets: Address[];
-    selectors: Hex[];
-    valueLte?: { maxValue: bigint };
-  } = {
+  // Get all trading selectors for Group 1 (TRADING)
+  const allowedSelectors = getAllTradingSelectors();
+
+  // Build base caveats (timestamp + limitedCalls)
+  const baseCaveats = buildRootCaveats(expiryDays, maxCalls);
+
+  // Build scope with targets/selectors (required by DTK)
+  // DTK will generate AllowedTargets and AllowedMethods caveats from this
+  const scope = {
     type: "functionCall" as const,
     targets: allowedTargets,
-    selectors: [], // Empty = all methods allowed
+    selectors: allowedSelectors,
   };
 
-  // Add valueLte to scope if specified
-  if (valueLtePerTx !== undefined && valueLtePerTx > 0n) {
-    scope.valueLte = { maxValue: valueLtePerTx };
-  }
-
-  // Build caveats (timestamp + limitedCalls)
-  const caveats = buildRootCaveats(expiryDays, maxCalls);
-
-  // Create delegation using DTK
-  // Root delegations don't pass authority - DTK uses ROOT_AUTHORITY by default
+  // Create delegation using DTK (generates scope-based caveats)
   const delegation = createDelegation({
     environment,
     scope,
     from: delegator,
     to: sessionKey,
-    caveats,
+    caveats: baseCaveats,
     salt: ZERO_SALT,
   });
 
-  // Build typed data for signing
+  // CRITICAL: Replace scope-based enforcers with LogicalOrWrapperEnforcer
+  // DTK generates AllowedTargets + AllowedMethods from scope, but we need
+  // OR logic instead of AND logic for approve() on arbitrary tokens.
+  //
+  // Filter out:
+  // - AllowedTargetsEnforcer (blocks arbitrary token addresses)
+  // - AllowedMethodsEnforcer (redundant, LogicalOr handles this)
+  // - ValueLteEnforcer (DTK adds with 0 value which can cause issues)
+  const scopeEnforcers = [
+    ALLOWED_TARGETS_ENFORCER.toLowerCase(),
+    ALLOWED_METHODS_ENFORCER.toLowerCase(),
+    VALUE_LTE_ENFORCER.toLowerCase(),
+  ];
+
+  delegation.caveats = delegation.caveats.filter(
+    (caveat) => !scopeEnforcers.includes(caveat.enforcer.toLowerCase())
+  );
+
+  // Add LogicalOrWrapperEnforcer caveat at the beginning
+  const logicalOrCaveat = buildLogicalOrCaveat(allowedTargets, allowedSelectors);
+  delegation.caveats.unshift(logicalOrCaveat);
+
+  // Build typed data for signing (with modified caveats)
   const typedData = buildDelegationTypedData(delegation, chainId);
 
   return {
@@ -312,8 +391,13 @@ export async function signAndStoreRootDelegation(
     signature,
   };
 
-  // Compute delegation hash
-  const delegationHash = hashDelegation(result.delegation, chainId);
+  // Compute delegation hash using DTK's hash function (struct hash, not EIP-712)
+  // DTK expects salt as bigint, our delegation has it as Hex
+  const delegationForHash = {
+    ...result.delegation,
+    salt: BigInt(result.delegation.salt),
+  };
+  const delegationHash = hashDelegation(delegationForHash);
 
   // Create stored delegation
   const storedDelegation: StoredRootDelegation = {
@@ -378,6 +462,7 @@ export function getRootDelegationStatus(): {
   expiresAt?: number;
   expiresIn?: string;
   approximateBudget?: string;
+  maxCalls?: number;
   sessionKey?: Address;
   delegator?: Address;
 } {
@@ -396,6 +481,7 @@ export function getRootDelegationStatus(): {
     expiresAt: delegation.expiresAt,
     expiresIn,
     approximateBudget: formatEther(BigInt(delegation.approximateBudget)) + " MON",
+    maxCalls: delegation.maxCalls,
     sessionKey: delegation.sessionKey,
     delegator: delegation.delegator,
   };

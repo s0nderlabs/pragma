@@ -17,6 +17,7 @@ import { buildViemChain } from "../config/chains.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { x402HttpOptions } from "../core/x402/client.js";
 import { loadAgentState, getFullWallet } from "../core/subagent/index.js";
+import { withRetryOrThrow } from "../core/utils/retry.js";
 
 const FundSubAgentSchema = z.object({
   subAgentId: z.string().describe("The sub-agent ID (UUID) to fund"),
@@ -24,9 +25,9 @@ const FundSubAgentSchema = z.object({
     .number()
     .min(0.001)
     .max(10)
-    .default(0.1)
+    .default(1)
     .describe(
-      "Amount of MON to transfer for gas. Default: 0.1 MON. Max: 10 MON"
+      "Amount of MON to transfer for gas. Default: 1 MON. Max: 10 MON"
     ),
 });
 
@@ -124,10 +125,11 @@ async function fundSubAgentHandler(
       transport: http(rpcUrl, x402HttpOptions(config)),
     });
 
-    // Check session key balance
-    const sessionKeyBalance = await publicClient.getBalance({
-      address: sessionKey.address,
-    });
+    // Check session key balance (with retry)
+    const sessionKeyBalance = await withRetryOrThrow(
+      async () => publicClient.getBalance({ address: sessionKey.address }),
+      { operationName: "check-session-key-balance" }
+    );
 
     const amountWei = parseEther(params.amountMon.toString());
 
@@ -139,10 +141,11 @@ async function fundSubAgentHandler(
       };
     }
 
-    // Get sub-agent's previous balance
-    const previousBalance = await publicClient.getBalance({
-      address: subAgentWallet.address as Address,
-    });
+    // Get sub-agent's previous balance (with retry)
+    const previousBalance = await withRetryOrThrow(
+      async () => publicClient.getBalance({ address: subAgentWallet.address as Address }),
+      { operationName: "check-subagent-balance" }
+    );
 
     // Transfer MON from session key to sub-agent
     const txHash = await walletClient.sendTransaction({
@@ -153,10 +156,11 @@ async function fundSubAgentHandler(
     // Wait for confirmation
     await publicClient.waitForTransactionReceipt({ hash: txHash });
 
-    // Get new balance
-    const newBalance = await publicClient.getBalance({
-      address: subAgentWallet.address as Address,
-    });
+    // Get new balance (with retry)
+    const newBalance = await withRetryOrThrow(
+      async () => publicClient.getBalance({ address: subAgentWallet.address as Address }),
+      { operationName: "check-new-balance" }
+    );
 
     return {
       success: true,

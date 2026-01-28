@@ -23,20 +23,20 @@ import {
   releaseWallet,
   createAgentState,
   storeDelegation,
-  USDC_ADDRESS,
   type StoredDelegation,
 } from "../core/subagent/index.js";
+import { withRetry } from "../core/utils/retry.js";
 import {
   createSubDelegation,
   validateSubDelegationParams,
   getSelectorsForAgentType,
 } from "../core/delegation/subagent.js";
 import { loadRootDelegation } from "../core/delegation/root.js";
-import { hashDelegation } from "../core/delegation/typedData.js";
+import { hashDelegation } from "@metamask/delegation-core";
 import { formatTimeRemaining } from "../core/utils/index.js";
 
 // Contract addresses for agent scopes
-import { LEVERUP_DIAMOND, WMON_ADDRESS } from "../core/leverup/constants.js";
+import { LEVERUP_DIAMOND, WMON_ADDRESS, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS } from "../core/leverup/constants.js";
 import { NADFUN_CONTRACTS } from "../core/nadfun/constants.js";
 
 const CreateSubAgentSchema = z.object({
@@ -76,10 +76,10 @@ const CreateSubAgentSchema = z.object({
   fundAmount: z
     .number()
     .min(0)
-    .max(1)
-    .default(0.1)
+    .max(10)
+    .default(1)
     .describe(
-      "Initial gas funding in MON. Set to 0 to skip funding. Default: 0.1 MON"
+      "Initial gas funding in MON. Set to 0 to skip funding. Default: 1 MON. Max: 10 MON"
     ),
   taskId: z
     .string()
@@ -117,23 +117,27 @@ function buildAllowedTargets(
 ): Address[] {
   switch (agentType) {
     case "kairos":
-      // kairos: perps only
-      return [LEVERUP_DIAMOND];
+      // kairos: perps + ERC20 tokens for autonomous approvals
+      return [LEVERUP_DIAMOND, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS];
 
     case "thymos": {
-      // thymos: memecoins (nadfun + WMON + dex)
+      // thymos: memecoins (nadfun + WMON + dex) + ERC20 tokens for autonomous approvals
       const targets: Address[] = [];
       if (nadfunRouter) targets.push(nadfunRouter);
       targets.push(WMON_ADDRESS);
       if (dexAggregator) targets.push(dexAggregator);
+      // Add ERC20 tokens for autonomous approvals
+      targets.push(USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS);
       return targets;
     }
 
     case "pragma": {
-      // pragma: all trading contracts
+      // pragma: all trading contracts + ERC20 tokens for autonomous approvals
       const targets: Address[] = [LEVERUP_DIAMOND, WMON_ADDRESS];
       if (dexAggregator) targets.push(dexAggregator);
       if (nadfunRouter) targets.push(nadfunRouter);
+      // Add ERC20 tokens for autonomous approvals
+      targets.push(USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS);
       return targets;
     }
   }
@@ -259,10 +263,11 @@ async function createSubAgentHandler(
         };
       }
 
-      // Create sub-delegation
+      // Create sub-delegation with parent delegation for proper authority chain
       const delegationResult = createSubDelegation({
         subAgentAddress: poolWallet.address as Address,
         mainAgentAddress: sessionKey.address,
+        parentDelegation: rootDelegation.delegation, // Required for redelegation chain
         allowedTargets,
         allowedSelectors,
         expiryDays: params.expiryDays,
@@ -306,8 +311,13 @@ async function createSubAgentHandler(
         signature,
       };
 
-      // Compute delegation hash
-      const delegationHash = hashDelegation(delegationResult.delegation, chainId);
+      // Compute delegation hash using DTK's hash function (struct hash, not EIP-712)
+      // DTK expects salt as bigint, our delegation has it as Hex
+      const delegationForHash = {
+        ...delegationResult.delegation,
+        salt: BigInt(delegationResult.delegation.salt),
+      };
+      const delegationHash = hashDelegation(delegationForHash);
 
       // Store delegation with root delegation reference for chain assembly
       const storedDelegation: StoredDelegation = {
@@ -320,8 +330,9 @@ async function createSubAgentHandler(
       };
       await storeDelegation(agentId, storedDelegation);
 
-      // Fund sub-agent if requested
+      // Fund sub-agent if requested (but check existing balance first)
       let fundingTxHash: string | undefined;
+      let existingBalance = 0n;
       if (params.fundAmount > 0) {
         const rpcUrl = await getRpcUrl(config);
         const chain = buildViemChain(chainId, rpcUrl);
@@ -331,28 +342,44 @@ async function createSubAgentHandler(
           transport: http(rpcUrl, x402HttpOptions(config)),
         });
 
-        const walletClient = createWalletClient({
-          account: sessionAccount,
-          chain,
-          transport: http(rpcUrl, x402HttpOptions(config)),
-        });
-
-        // Check session key balance
-        const sessionKeyBalance = await publicClient.getBalance({
-          address: sessionKey.address,
-        });
+        // Check sub-agent wallet's existing balance (may have leftover from previous agent)
+        const existingBalanceResult = await withRetry(
+          async () => publicClient.getBalance({ address: poolWallet.address as Address }),
+          { operationName: "check-wallet-balance" }
+        );
+        existingBalance = existingBalanceResult.success ? existingBalanceResult.data ?? 0n : 0n;
 
         const fundAmountWei = parseEther(params.fundAmount.toString());
 
-        if (sessionKeyBalance >= fundAmountWei) {
-          fundingTxHash = await walletClient.sendTransaction({
-            to: poolWallet.address as Address,
-            value: fundAmountWei,
+        // Only fund if existing balance is less than requested amount
+        if (existingBalance < fundAmountWei) {
+          const walletClient = createWalletClient({
+            account: sessionAccount,
+            chain,
+            transport: http(rpcUrl, x402HttpOptions(config)),
           });
 
-          // Wait for confirmation
-          await publicClient.waitForTransactionReceipt({ hash: fundingTxHash as `0x${string}` });
+          // Check session key balance (with retry)
+          const sessionKeyBalanceResult = await withRetry(
+            async () => publicClient.getBalance({ address: sessionKey.address }),
+            { operationName: "check-session-key-balance" }
+          );
+          const sessionKeyBalance = sessionKeyBalanceResult.success ? sessionKeyBalanceResult.data ?? 0n : 0n;
+
+          // Calculate how much more is needed
+          const amountNeeded = fundAmountWei - existingBalance;
+
+          if (sessionKeyBalance >= amountNeeded) {
+            fundingTxHash = await walletClient.sendTransaction({
+              to: poolWallet.address as Address,
+              value: amountNeeded,
+            });
+
+            // Wait for confirmation
+            await publicClient.waitForTransactionReceipt({ hash: fundingTxHash as `0x${string}` });
+          }
         }
+        // If existingBalance >= fundAmountWei, skip funding (wallet already has enough)
       }
 
       // Calculate human-readable expiry

@@ -5,7 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.2] - 2026-01-28
+
+### Added
+- **LogicalOrWrapperEnforcer** - Enables autonomous mode to approve arbitrary ERC20 tokens:
+  - Two-group delegation structure: approve group (any token) + trading group (whitelisted protocols)
+  - Dynamic group selection at execution time
+  - Unlocks nad.fun sell operations (which require token approval)
+
+- **`check_delegation_status` tool** - Check validity of root or sub-agent delegations:
+  - On-chain call count verification via LimitedCallsEnforcer
+  - Returns used/remaining/exhausted call counts
+  - Expiry info and validity status
+
+- **`report_agent_status` tool** - Unified status reporting for sub-agents:
+  - Statuses: `running`, `paused`, `completed`, `failed`
+  - Key rule: `completed` = user's goal achieved, `failed` = goal NOT achieved
+
+- **Agent Lifecycle Management**:
+  - Lazy expiry detection in `loadAgentState()` - auto-marks expired agents as failed
+  - `list_sub_agents` now includes `paused` status filter and count
+  - `revoke_sub_agent` now deletes agent state (no stale agents accumulate)
+  - `create_sub_agent` checks existing wallet balance before funding
+
+- **Separate Autonomous Mode Skill** - `skills/autonomous-mode/SKILL.md`:
+  - Dedicated skill for autonomous trading configuration
+  - Intent-based sub-agent creation flow
+  - Gas depletion → fund → resume flow documentation
+
+- **Gas Depletion Protocol** in agent prompts for graceful pause handling
+
+### Changed
+- `skills/pragma-core/SKILL.md` - Autonomous mode content moved to dedicated skill
+- `create_sub_agent` - Max funding increased from 1 to 10 MON, default from 0.1 to 1 MON
+- `revoke_sub_agent` - `sweepBalance` default changed to `false` (keep gas for wallet reuse)
+
+### Fixed
+- **Sub-agent delegation `InvalidDelegate()` error** - Sub-agents can now execute autonomous trades
+- **On-chain call count in `check_delegation_status`** - Now correctly returns used/remaining calls
+- Added `withRetry` to all read-only RPC calls per Tool Implementation Bible
 
 ## [0.8.1] - 2026-01-26
 

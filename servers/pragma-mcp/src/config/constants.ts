@@ -62,6 +62,74 @@ export const DELEGATION_FRAMEWORK = {
   },
 } as const;
 
+// ============================================================================
+// LogicalOrWrapperEnforcer Constants
+// ============================================================================
+
+/**
+ * LogicalOrWrapperEnforcer address on Monad (CREATE2 - same on mainnet/testnet)
+ * Enables OR logic between caveat groups for autonomous mode
+ *
+ * Used for: approve() on any token OR trading calls to whitelisted protocols
+ */
+export const LOGICAL_OR_WRAPPER_ENFORCER = "0xE1302607a3251AF54c3a6e69318d6aa07F5eB46c" as Address;
+
+/**
+ * AllowedMethodsEnforcer address
+ * Validates function selector is in the allowed list
+ */
+export const ALLOWED_METHODS_ENFORCER = "0x2c21fD0Cb9DC8445CB3fb0DC5E7Bb0Aca01842B5" as Address;
+
+/**
+ * AllowedTargetsEnforcer address
+ * Validates target contract address is in the allowed list
+ */
+export const ALLOWED_TARGETS_ENFORCER = "0x7F20f61b1f09b08D970938F6fa563634d65c4EeB" as Address;
+
+/**
+ * ValueLteEnforcer address
+ * Validates msg.value <= terms (max value per tx)
+ * We filter this out from scope-generated caveats to avoid 0-value issues
+ */
+export const VALUE_LTE_ENFORCER = "0x92Bf12322527cAA612fd31a0e810472BBB106A8F" as Address;
+
+/**
+ * Group indices for LogicalOrWrapperEnforcer
+ *
+ * Group 0 (APPROVE): AllowedMethodsEnforcer(approve) - can call approve() on ANY token
+ * Group 1 (TRADING): AllowedTargetsEnforcer(protocols) + AllowedMethodsEnforcer(trading)
+ */
+export const DELEGATION_GROUPS = {
+  /** Group 0: approve() on any token to whitelisted spenders */
+  APPROVE: 0,
+  /** Group 1: trading calls to whitelisted protocols */
+  TRADING: 1,
+} as const;
+
+// ============================================================================
+// ERC20 Approval Constants
+// ============================================================================
+
+/**
+ * ERC20 approve(address,uint256) function selector
+ * Used for autonomous mode approval delegations
+ */
+export const ERC20_APPROVE_SELECTOR = "0x095ea7b3" as `0x${string}`;
+
+/**
+ * Whitelisted spender addresses for autonomous approvals
+ * Only these addresses can receive ERC20 approvals via delegation
+ * Security: Validated both in code and on-chain via AllowedTargetsEnforcer
+ */
+export const WHITELISTED_SPENDERS = {
+  /** DEX aggregator router (Monad mainnet/testnet) */
+  dexRouter: "0x0000000000001fF3684f28c67538d4D072C22734" as Address,
+  /** LeverUp trading diamond */
+  leverUpDiamond: "0xea1b8E4aB7f14F7dCA68c5B214303B13078FC5ec" as Address,
+  /** nad.fun bonding curve router (mainnet only) */
+  nadfunRouter: "0x6F6B8F1a20703309951a5127c45B49b1CD981A22" as Address,
+} as const;
+
 // Binary paths
 export const PRAGMA_SIGNER_BINARY = "pragma-signer";
 

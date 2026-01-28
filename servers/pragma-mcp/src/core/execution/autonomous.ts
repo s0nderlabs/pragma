@@ -33,7 +33,8 @@ import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
 import { buildViemChain, getChainConfig } from "../../config/chains.js";
 import { createSyncHttpTransport } from "../x402/client.js";
 import { waitForReceiptSync } from "../rpc/index.js";
-import { DELEGATION_FRAMEWORK } from "../../config/constants.js";
+import { DELEGATION_FRAMEWORK, WHITELISTED_SPENDERS, ERC20_APPROVE_SELECTOR, DELEGATION_GROUPS } from "../../config/constants.js";
+import { setLogicalOrArgs } from "../delegation/logical-or.js";
 import {
   getCachedNadFunQuote,
   getNadFunQuoteExecutionData,
@@ -110,6 +111,16 @@ export interface TradeInfo {
 // ============================================================================
 
 /**
+ * Options for delegation chain execution
+ */
+export interface ExecutionOptions {
+  /** Skip budget tracking for this execution (e.g., for approvals) */
+  skipBudgetTracking?: boolean;
+  /** Skip trade logging for this execution (e.g., for approvals) */
+  skipTradeLogging?: boolean;
+}
+
+/**
  * Execute a trade using the sub-agent's delegation chain
  *
  * Key differences from assistant mode:
@@ -120,11 +131,13 @@ export interface TradeInfo {
  * @param agentId - Sub-agent ID
  * @param execution - Transaction to execute
  * @param tradeInfo - Trade metadata for logging
+ * @param options - Execution options (skipBudgetTracking, skipTradeLogging)
  */
 export async function executeWithDelegationChain(
   agentId: string,
   execution: AutonomousExecution,
-  tradeInfo: TradeInfo
+  tradeInfo: TradeInfo,
+  options?: ExecutionOptions
 ): Promise<AutonomousExecutionResult> {
   const config = await loadConfig();
   if (!config?.wallet) {
@@ -157,8 +170,8 @@ export async function executeWithDelegationChain(
     return { success: false, error: "Missing delegation chain in storage" };
   }
 
-  // 3. Validate budget for native MON
-  if (execution.value > 0n) {
+  // 3. Validate budget for native MON (skip for approvals)
+  if (execution.value > 0n && !options?.skipBudgetTracking) {
     const monAllocated = BigInt(state.budget.monAllocated);
     const monSpent = BigInt(state.budget.monSpent);
     if (monSpent + execution.value > monAllocated) {
@@ -205,11 +218,32 @@ export async function executeWithDelegationChain(
     transport: createSyncHttpTransport(rpcUrl, config),
   });
 
-  // 6. Build delegation chain (THE KEY DIFFERENCE)
-  // Order matters: root first, then sub
+  // 6. Build delegation chain with LogicalOrWrapperEnforcer group selection
+  // Order matters: INNERMOST first (caller's delegation), then parent delegations
+  // delegations_[0].delegate must equal msg.sender (sub-agent wallet)
+  //
+  // CRITICAL: We must clone delegations and set the LogicalOr args to select
+  // the correct group (APPROVE or TRADING) based on the calldata.
+  // The args field is NOT signed, so this doesn't invalidate signatures.
+
+  // Clone delegations to avoid mutating stored state
+  const rootDelegation = structuredClone(storedDelegation.rootDelegation);
+  const subDelegation = structuredClone(storedDelegation.signedDelegation);
+
+  // Determine which group to use based on the function being called
+  // Group 0 (APPROVE): For ERC20 approve() calls on arbitrary tokens
+  // Group 1 (TRADING): For trading calls to whitelisted protocols
+  const isApproveCall = execution.callData.toLowerCase().startsWith(ERC20_APPROVE_SELECTOR.toLowerCase());
+  const groupIndex = isApproveCall ? DELEGATION_GROUPS.APPROVE : DELEGATION_GROUPS.TRADING;
+
+  // Set LogicalOrWrapperEnforcer args on BOTH delegations in the chain
+  // Both delegations have the LogicalOr caveat and need the same group selected
+  setLogicalOrArgs(rootDelegation, groupIndex);
+  setLogicalOrArgs(subDelegation, groupIndex);
+
   const delegationChain = [
-    storedDelegation.rootDelegation, // User → Main Agent
-    storedDelegation.signedDelegation, // Main Agent → Sub-Agent
+    subDelegation, // Main Agent → Sub-Agent (delegate = sub-agent = msg.sender)
+    rootDelegation, // User → Main Agent (parent delegation)
   ] as SignedDelegation[];
 
   // 7. Execute via redeemDelegations
@@ -240,18 +274,20 @@ export async function executeWithDelegationChain(
       return { success: false, txHash, error: "Transaction reverted on-chain" };
     }
 
-    // 8. Update state on success
-    await appendTrade(agentId, {
-      timestamp: Date.now(),
-      action: tradeInfo.action,
-      protocol: tradeInfo.protocol,
-      details: tradeInfo.details,
-      txHash,
-      success: true,
-    });
+    // 8. Update state on success (skip for approvals)
+    if (!options?.skipTradeLogging) {
+      await appendTrade(agentId, {
+        timestamp: Date.now(),
+        action: tradeInfo.action,
+        protocol: tradeInfo.protocol,
+        details: tradeInfo.details,
+        txHash,
+        success: true,
+      });
+    }
 
-    // Track native MON spent
-    if (execution.value > 0n) {
+    // Track native MON spent (skip for approvals)
+    if (execution.value > 0n && !options?.skipBudgetTracking) {
       await updateTokenSpent(agentId, NATIVE_TOKEN_ADDRESS, execution.value);
     }
 
@@ -265,6 +301,198 @@ export async function executeWithDelegationChain(
     await addError(agentId, msg, true);
     return { success: false, error: msg };
   }
+}
+
+// ============================================================================
+// ERC20 Approval Functions
+// ============================================================================
+
+/**
+ * Check if a spender address is whitelisted for autonomous approvals
+ *
+ * Security: Only these addresses can receive ERC20 approvals via delegation:
+ * - DEX Router
+ * - LeverUp Diamond
+ * - nad.fun Router
+ *
+ * @param spender - Address to check
+ */
+export function isSpenderWhitelisted(spender: Address): boolean {
+  const lowerSpender = spender.toLowerCase();
+  return Object.values(WHITELISTED_SPENDERS).some(
+    addr => addr.toLowerCase() === lowerSpender
+  );
+}
+
+/**
+ * Check current ERC20 allowance
+ *
+ * @param publicClient - Viem public client
+ * @param token - ERC20 token address
+ * @param owner - Token owner (user's smart account)
+ * @param spender - Spender to check allowance for
+ * @param required - Required amount (returns true if allowance >= required)
+ */
+export async function checkApproval(
+  publicClient: ReturnType<typeof createPublicClient>,
+  token: Address,
+  owner: Address,
+  spender: Address,
+  required: bigint
+): Promise<{ hasApproval: boolean; currentAllowance: bigint }> {
+  try {
+    const allowance = await publicClient.readContract({
+      address: token,
+      abi: erc20Abi,
+      functionName: "allowance",
+      args: [owner, spender],
+    });
+
+    return {
+      hasApproval: allowance >= required,
+      currentAllowance: allowance,
+    };
+  } catch {
+    // If we can't read allowance, assume no approval
+    return { hasApproval: false, currentAllowance: 0n };
+  }
+}
+
+/**
+ * Execute ERC20 approve using autonomous mode
+ *
+ * Uses MaxUint256 for efficiency (single approval enables all future trades).
+ * Security is maintained via:
+ * 1. Whitelist validation in code
+ * 2. AllowedTargetsEnforcer on-chain
+ *
+ * @param agentId - Sub-agent ID
+ * @param token - ERC20 token address to approve
+ * @param spender - Spender address (must be whitelisted)
+ */
+export async function executeAutonomousApproval(
+  agentId: string,
+  token: Address,
+  spender: Address
+): Promise<AutonomousExecutionResult> {
+  // Security: Validate spender is whitelisted
+  if (!isSpenderWhitelisted(spender)) {
+    return {
+      success: false,
+      error: `Spender ${spender} is not whitelisted for autonomous approvals. ` +
+        `Whitelisted: ${Object.entries(WHITELISTED_SPENDERS).map(([k, v]) => `${k}: ${v}`).join(", ")}`,
+    };
+  }
+
+  // Use MaxUint256 for unlimited approval
+  const maxApproval = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+  const approveCalldata = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "approve",
+    args: [spender, maxApproval],
+  });
+
+  // Execute with skipBudgetTracking and skipTradeLogging (approvals are overhead, not trades)
+  return await executeWithDelegationChain(
+    agentId,
+    {
+      target: token,
+      value: 0n,
+      callData: approveCalldata,
+    },
+    {
+      action: "other",
+      protocol: "other",
+      details: {
+        operation: "approve",
+        token: token,
+        spender: spender,
+      },
+    },
+    {
+      skipBudgetTracking: true,
+      skipTradeLogging: true,
+    }
+  );
+}
+
+/**
+ * Execute a trade with automatic approval if needed
+ *
+ * This is the main entry point for trades that may require ERC20 approval.
+ * It checks if approval exists, executes approval if needed, then executes the trade.
+ *
+ * @param agentId - Sub-agent ID
+ * @param token - ERC20 token address that needs approval
+ * @param spender - Spender that needs approval (must be whitelisted)
+ * @param requiredAmount - Minimum amount that needs to be approved
+ * @param tradeExecution - The actual trade execution data
+ * @param tradeInfo - Trade metadata for logging
+ */
+export async function executeWithApprovalIfNeeded(
+  agentId: string,
+  token: Address,
+  spender: Address,
+  requiredAmount: bigint,
+  tradeExecution: AutonomousExecution,
+  tradeInfo: TradeInfo
+): Promise<AutonomousExecutionResult> {
+  const config = await loadConfig();
+  if (!config?.wallet) {
+    return { success: false, error: "Wallet not configured" };
+  }
+
+  // Skip approval check for native MON (NATIVE_TOKEN_ADDRESS)
+  if (token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) {
+    return await executeWithDelegationChain(agentId, tradeExecution, tradeInfo);
+  }
+
+  // Validate spender is whitelisted
+  if (!isSpenderWhitelisted(spender)) {
+    return {
+      success: false,
+      error: `Spender ${spender} is not whitelisted for autonomous approvals.`,
+    };
+  }
+
+  // Build client to check allowance
+  const chainId = config.network.chainId;
+  const rpcUrl = await getRpcUrl(config);
+  const chain = buildViemChain(chainId, rpcUrl);
+
+  const publicClient = createPublicClient({
+    chain,
+    transport: createSyncHttpTransport(rpcUrl, config),
+  });
+
+  // Get user's smart account address (owner of tokens)
+  const owner = config.wallet.smartAccountAddress as Address;
+
+  // Check current allowance
+  const { hasApproval } = await checkApproval(
+    publicClient,
+    token,
+    owner,
+    spender,
+    requiredAmount
+  );
+
+  // Execute approval if needed
+  if (!hasApproval) {
+    const approvalResult = await executeAutonomousApproval(agentId, token, spender);
+    if (!approvalResult.success) {
+      return {
+        success: false,
+        error: `Approval failed: ${approvalResult.error}`,
+      };
+    }
+    // Small delay to ensure approval is indexed
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  // Execute the actual trade
+  return await executeWithDelegationChain(agentId, tradeExecution, tradeInfo);
 }
 
 // ============================================================================
@@ -367,8 +595,8 @@ export async function executeAutonomousNadFunBuy(
 /**
  * Execute nad.fun sell using autonomous mode
  *
- * Note: Sell requires approval which is more complex.
- * For MVP, we recommend using buy operations for autonomous nad.fun trading.
+ * Automatically handles ERC20 approval if needed.
+ * Uses executeWithApprovalIfNeeded for seamless approval + sell.
  *
  * @param agentId - Sub-agent ID
  * @param quoteId - Quote ID from nadfun_quote
@@ -413,12 +641,15 @@ export async function executeAutonomousNadFunSell(
     };
   }
 
-  // For sell, we need to handle approval
-  // This is complex because it requires a delegation chain for approve too
-  // For now, we'll attempt direct execution (assumes approval already exists)
+  // Parse amount for approval check
+  const amountInWei = parseUnits(quote.amountIn, 18); // nad.fun tokens are 18 decimals
 
-  const result = await executeWithDelegationChain(
+  // Use executeWithApprovalIfNeeded for automatic approval handling
+  const result = await executeWithApprovalIfNeeded(
     agentId,
+    quote.token as Address, // Token to approve
+    executionData.router,   // Spender (nad.fun router)
+    amountInWei,            // Amount to approve
     {
       target: executionData.router,
       value: 0n, // Sell is not payable
@@ -437,17 +668,6 @@ export async function executeAutonomousNadFunSell(
   );
 
   if (!result.success) {
-    // Check if it's an approval issue
-    if (result.error?.includes("allowance") || result.error?.includes("approve")) {
-      return {
-        success: false,
-        message: "Token approval needed",
-        error:
-          "Token approval required. Autonomous sell requires pre-existing approval. " +
-          "Consider using assistant mode (without agentId) for the first sell to set approval.",
-      };
-    }
-
     return {
       success: false,
       message: "Autonomous sell failed",
@@ -698,34 +918,54 @@ export async function executeAutonomousLeverUpUpdateMargin(
 
   const execution = executeAddMargin(tradeHash, tokenAddress, amountWei, isNativeMon);
 
-  const result = await executeWithDelegationChain(
-    agentId,
-    {
-      target: execution.to,
-      value: execution.value,
-      callData: execution.data as Hex,
-    },
-    {
-      action: "other",
-      protocol: "leverup",
-      details: {
-        operation: "addMargin",
-        positionId: tradeHash,
-        amount: amount,
-        collateral: collateralToken,
+  let result: AutonomousExecutionResult;
+
+  if (isNativeMon) {
+    // Native MON - no approval needed
+    result = await executeWithDelegationChain(
+      agentId,
+      {
+        target: execution.to,
+        value: execution.value,
+        callData: execution.data as Hex,
       },
-    }
-  );
+      {
+        action: "other",
+        protocol: "leverup",
+        details: {
+          operation: "addMargin",
+          positionId: tradeHash,
+          amount: amount,
+          collateral: collateralToken,
+        },
+      }
+    );
+  } else {
+    // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
+    result = await executeWithApprovalIfNeeded(
+      agentId,
+      tokenAddress,             // Token to approve
+      execution.to,             // Spender (LeverUp diamond)
+      amountWei,                // Amount to approve
+      {
+        target: execution.to,
+        value: execution.value,
+        callData: execution.data as Hex,
+      },
+      {
+        action: "other",
+        protocol: "leverup",
+        details: {
+          operation: "addMargin",
+          positionId: tradeHash,
+          amount: amount,
+          collateral: collateralToken,
+        },
+      }
+    );
+  }
 
   if (!result.success) {
-    // Check for approval issue
-    if (result.error?.includes("allowance") || result.error?.includes("approve")) {
-      return {
-        success: false,
-        message: "Token approval needed",
-        error: `${collateralToken} approval required. Use assistant mode (without agentId) first to set approval.`,
-      };
-    }
     return {
       success: false,
       message: "Autonomous add margin failed",
@@ -1136,40 +1376,59 @@ export async function executeAutonomousSwap(
     const isNativeSwap = quote.fromToken.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
     const swapValue = isNativeSwap ? (executionData.value || quote.amountInWei) : 0n;
 
-    const result = await executeWithDelegationChain(
-      agentId,
-      {
-        target: executionData.router,
-        value: swapValue,
-        callData: executionData.calldata,
-      },
-      {
-        action: "buy",
-        protocol: "dex",
-        details: {
-          fromToken: quote.fromToken.symbol,
-          toToken: quote.toToken.symbol,
-          amountIn: quote.amountIn,
-          amountOut: quote.expectedOutput,
+    let result: AutonomousExecutionResult;
+
+    if (isNativeSwap) {
+      // Native MON swap - no approval needed
+      result = await executeWithDelegationChain(
+        agentId,
+        {
+          target: executionData.router,
+          value: swapValue,
+          callData: executionData.calldata,
         },
-      }
-    );
+        {
+          action: "buy",
+          protocol: "dex",
+          details: {
+            fromToken: quote.fromToken.symbol,
+            toToken: quote.toToken.symbol,
+            amountIn: quote.amountIn,
+            amountOut: quote.expectedOutput,
+          },
+        }
+      );
+    } else {
+      // ERC20 swap - use executeWithApprovalIfNeeded for automatic approval
+      result = await executeWithApprovalIfNeeded(
+        agentId,
+        quote.fromToken.address as Address, // Token to approve
+        executionData.router,               // Spender (DEX router)
+        quote.amountInWei,                  // Amount to approve
+        {
+          target: executionData.router,
+          value: 0n,
+          callData: executionData.calldata,
+        },
+        {
+          action: "buy",
+          protocol: "dex",
+          details: {
+            fromToken: quote.fromToken.symbol,
+            toToken: quote.toToken.symbol,
+            amountIn: quote.amountIn,
+            amountOut: quote.expectedOutput,
+          },
+        }
+      );
+    }
 
     if (!result.success) {
-      // Check for approval issue
-      if (!isNativeSwap && (result.error?.includes("allowance") || result.error?.includes("approve"))) {
-        results.push({
-          quoteId,
-          success: false,
-          error: `${quote.fromToken.symbol} approval required. Use assistant mode first to set approval.`,
-        });
-      } else {
-        results.push({
-          quoteId,
-          success: false,
-          error: result.error,
-        });
-      }
+      results.push({
+        quoteId,
+        success: false,
+        error: result.error,
+      });
       continue;
     }
 
@@ -1352,35 +1611,65 @@ export async function executeAutonomousLeverUpOpen(
     };
   }
 
-  const result = await executeWithDelegationChain(
-    agentId,
-    {
-      target: execution.to,
-      value: execution.value,
-      callData: execution.data as Hex,
-    },
-    {
-      action: "open",
-      protocol: "leverup",
-      details: {
-        symbol: params.symbol,
-        side: params.isLong ? "LONG" : "SHORT",
-        leverage: String(params.leverage),
-        margin: params.marginAmount,
-        collateral: collateral,
+  let result: AutonomousExecutionResult;
+
+  if (collateral === "MON") {
+    // Native MON collateral - no approval needed
+    result = await executeWithDelegationChain(
+      agentId,
+      {
+        target: execution.to,
+        value: execution.value,
+        callData: execution.data as Hex,
       },
-    }
-  );
+      {
+        action: "open",
+        protocol: "leverup",
+        details: {
+          symbol: params.symbol,
+          side: params.isLong ? "LONG" : "SHORT",
+          leverage: String(params.leverage),
+          margin: params.marginAmount,
+          collateral: collateral,
+        },
+      }
+    );
+  } else {
+    // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
+    // Get token address based on collateral type
+    const collateralAddresses: Record<CollateralToken, Address> = {
+      MON: WMON_ADDRESS,
+      USDC: USDC_ADDRESS,
+      LVUSD: LVUSD_ADDRESS,
+      LVMON: LVMON_ADDRESS,
+    };
+    const tokenAddress = collateralAddresses[collateral];
+
+    result = await executeWithApprovalIfNeeded(
+      agentId,
+      tokenAddress,               // Token to approve
+      execution.to,               // Spender (LeverUp diamond)
+      marginWei,                  // Amount to approve
+      {
+        target: execution.to,
+        value: execution.value,
+        callData: execution.data as Hex,
+      },
+      {
+        action: "open",
+        protocol: "leverup",
+        details: {
+          symbol: params.symbol,
+          side: params.isLong ? "LONG" : "SHORT",
+          leverage: String(params.leverage),
+          margin: params.marginAmount,
+          collateral: collateral,
+        },
+      }
+    );
+  }
 
   if (!result.success) {
-    // Check for approval issue
-    if (collateral !== "MON" && (result.error?.includes("allowance") || result.error?.includes("approve"))) {
-      return {
-        success: false,
-        message: "Token approval needed",
-        error: `${collateral} approval required. Use assistant mode (without agentId) first to set approval.`,
-      };
-    }
     return {
       success: false,
       message: "Autonomous open failed",
@@ -1551,37 +1840,68 @@ export async function executeAutonomousLeverUpLimitOrder(
     };
   }
 
-  const result = await executeWithDelegationChain(
-    agentId,
-    {
-      target: execution.to,
-      value: execution.value,
-      callData: execution.data as Hex,
-    },
-    {
-      action: "open",
-      protocol: "leverup",
-      details: {
-        operation: "limitOrder",
-        symbol: params.symbol,
-        side: params.isLong ? "LONG" : "SHORT",
-        leverage: String(params.leverage),
-        triggerPrice: params.triggerPrice,
-        margin: params.marginAmount,
-        collateral: collateral,
+  let result: AutonomousExecutionResult;
+
+  if (collateral === "MON") {
+    // Native MON collateral - no approval needed
+    result = await executeWithDelegationChain(
+      agentId,
+      {
+        target: execution.to,
+        value: execution.value,
+        callData: execution.data as Hex,
       },
-    }
-  );
+      {
+        action: "open",
+        protocol: "leverup",
+        details: {
+          operation: "limitOrder",
+          symbol: params.symbol,
+          side: params.isLong ? "LONG" : "SHORT",
+          leverage: String(params.leverage),
+          triggerPrice: params.triggerPrice,
+          margin: params.marginAmount,
+          collateral: collateral,
+        },
+      }
+    );
+  } else {
+    // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
+    const collateralAddresses: Record<CollateralToken, Address> = {
+      MON: WMON_ADDRESS,
+      USDC: USDC_ADDRESS,
+      LVUSD: LVUSD_ADDRESS,
+      LVMON: LVMON_ADDRESS,
+    };
+    const tokenAddress = collateralAddresses[collateral];
+
+    result = await executeWithApprovalIfNeeded(
+      agentId,
+      tokenAddress,               // Token to approve
+      execution.to,               // Spender (LeverUp diamond)
+      marginWei,                  // Amount to approve
+      {
+        target: execution.to,
+        value: execution.value,
+        callData: execution.data as Hex,
+      },
+      {
+        action: "open",
+        protocol: "leverup",
+        details: {
+          operation: "limitOrder",
+          symbol: params.symbol,
+          side: params.isLong ? "LONG" : "SHORT",
+          leverage: String(params.leverage),
+          triggerPrice: params.triggerPrice,
+          margin: params.marginAmount,
+          collateral: collateral,
+        },
+      }
+    );
+  }
 
   if (!result.success) {
-    // Check for approval issue
-    if (collateral !== "MON" && (result.error?.includes("allowance") || result.error?.includes("approve"))) {
-      return {
-        success: false,
-        message: "Token approval needed",
-        error: `${collateral} approval required. Use assistant mode (without agentId) first.`,
-      };
-    }
     return {
       success: false,
       message: "Autonomous limit order failed",

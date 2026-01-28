@@ -150,10 +150,10 @@ export const ROUTER_ABI = [
 // ============================================================================
 
 /** buy(BuyParams) function selector */
-export const NADFUN_BUY_SELECTOR = "0x0f5b0d09" as Hex;
+export const NADFUN_BUY_SELECTOR = "0x6df9e92b" as Hex;
 
 /** sell(SellParams) function selector */
-export const NADFUN_SELL_SELECTOR = "0xd4e19b4b" as Hex;
+export const NADFUN_SELL_SELECTOR = "0x5de3085d" as Hex;
 
 /**
  * BondingCurveRouter ABI for token creation

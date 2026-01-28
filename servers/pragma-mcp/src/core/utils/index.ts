@@ -9,4 +9,4 @@ export {
   type RetryResult,
 } from "./retry.js";
 
-export { formatTimeRemaining } from "./format.js";
+export { formatTimeRemaining, formatLocalTimestamp } from "./format.js";

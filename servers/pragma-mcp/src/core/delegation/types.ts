@@ -55,8 +55,8 @@ export const FUNCTION_SELECTORS = {
   // ERC20
   approve: "0x095ea7b3" as Hex, // approve(address,uint256)
   transfer: "0xa9059cbb" as Hex, // transfer(address,uint256)
-  // DEX aggregator
-  aggregate: "0x087c2af4" as Hex, // aggregate(address,address,uint256,uint256,address,bytes)
+  // DEX aggregator (0x Exchange Proxy)
+  execute: "0x1fff991f" as Hex, // execute((address,address,uint256),bytes[],bytes32)
   // Wrapped native
   deposit: "0xd0e30db0" as Hex, // deposit()
   withdraw: "0x2e1a7d4d" as Hex, // withdraw(uint256)
@@ -69,14 +69,9 @@ export const CALLDATA_OFFSETS = {
     spender: 4, // After selector
     amount: 36, // 4 + 32
   },
-  // DEX aggregate(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut, address destination, bytes data)
-  aggregate: {
-    tokenIn: 4,
-    tokenOut: 36,
-    amountIn: 68,
-    minAmountOut: 100,
-    destination: 132, // This is what we enforce
-  },
+  // 0x execute((address,address,uint256),bytes[],bytes32) - first param is tuple
+  // Not used for calldata enforcement - 0x handles routing internally
+  execute: {},
   // transfer(address to, uint256 amount)
   transfer: {
     to: 4,

@@ -55,6 +55,8 @@ import { registerFundSubAgent } from "./fund-sub-agent.js";
 import { registerListSubAgents } from "./list-sub-agents.js";
 import { registerRevokeSubAgent } from "./revoke-sub-agent.js";
 import { registerGetSubAgentState } from "./get-sub-agent-state.js";
+import { registerReportAgentStatus } from "./report-agent-status.js";
+import { registerCheckDelegationStatus } from "./check-delegation-status.js";
 
 export function registerTools(server: McpServer): void {
   registerHasWallet(server);
@@ -114,4 +116,6 @@ export function registerTools(server: McpServer): void {
   registerListSubAgents(server);
   registerRevokeSubAgent(server);
   registerGetSubAgentState(server);
+  registerReportAgentStatus(server);
+  registerCheckDelegationStatus(server);
 }

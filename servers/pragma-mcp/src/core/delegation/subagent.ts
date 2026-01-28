@@ -10,10 +10,13 @@ import {
   type Delegation,
   type Caveats,
 } from "@metamask/smart-accounts-kit";
+import { hashDelegation } from "@metamask/delegation-core";
 
 import { buildDelegationTypedData } from "./typedData.js";
-import { getDTKEnvironment } from "../../config/constants.js";
+import { getDTKEnvironment, ALLOWED_TARGETS_ENFORCER, ALLOWED_METHODS_ENFORCER, VALUE_LTE_ENFORCER } from "../../config/constants.js";
+import { USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS } from "../leverup/constants.js";
 import type { SignedDelegation } from "./types.js";
+import { buildLogicalOrCaveat } from "./logical-or.js";
 
 // ============================================================================
 // Types
@@ -23,12 +26,12 @@ import type { SignedDelegation } from "./types.js";
  * Parameters for creating a sub-delegation
  */
 export interface SubDelegationParams {
-  /** User's signed root delegation (Main Agent is delegate) */
-  parentDelegation?: SignedDelegation;
   /** Sub-agent wallet address (will be the new delegate) */
   subAgentAddress: Address;
   /** Main Agent's session key address (delegator for sub-delegation) */
   mainAgentAddress: Address;
+  /** Parent delegation (root delegation) for authority chain - required for redelegation */
+  parentDelegation: Delegation;
   /** Allowed contract addresses */
   allowedTargets: Address[];
   /** Allowed function selectors (optional - if empty, all methods allowed) */
@@ -80,21 +83,24 @@ const SECONDS_PER_DAY = 24 * 60 * 60;
 
 /**
  * LeverUp function selectors (for Kairos agent)
- * Computed from function signatures using keccak256
+ * Computed from actual function signatures in LeverUp diamond
+ * Verified by calculating keccak256 of function signatures
  */
 export const LEVERUP_SELECTORS = {
   // openMarketTradeWithPyth((address,bool,address,address,uint96,uint128,uint128,uint128,uint128,uint24),bytes[])
-  openMarketTrade: "0x8739e924" as Hex,
+  openMarketTrade: "0xca004414" as Hex,
   // closeTrade(bytes32)
-  closeTrade: "0x6e25e216" as Hex,
+  closeTrade: "0x5177fd3b" as Hex,
   // addMargin(bytes32,address,uint96)
   addMargin: "0xe1379570" as Hex,
   // updateTradeTpAndSl(bytes32,uint128,uint128)
   updateTpSl: "0x2f745df6" as Hex,
   // openLimitOrderWithPyth((address,bool,address,address,uint96,uint128,uint128,uint128,uint128,uint24),bytes[])
-  openLimitOrder: "0xf22b4898" as Hex,
+  openLimitOrder: "0xf37afc20" as Hex,
   // cancelLimitOrder(bytes32)
-  cancelLimitOrder: "0x56189236" as Hex,
+  cancelLimitOrder: "0x4584eff6" as Hex,
+  // batchCancelLimitOrders(bytes32[])
+  batchCancelLimitOrders: "0x54688625" as Hex,
 } as const;
 
 /**
@@ -102,11 +108,11 @@ export const LEVERUP_SELECTORS = {
  */
 export const NADFUN_SELECTORS = {
   // buy((uint256,address,address,uint256))
-  buy: "0x0f5b0d09" as Hex,
+  buy: "0x6df9e92b" as Hex,
   // sell((uint256,uint256,address,address,uint256))
-  sell: "0xd4e19b4b" as Hex,
+  sell: "0x5de3085d" as Hex,
   // create((string,string,string,uint256,bytes32,uint8))
-  create: "0x8b159e6e" as Hex,
+  create: "0xba12cd8d" as Hex,
 } as const;
 
 /**
@@ -120,32 +126,38 @@ export const WMON_SELECTORS = {
 } as const;
 
 /**
- * DEX Aggregator selectors
+ * DEX Aggregator selectors (0x Exchange Proxy)
  */
 export const DEX_SELECTORS = {
-  // aggregate(address,address,uint256,uint256,address,bytes)
-  aggregate: "0x087c2af4" as Hex,
+  // execute((address,address,uint256),bytes[],bytes32) - 0x Exchange Proxy batch execution
+  execute: "0x1fff991f" as Hex,
+  // exec(address,address,uint256,address,bytes) - 0x Exchange Proxy single execution wrapper
+  exec: "0x2213bc0b" as Hex,
 } as const;
 
 /**
- * Get all selectors for a given agent type
+ * Get all selectors for a given agent type (Group 1 - TRADING)
+ *
+ * Note: ERC20 approve() is NOT included here - it's handled by
+ * Group 0 (APPROVE) in LogicalOrWrapperEnforcer, which allows
+ * approve() on ANY token address without target restrictions.
  */
 export function getSelectorsForAgentType(agentType: "kairos" | "thymos" | "pragma"): Hex[] {
   switch (agentType) {
     case "kairos":
-      return Object.values(LEVERUP_SELECTORS);
+      return [...Object.values(LEVERUP_SELECTORS)];
     case "thymos":
       return [
         ...Object.values(NADFUN_SELECTORS),
         ...Object.values(WMON_SELECTORS),
-        DEX_SELECTORS.aggregate,
+        ...Object.values(DEX_SELECTORS),
       ];
     case "pragma":
       return [
         ...Object.values(LEVERUP_SELECTORS),
         ...Object.values(NADFUN_SELECTORS),
         ...Object.values(WMON_SELECTORS),
-        DEX_SELECTORS.aggregate,
+        ...Object.values(DEX_SELECTORS),
       ];
   }
 }
@@ -155,13 +167,15 @@ export function getSelectorsForAgentType(agentType: "kairos" | "thymos" | "pragm
 // ============================================================================
 
 /**
- * Build caveats for persistent sub-delegation (DTK format)
+ * Build base caveats for persistent sub-delegation (DTK format)
  *
- * Unlike ephemeral delegations:
- * - Longer expiry (days, not minutes)
- * - Higher call limit (configurable)
+ * These caveats are ADDED to the delegation after scope-based caveats are removed.
+ * LogicalOrWrapperEnforcer is added separately after filtering.
  *
- * Note: valueLte is added in scope, not caveats, per DTK convention
+ * Caveats:
+ * - timestamp: Expiry in days
+ * - limitedCalls: Max number of operations
+ * - nonce: Optional, for revocation support
  */
 function buildPersistentCaveats(
   expiryDays: number,
@@ -172,11 +186,13 @@ function buildPersistentCaveats(
   const expiresAt = now + expiryDays * SECONDS_PER_DAY;
 
   const caveats: unknown[] = [
+    // Timestamp: Delegation expiry
     {
       type: "timestamp" as const,
       afterThreshold: 0,
       beforeThreshold: expiresAt,
     },
+    // LimitedCalls: Max operations
     {
       type: "limitedCalls" as const,
       limit: maxCalls,
@@ -207,12 +223,19 @@ function buildPersistentCaveats(
  * - Higher limitedCalls (configurable, not 1)
  * - Signed by Main Agent's session key (no Touch ID)
  *
+ * Uses LogicalOrWrapperEnforcer for OR logic between groups:
+ * - Group 0 (APPROVE): approve() on any token address
+ * - Group 1 (TRADING): Trading calls to whitelisted protocols
+ *
+ * Implementation note: DTK requires scope, which generates AllowedTargets and
+ * AllowedMethods caveats. We create with scope, then replace those caveats
+ * with our LogicalOrWrapperEnforcer for flexible permissions.
+ *
  * Security properties:
  * - Time-bound (timestamp enforcer)
  * - Trade count limited (limitedCalls enforcer)
- * - Per-tx MON cap (valueLte when applicable)
- * - Contract whitelist (allowedTargets in scope)
- * - Optional method whitelist (allowedMethods in scope)
+ * - Method validation (AllowedMethodsEnforcer via LogicalOr)
+ * - Target validation for trades (AllowedTargetsEnforcer via LogicalOr Group 1)
  * - Revocation via nonce increment (when nonce provided)
  */
 export function createSubDelegation(params: SubDelegationParams): SubDelegationResult {
@@ -233,41 +256,61 @@ export function createSubDelegation(params: SubDelegationParams): SubDelegationR
   const now = Math.floor(Date.now() / 1000);
   const expiresAt = now + expiryDays * SECONDS_PER_DAY;
 
-  // Build scope based on targets and selectors
-  // valueLte goes in scope (not caveats) per DTK convention
-  const scope: {
-    type: "functionCall";
-    targets: Address[];
-    selectors: Hex[];
-    valueLte?: { maxValue: bigint };
-  } = {
+  // Build base caveats (timestamp + limitedCalls + optional nonce)
+  const baseCaveats = buildPersistentCaveats(expiryDays, maxCalls, nonce);
+
+  // Build scope with targets/selectors (required by DTK)
+  const selectorsToUse = allowedSelectors && allowedSelectors.length > 0 ? allowedSelectors : [];
+  const scope = {
     type: "functionCall" as const,
     targets: allowedTargets,
-    selectors: allowedSelectors && allowedSelectors.length > 0 ? allowedSelectors : [],
+    selectors: selectorsToUse,
   };
 
-  // Add valueLte to scope if specified
-  if (valueLtePerTx !== undefined && valueLtePerTx > 0n) {
-    scope.valueLte = { maxValue: valueLtePerTx };
-  }
-
-  // Build caveats (without valueLte - that's in scope)
-  const caveats = buildPersistentCaveats(expiryDays, maxCalls, nonce);
-
-  // Create delegation using DTK
-  // If parentDelegation is provided, this creates a redelegation
+  // Create delegation using DTK WITHOUT parentDelegation
+  // We'll set the authority manually to avoid hash computation mismatch
   const delegation = createDelegation({
     environment,
     scope,
     from: mainAgentAddress,
     to: subAgentAddress,
-    caveats,
+    caveats: baseCaveats,
     salt: ZERO_SALT,
-    // Note: parentDelegation is used when redeeming, not when creating
-    // The delegation chain is assembled at execution time
+    // Don't pass parentDelegation - DTK's hash computation may have salt type issues
   });
 
-  // Build typed data for signing
+  // CRITICAL: Compute authority hash correctly with bigint salt
+  // hashDelegation from delegation-core expects salt as bigint.
+  // When parentDelegation is loaded from JSON storage, salt is Hex string.
+  // DTK's internal hash computation might not convert correctly, causing InvalidDelegate().
+  // We compute the hash ourselves to ensure correctness.
+  const parentForHash = {
+    ...parentDelegation,
+    salt: typeof parentDelegation.salt === "bigint"
+      ? parentDelegation.salt
+      : BigInt(parentDelegation.salt),
+  };
+  delegation.authority = hashDelegation(parentForHash);
+
+  // CRITICAL: Replace scope-based enforcers with LogicalOrWrapperEnforcer
+  // DTK generates AllowedTargets + AllowedMethods from scope, but we need
+  // OR logic instead of AND logic for approve() on arbitrary tokens.
+  // Also filter out ValueLteEnforcer (DTK adds with 0 value which can cause issues)
+  const scopeEnforcers = [
+    ALLOWED_TARGETS_ENFORCER.toLowerCase(),
+    ALLOWED_METHODS_ENFORCER.toLowerCase(),
+    VALUE_LTE_ENFORCER.toLowerCase(),
+  ];
+
+  delegation.caveats = delegation.caveats.filter(
+    (caveat) => !scopeEnforcers.includes(caveat.enforcer.toLowerCase())
+  );
+
+  // Add LogicalOrWrapperEnforcer caveat at the beginning
+  const logicalOrCaveat = buildLogicalOrCaveat(allowedTargets, selectorsToUse);
+  delegation.caveats.unshift(logicalOrCaveat);
+
+  // Build typed data for signing (with modified caveats)
   const typedData = buildDelegationTypedData(delegation, chainId);
 
   return {
@@ -289,6 +332,7 @@ export function createKairosSubDelegation(
   leverUpDiamond: Address,
   subAgentAddress: Address,
   mainAgentAddress: Address,
+  parentDelegation: Delegation,
   expiryDays: number,
   valueLtePerTx: bigint,
   maxCalls: number,
@@ -298,8 +342,10 @@ export function createKairosSubDelegation(
   return createSubDelegation({
     subAgentAddress,
     mainAgentAddress,
-    allowedTargets: [leverUpDiamond],
-    // No selector restriction - allow all LeverUp methods
+    parentDelegation,
+    // Include LeverUp Diamond + ERC20 tokens (for approve() calls)
+    allowedTargets: [leverUpDiamond, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS],
+    // No selector restriction - allow all LeverUp methods + approve
     expiryDays,
     valueLtePerTx,
     maxCalls,
@@ -323,6 +369,7 @@ export function createThymosSubDelegation(
   wmonAddress: Address,
   subAgentAddress: Address,
   mainAgentAddress: Address,
+  parentDelegation: Delegation,
   expiryDays: number,
   valueLtePerTx: bigint,
   maxCalls: number,
@@ -332,6 +379,7 @@ export function createThymosSubDelegation(
   return createSubDelegation({
     subAgentAddress,
     mainAgentAddress,
+    parentDelegation,
     allowedTargets: [nadfunRouter, dexAggregator, wmonAddress],
     // No selector restriction - allow all trading methods
     expiryDays,
@@ -353,6 +401,7 @@ export function createPragmaSubDelegation(
   allowedTargets: Address[],
   subAgentAddress: Address,
   mainAgentAddress: Address,
+  parentDelegation: Delegation,
   expiryDays: number,
   valueLtePerTx: bigint,
   maxCalls: number,
@@ -362,6 +411,7 @@ export function createPragmaSubDelegation(
   return createSubDelegation({
     subAgentAddress,
     mainAgentAddress,
+    parentDelegation,
     allowedTargets,
     // No selector restriction for general agent
     expiryDays,
@@ -388,8 +438,9 @@ export function calculateApproximateBudget(
 
 /**
  * Validate sub-delegation parameters
+ * Note: parentDelegation is not validated here as it's only needed for creation
  */
-export function validateSubDelegationParams(params: SubDelegationParams): {
+export function validateSubDelegationParams(params: Omit<SubDelegationParams, 'parentDelegation'>): {
   valid: boolean;
   errors: string[];
 } {

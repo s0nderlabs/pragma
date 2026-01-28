@@ -33,7 +33,8 @@ export interface SubAgentState {
   walletId: string;
   walletAddress: Address;
   agentType: "kairos" | "thymos" | "pragma";
-  taskId: string; // Claude Code Task ID
+  taskId: string; // Claude Code Task ID (for tracking)
+  taskAgentId?: string; // Claude Code Task agent ID (for resume after gas top-up)
   status: "running" | "paused" | "completed" | "failed" | "revoked";
 
   // Budget tracking (soft limits - stored as string for JSON serialization)
@@ -203,6 +204,7 @@ export async function createAgentState(params: CreateAgentStateParams): Promise<
 /**
  * Load agent state from disk
  * Handles migration from old format (usdcAllocated/usdcSpent) to new format (tokenSpent)
+ * Performs lazy expiry check - auto-updates status to "failed" if delegation has expired
  */
 export async function loadAgentState(agentId: string): Promise<SubAgentState | null> {
   const statePath = path.join(getAgentDir(agentId), "state.json");
@@ -223,6 +225,17 @@ export async function loadAgentState(agentId: string): Promise<SubAgentState | n
       if (state.budget.usdcSpent && state.budget.usdcSpent !== "0") {
         state.budget.tokenSpent[USDC_ADDRESS.toLowerCase()] = state.budget.usdcSpent;
       }
+    }
+
+    // Lazy expiry check: if delegation expired and status is still active, mark as failed
+    const isExpired = Date.now() > state.expiresAt;
+    const isActiveStatus = state.status === "running" || state.status === "paused";
+
+    if (isExpired && isActiveStatus) {
+      state.status = "failed";
+      state.lastActivityAt = Date.now();
+      // Write updated state back to disk
+      writeFileSync(statePath, JSON.stringify(state, null, 2));
     }
 
     return state;
