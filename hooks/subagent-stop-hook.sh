@@ -6,7 +6,13 @@
 # Output (stdout): JSON { "decision": "block", "reason": "..." } to prevent exit
 # Allow exit: exit 0 with no JSON output
 #
-# Fail-open: any error → exit 0 (never trap an agent in a broken loop)
+# Fail-open: any error → non-zero exit → agent stops (never trapped)
+#
+# NOTE: We intentionally do NOT check stop_hook_active. That flag is set to
+# true after a previous block, but our termination conditions (status, trades,
+# expiry, maxIterations) already guarantee the loop will end. Checking
+# stop_hook_active would limit us to 1 block per spawn. Ralph Loop (official
+# Anthropic plugin) uses the same pattern — ignore the flag, rely on own logic.
 
 set -euo pipefail
 
@@ -15,19 +21,13 @@ AGENTS_DIR="$HOME/.pragma/agents"
 # --- Read hook input from stdin ---
 INPUT=$(cat)
 
-# --- Step 1: Check stop_hook_active (prevent infinite loop) ---
-STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
-if [ "$STOP_HOOK_ACTIVE" = "true" ]; then
-  exit 0
-fi
-
-# --- Step 2: Extract agent_id ---
+# --- Step 1: Extract agent_id ---
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
 if [ -z "$AGENT_ID" ]; then
   exit 0
 fi
 
-# --- Step 3: Find matching pragma agent by taskAgentId ---
+# --- Step 2: Find matching pragma agent by taskAgentId ---
 PRAGMA_AGENT_DIR=""
 PRAGMA_AGENT_ID=""
 
@@ -51,7 +51,7 @@ if [ -z "$PRAGMA_AGENT_DIR" ]; then
   exit 0
 fi
 
-# --- Step 4: Read loop.json ---
+# --- Step 3: Read loop.json ---
 LOOP_FILE="$PRAGMA_AGENT_DIR/loop.json"
 if [ ! -f "$LOOP_FILE" ]; then
   # No loop config → one-shot task, allow stop
@@ -69,7 +69,7 @@ if [ "$LOOP_TYPE" = "none" ]; then
   exit 0
 fi
 
-# --- Step 5: Check termination conditions from state.json ---
+# --- Step 4: Check termination conditions from state.json ---
 STATE_FILE="$PRAGMA_AGENT_DIR/state.json"
 
 # Check agent status
@@ -92,7 +92,7 @@ if [ "$EXPIRES_AT" -gt 0 ] && [ "$NOW_MS" -ge "$EXPIRES_AT" ] 2>/dev/null; then
   exit 0
 fi
 
-# --- Step 6: Check iteration limits ---
+# --- Step 5: Check iteration limits ---
 MAX_ITERATIONS=$(jq -r '.maxIterations // 0' "$LOOP_FILE" 2>/dev/null)
 CURRENT_ITERATION=$(jq -r '.currentIteration // 0' "$LOOP_FILE" 2>/dev/null)
 
@@ -100,7 +100,7 @@ if [ "$MAX_ITERATIONS" -gt 0 ] 2>/dev/null && [ "$CURRENT_ITERATION" -ge "$MAX_I
   exit 0
 fi
 
-# --- Step 7: All checks pass — block exit ---
+# --- Step 6: All checks pass — block exit ---
 
 # Read mission (becomes the agent's next prompt)
 MISSION=$(jq -r '.mission // empty' "$LOOP_FILE" 2>/dev/null)
