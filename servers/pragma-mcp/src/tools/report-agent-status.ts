@@ -5,7 +5,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig } from "../config/pragma-config.js";
-import { loadAgentState, updateAgentState } from "../core/subagent/index.js";
+import { loadAgentState, updateAgentState, deactivateLoop } from "../core/subagent/index.js";
 
 const ReportAgentStatusSchema = z.object({
   agentId: z.string().describe("The sub-agent ID (UUID) reporting its status"),
@@ -95,6 +95,15 @@ async function reportAgentStatusHandler(
 
     // Update the status
     await updateAgentState(params.agentId, { status: params.status });
+
+    // Deactivate loop on terminal status (defense in depth -- hook also checks state.json)
+    if (params.status === "completed" || params.status === "failed") {
+      try {
+        deactivateLoop(params.agentId);
+      } catch {
+        // Non-critical -- hook also checks state.json status
+      }
+    }
 
     return {
       success: true,

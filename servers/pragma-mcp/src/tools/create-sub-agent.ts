@@ -11,7 +11,6 @@ import {
   createPublicClient,
   createWalletClient,
   type Address,
-  type Hex,
 } from "viem";
 import { randomUUID } from "node:crypto";
 import { loadConfig, getRpcUrl } from "../config/pragma-config.js";
@@ -23,6 +22,9 @@ import {
   releaseWallet,
   createAgentState,
   storeDelegation,
+  createContinuousLoop,
+  createConditionLoop,
+  createIntervalLoop,
   type StoredDelegation,
 } from "../core/subagent/index.js";
 import { withRetry } from "../core/utils/retry.js";
@@ -34,6 +36,7 @@ import {
 import { loadRootDelegation } from "../core/delegation/root.js";
 import { hashDelegation } from "@metamask/delegation-core";
 import { formatTimeRemaining } from "../core/utils/index.js";
+import { startCaffeinate } from "../core/utils/caffeinate.js";
 
 // Contract addresses for agent scopes
 import { LEVERUP_DIAMOND, WMON_ADDRESS, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS } from "../core/leverup/constants.js";
@@ -85,6 +88,45 @@ const CreateSubAgentSchema = z.object({
     .string()
     .optional()
     .describe("Optional Claude Code Task ID for tracking"),
+  loopType: z
+    .enum(["none", "condition", "continuous", "interval"])
+    .default("none")
+    .describe(
+      "Loop behavior. none=one-shot (agent runs once and stops), " +
+        "condition=until condition met (e.g., 'BTC >= 95000'), " +
+        "continuous=until budget/expiry exhausted, " +
+        "interval=periodic checks at fixed intervals"
+    ),
+  loopCondition: z
+    .string()
+    .optional()
+    .describe(
+      "For condition type: human-readable condition (e.g., 'BTC price >= 95000')"
+    ),
+  loopIntervalMinutes: z
+    .number()
+    .min(1)
+    .max(1440)
+    .optional()
+    .describe(
+      "For interval type: minutes between checks (e.g., 2 for every 2 minutes)"
+    ),
+  mission: z
+    .string()
+    .optional()
+    .describe(
+      "Natural language task re-injected as the agent's next prompt when the SubagentStop hook blocks exit. " +
+        "Must be actionable and self-contained. " +
+        "Example: 'Monitor BTC/USD. Buy when price hits $95,000. Budget: 10 MON.'"
+    ),
+  maxIterations: z
+    .number()
+    .min(0)
+    .max(10000)
+    .default(0)
+    .describe(
+      "Safety valve: max loop iterations before forcing exit. 0 = unlimited. Default: 0"
+    ),
 });
 
 interface CreateSubAgentResult {
@@ -110,6 +152,14 @@ interface CreateSubAgentResult {
       decision: "skipped" | "partial" | "full" | "none";
     };
     fundingTx?: string;
+    loop?: {
+      type: string;
+      active: boolean;
+      mission?: string;
+      condition?: string;
+      intervalMinutes?: number;
+      maxIterations?: number;
+    };
   };
   error?: string;
 }
@@ -329,8 +379,8 @@ async function createSubAgentHandler(
         signature,
       };
 
-      // Compute delegation hash using DTK's hash function (struct hash, not EIP-712)
-      // DTK expects salt as bigint, our delegation has it as Hex
+      // Compute delegation hash using DTK's hash function (struct hash, not EIP-712).
+      // DTK expects salt as bigint; our delegation stores it as a hex string.
       const delegationForHash = {
         ...delegationResult.delegation,
         salt: BigInt(delegationResult.delegation.salt),
@@ -347,6 +397,42 @@ async function createSubAgentHandler(
         expiresAt: delegationResult.expiresAt * 1000,
       };
       await storeDelegation(agentId, storedDelegation);
+
+      // Create loop config if requested
+      if (params.loopType && params.loopType !== "none") {
+        const mission =
+          params.mission ||
+          `Continue your ${params.agentType} agent task. ` +
+            (params.loopCondition
+              ? `Condition: ${params.loopCondition}. `
+              : "") +
+            `Check get_sub_agent_state for current state.`;
+
+        switch (params.loopType) {
+          case "continuous":
+            createContinuousLoop(agentId, mission, params.maxIterations ?? 0);
+            break;
+          case "condition":
+            createConditionLoop(
+              agentId,
+              params.loopCondition || "condition not specified",
+              mission,
+              params.maxIterations ?? 0
+            );
+            break;
+          case "interval":
+            createIntervalLoop(
+              agentId,
+              params.loopIntervalMinutes || 5,
+              mission,
+              params.maxIterations ?? 0
+            );
+            break;
+        }
+      }
+
+      // Prevent macOS idle sleep while agents are running
+      startCaffeinate();
 
       // Check wallet balance and fund if needed
       const rpcUrl = await getRpcUrl(config);
@@ -435,6 +521,16 @@ async function createSubAgentHandler(
             decision: fundingDecision,
           },
           fundingTx: fundingTxHash,
+          loop: params.loopType !== "none"
+            ? {
+                type: params.loopType,
+                active: true,
+                mission: params.mission,
+                condition: params.loopCondition,
+                intervalMinutes: params.loopIntervalMinutes,
+                maxIterations: params.maxIterations ?? 0,
+              }
+            : undefined,
         },
       };
     } catch (innerError) {

@@ -11,13 +11,22 @@ import * as path from "node:path";
  *
  * Loop types:
  * - none: One-shot task, agent stops when done
- * - condition: Monitor until condition is met (e.g., "BTC hits 50k")
+ * - condition: Monitor until condition is met (e.g., "BTC hits 95k")
  * - continuous: Keep trading until budget/time exhausted
  * - interval: Periodic wake-up for monitoring (e.g., "every hour")
  */
 export interface LoopConfig {
   type: "none" | "condition" | "continuous" | "interval";
   active: boolean;
+
+  // The mission text — re-injected as the agent's next prompt when hook blocks exit
+  mission: string;
+
+  // Safety valve: max hook-blocked iterations (0 = unlimited)
+  maxIterations: number;
+
+  // Tracked by hook: incremented each time hook blocks exit
+  currentIteration: number;
 
   // For condition type
   condition?: string; // Human-readable condition description
@@ -29,7 +38,6 @@ export interface LoopConfig {
   intervalMinutes?: number; // e.g., 60 = check every hour
 
   // Metadata
-  description: string;
   createdAt: number;
   lastCheckedAt?: number;
 }
@@ -45,10 +53,10 @@ function getLoopConfigPath(agentId: string): string {
 /**
  * Create or update loop configuration for an agent
  */
-export async function createLoopConfig(
+export function createLoopConfig(
   agentId: string,
   config: Omit<LoopConfig, "createdAt">
-): Promise<void> {
+): void {
   const loopPath = getLoopConfigPath(agentId);
   const agentDir = path.dirname(loopPath);
 
@@ -65,10 +73,10 @@ export async function createLoopConfig(
 }
 
 /**
- * Load loop configuration for an agent
- * Returns null if no loop config exists (agent runs as one-shot)
+ * Load loop configuration for an agent.
+ * Returns null if no loop config exists (agent runs as one-shot).
  */
-export async function loadLoopConfig(agentId: string): Promise<LoopConfig | null> {
+export function loadLoopConfig(agentId: string): LoopConfig | null {
   const loopPath = getLoopConfigPath(agentId);
 
   if (!existsSync(loopPath)) {
@@ -86,11 +94,11 @@ export async function loadLoopConfig(agentId: string): Promise<LoopConfig | null
 /**
  * Update loop configuration
  */
-export async function updateLoopConfig(
+export function updateLoopConfig(
   agentId: string,
   updates: Partial<LoopConfig>
-): Promise<void> {
-  const config = await loadLoopConfig(agentId);
+): void {
+  const config = loadLoopConfig(agentId);
   if (!config) {
     throw new Error(`Loop config not found for agent: ${agentId}`);
   }
@@ -108,20 +116,19 @@ export async function updateLoopConfig(
 /**
  * Deactivate loop (allows agent to stop)
  */
-export async function deactivateLoop(agentId: string): Promise<void> {
-  const config = await loadLoopConfig(agentId);
+export function deactivateLoop(agentId: string): void {
+  const config = loadLoopConfig(agentId);
   if (!config) {
-    // No loop config - nothing to deactivate
     return;
   }
 
-  await updateLoopConfig(agentId, { active: false });
+  updateLoopConfig(agentId, { active: false });
 }
 
 /**
  * Delete loop configuration
  */
-export async function deleteLoopConfig(agentId: string): Promise<void> {
+export function deleteLoopConfig(agentId: string): void {
   const loopPath = getLoopConfigPath(agentId);
 
   if (existsSync(loopPath)) {
@@ -130,53 +137,30 @@ export async function deleteLoopConfig(agentId: string): Promise<void> {
 }
 
 /**
- * Check if loop should continue
- * This is called by the SubagentStop hook to decide whether to block stopping
+ * Check if loop should continue.
+ * Called by the SubagentStop hook to decide whether to block stopping.
  */
-export async function shouldContinueLoop(agentId: string): Promise<{
+export function shouldContinueLoop(agentId: string): {
   continue: boolean;
   reason?: string;
-}> {
-  const config = await loadLoopConfig(agentId);
+} {
+  const config = loadLoopConfig(agentId);
 
-  // No loop config - allow stop
-  if (!config) {
+  if (!config || !config.active) {
     return { continue: false };
   }
 
-  // Loop not active - allow stop
-  if (!config.active) {
-    return { continue: false };
+  if (config.maxIterations > 0 && config.currentIteration >= config.maxIterations) {
+    return { continue: false, reason: "Max iterations reached" };
   }
 
-  // Check based on loop type
   switch (config.type) {
-    case "none":
-      return { continue: false };
-
     case "condition":
-      // For condition type, hook should continue until condition is explicitly met
-      // Condition evaluation happens in the agent, not here
-      return {
-        continue: true,
-        reason: `Condition not met: ${config.condition || "unknown"}`,
-      };
-
     case "continuous":
-      // For continuous type, always continue until deactivated
-      return {
-        continue: true,
-        reason: `Continuous mode active: ${config.description}`,
-      };
-
     case "interval":
-      // For interval type, continue if within interval
-      // The actual interval checking would be more complex in production
-      return {
-        continue: true,
-        reason: `Interval monitoring: every ${config.intervalMinutes} minutes`,
-      };
+      return { continue: true, reason: config.mission };
 
+    case "none":
     default:
       return { continue: false };
   }
@@ -185,47 +169,56 @@ export async function shouldContinueLoop(agentId: string): Promise<{
 /**
  * Create a continuous trading loop config
  */
-export async function createContinuousLoop(
+export function createContinuousLoop(
   agentId: string,
-  description: string
-): Promise<void> {
-  await createLoopConfig(agentId, {
+  mission: string,
+  maxIterations: number = 0
+): void {
+  createLoopConfig(agentId, {
     type: "continuous",
     active: true,
+    mission,
+    maxIterations,
+    currentIteration: 0,
     until: ["budget_exhausted", "delegation_expired", "user_cancelled"],
-    description,
   });
 }
 
 /**
  * Create a condition-based loop config
  */
-export async function createConditionLoop(
+export function createConditionLoop(
   agentId: string,
   condition: string,
-  description: string
-): Promise<void> {
-  await createLoopConfig(agentId, {
+  mission: string,
+  maxIterations: number = 0
+): void {
+  createLoopConfig(agentId, {
     type: "condition",
     active: true,
     condition,
-    description,
+    mission,
+    maxIterations,
+    currentIteration: 0,
   });
 }
 
 /**
  * Create an interval-based loop config
  */
-export async function createIntervalLoop(
+export function createIntervalLoop(
   agentId: string,
   intervalMinutes: number,
-  description: string
-): Promise<void> {
-  await createLoopConfig(agentId, {
+  mission: string,
+  maxIterations: number = 0
+): void {
+  createLoopConfig(agentId, {
     type: "interval",
     active: true,
     intervalMinutes,
-    description,
+    mission,
+    maxIterations,
+    currentIteration: 0,
   });
 }
 

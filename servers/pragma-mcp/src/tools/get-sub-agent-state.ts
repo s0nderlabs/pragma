@@ -109,9 +109,11 @@ interface GetSubAgentStateResult {
     loop?: {
       type: string;
       active: boolean;
-      description: string;
+      mission: string;
       condition?: string;
       intervalMinutes?: number;
+      currentIteration: number;
+      maxIterations: number;
     };
     recentTrades?: Array<{
       timestamp: string;
@@ -216,10 +218,14 @@ async function getSubAgentStateHandler(
       "0x91b81bfbe3a747230f0529aa28d8b2bc898e6d56": { symbol: "LVMON", decimals: 18 },
     };
 
+    function getTokenMeta(addr: string): { symbol: string; decimals: number } {
+      return TOKEN_INFO[addr] || { symbol: addr.slice(0, 10), decimals: 18 };
+    }
+
     // Format token spending for output
     const tokenSpending = tokenSpendingMap
       ? Object.entries(tokenSpendingMap).map(([addr, { spent, limit }]) => {
-          const { symbol, decimals } = TOKEN_INFO[addr] || { symbol: addr.slice(0, 10), decimals: 18 };
+          const { symbol, decimals } = getTokenMeta(addr);
           const formatAmount = (value: bigint): string => `${formatUnits(value, decimals)} ${symbol}`;
 
           return {
@@ -238,7 +244,7 @@ async function getSubAgentStateHandler(
       ? Object.entries(tokenFlowsMap)
           .filter(([, flow]) => flow.out > 0n || flow.in > 0n) // Only show tokens with activity
           .map(([addr, flow]) => {
-            const { symbol, decimals } = TOKEN_INFO[addr] || { symbol: addr.slice(0, 10), decimals: 18 };
+            const { symbol, decimals } = getTokenMeta(addr);
             const fmt = (v: bigint): string => `${formatUnits(v < 0n ? -v : v, decimals)} ${symbol}`;
             return {
               address: addr,
@@ -295,22 +301,28 @@ async function getSubAgentStateHandler(
     }
 
     // Load loop config
-    const loopConfig = await loadLoopConfig(params.subAgentId);
+    const loopConfig = loadLoopConfig(params.subAgentId);
 
     // Load trades if requested
-    const recentTrades = params.includeTrades !== false
-      ? await loadTrades(params.subAgentId)
-          .then((trades) => {
-            const limit = params.tradeLimit || 10;
-            return trades.slice(-limit).reverse().map((trade) => ({
-              timestamp: formatLocalTimestamp(new Date(trade.timestamp)),
-              action: trade.action,
-              protocol: trade.protocol,
-              txHash: trade.txHash,
-              success: trade.success,
-            }));
-          })
-      : undefined;
+    let recentTrades: Array<{
+      timestamp: string;
+      action: string;
+      protocol: string;
+      txHash: string;
+      success: boolean;
+    }> | undefined;
+
+    if (params.includeTrades !== false) {
+      const trades = await loadTrades(params.subAgentId);
+      const limit = params.tradeLimit || 10;
+      recentTrades = trades.slice(-limit).reverse().map((trade) => ({
+        timestamp: formatLocalTimestamp(new Date(trade.timestamp)),
+        action: trade.action,
+        protocol: trade.protocol,
+        txHash: trade.txHash,
+        success: trade.success,
+      }));
+    }
 
     const now = Date.now();
     const isExpired = state.expiresAt < now;
@@ -358,9 +370,11 @@ async function getSubAgentStateHandler(
           ? {
               type: loopConfig.type,
               active: loopConfig.active,
-              description: loopConfig.description,
+              mission: loopConfig.mission,
               condition: loopConfig.condition,
               intervalMinutes: loopConfig.intervalMinutes,
+              currentIteration: loopConfig.currentIteration ?? 0,
+              maxIterations: loopConfig.maxIterations ?? 0,
             }
           : undefined,
         recentTrades,

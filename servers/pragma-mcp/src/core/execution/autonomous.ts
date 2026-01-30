@@ -78,6 +78,18 @@ import {
 import { resolveToken } from "../data/client.js";
 
 // ============================================================================
+// Constants
+// ============================================================================
+
+/** Maps collateral token type to its on-chain address for token flow tracking */
+const COLLATERAL_TOKEN_ADDRESSES: Record<CollateralToken, Address> = {
+  MON: NATIVE_TOKEN_ADDRESS,
+  USDC: USDC_ADDRESS,
+  LVUSD: LVUSD_ADDRESS,
+  LVMON: LVMON_ADDRESS,
+};
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -1707,13 +1719,7 @@ export async function executeAutonomousLeverUpOpen(
   }
 
   // Build token flows: collateral out, no inflow (position opened)
-  const collateralAddresses: Record<CollateralToken, Address> = {
-    MON: NATIVE_TOKEN_ADDRESS,
-    USDC: USDC_ADDRESS,
-    LVUSD: LVUSD_ADDRESS,
-    LVMON: LVMON_ADDRESS,
-  };
-  const collateralAddress = collateralAddresses[collateral];
+  const collateralAddress = COLLATERAL_TOKEN_ADDRESSES[collateral];
   const openTokenFlows: TokenFlowUpdate = {
     outflows: [{ token: collateralAddress, amount: marginWei }],
     inflows: [], // Position opened — no token received
@@ -1745,7 +1751,7 @@ export async function executeAutonomousLeverUpOpen(
     );
   } else {
     // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
-    const tokenAddress = collateralAddresses[collateral];
+    const tokenAddress = COLLATERAL_TOKEN_ADDRESSES[collateral];
 
     result = await executeWithApprovalIfNeeded(
       agentId,
@@ -1944,13 +1950,7 @@ export async function executeAutonomousLeverUpLimitOrder(
   }
 
   // Build token flows: collateral out (margin locked for limit order)
-  const limitCollateralAddresses: Record<CollateralToken, Address> = {
-    MON: NATIVE_TOKEN_ADDRESS,
-    USDC: USDC_ADDRESS,
-    LVUSD: LVUSD_ADDRESS,
-    LVMON: LVMON_ADDRESS,
-  };
-  const limitCollateralAddress = limitCollateralAddresses[collateral];
+  const limitCollateralAddress = COLLATERAL_TOKEN_ADDRESSES[collateral];
   const limitTokenFlows: TokenFlowUpdate = {
     outflows: [{ token: limitCollateralAddress, amount: marginWei }],
     inflows: [],
@@ -1984,7 +1984,7 @@ export async function executeAutonomousLeverUpLimitOrder(
     );
   } else {
     // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
-    const tokenAddress = limitCollateralAddresses[collateral];
+    const tokenAddress = COLLATERAL_TOKEN_ADDRESSES[collateral];
 
     result = await executeWithApprovalIfNeeded(
       agentId,

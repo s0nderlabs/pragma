@@ -43,6 +43,7 @@ interface ListSubAgentsResult {
   subAgents: SubAgentSummary[];
   summary: {
     total: number;
+    pending: number;
     running: number;
     paused: number;
     completed: number;
@@ -111,7 +112,7 @@ async function listSubAgentsHandler(
         success: false,
         message: "Wallet not configured",
         subAgents: [],
-        summary: { total: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 },
+        summary: { total: 0, pending: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 },
         error: "Please run setup_wallet first",
       };
     }
@@ -163,7 +164,7 @@ async function listSubAgentsHandler(
       success: false,
       message: "Failed to list sub-agents",
       subAgents: [],
-      summary: { total: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 },
+      summary: { total: 0, pending: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 },
       error: error instanceof Error ? error.message : "Unknown error",
     };
   }

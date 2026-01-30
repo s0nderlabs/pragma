@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-01-30
+
+### Added
+- **SubagentStop hook** - Shell script loop enforcement that blocks autonomous agents from exiting before their mission completes. 7-step decision algorithm checks loop config, agent status, trade limits, expiry, and iteration caps. Fail-open design (errors allow exit, never trap agents)
+- **Mission-based loop system** - `loop.json` stores mission text, maxIterations, and currentIteration. Hook re-injects mission as agent's next prompt on each iteration. Supports continuous, condition, and interval loop types
+- **Caffeinate management** - Prevents macOS idle sleep while autonomous agents run. Starts on agent creation, stops when last agent is revoked. Child process design (auto-dies with MCP server, no orphans)
+
+### Changed
+- **Loop functions sync** - All `loop.ts` functions converted from async to sync (they only use synchronous fs operations)
+
 ## [0.8.4] - 2026-01-30
 
 ### Added

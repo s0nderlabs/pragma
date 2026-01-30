@@ -1,6 +1,6 @@
 ---
 name: autonomous-mode
-description: Manages autonomous trading agents. Use when user mentions autonomous, sub-agent, background trading, AFK trading, monitoring while away, spawn agent, create agent, delegate trading, or hands-free trading.
+description: Manages autonomous trading agents. Use when user mentions autonomous, sub-agent, background trading, AFK trading, monitoring while away, spawn agent, create agent, delegate trading, hands-free trading, while I sleep, overnight, keep running, monitor and execute, condition trigger, loop, or run until.
 allowed-tools:
   - mcp__pragma__create_root_delegation
   - mcp__pragma__create_sub_agent
@@ -335,6 +335,23 @@ Before creating the sub-agent:
 
 ### Step 7: Create Sub-Agent
 
+**Loop Type Inference — decide based on user intent:**
+
+| User Intent | loopType | Example Mission |
+|-------------|----------|-----------------|
+| "Monitor BTC until 95k then buy" | `condition` | "Monitor BTC/USD. Open long when >= $95,000." |
+| "Turn $10 into $20 or $0" | `continuous` | "Trade actively. Target: $20. Stop-loss: $0." |
+| "Check portfolio every 2 min" | `interval` | "Check portfolio positions every 2 minutes." |
+| "Open a BTC long and close it" | `none` | N/A (one-shot, no loop) |
+
+**One-shot tasks do NOT get loop enforcement.** Only tasks requiring persistence get a loop.
+
+**Mission Construction:**
+- Mission is re-injected as the agent's next prompt when the SubagentStop hook blocks exit
+- Must be actionable and self-contained (the agent sees ONLY this text when unblocked)
+- Include: objective, key conditions, budget context
+- Do NOT include generic instructions — the hook appends agent ID and iteration count automatically
+
 ```
 create_sub_agent(
   agentType: [inferred],
@@ -342,13 +359,25 @@ create_sub_agent(
   budgetUsdc: [user specified, optional],
   maxTrades: [inferred],
   expiryDays: [calculated],
-  fundAmount: 1  // Default 1 MON (skipped if wallet already funded)
+  fundAmount: 1,
+  loopType: [inferred from intent — "none" for one-shot],
+  loopCondition: [for condition type],
+  loopIntervalMinutes: [for interval type],
+  mission: [actionable task text — fed back by hook on each iteration],
+  maxIterations: [safety limit, 0 = unlimited]
 )
 → Returns agentId (pragma agent ID)
 → Agent status starts as "pending"
+→ If loopType != "none", loop.json is created with mission text
 ```
 
 ### Step 8: Spawn via Task Tool
+
+**Note:** The `mission` (in loop.json) and the Task `prompt` serve different purposes:
+- **Task prompt**: Full initial instructions with rules, agent ID, all context (seen once at spawn)
+- **Mission**: Concise re-prompt fed by the SubagentStop hook each time the agent tries to exit (seen repeatedly)
+
+The mission should be a subset of the prompt — just the core objective and key constraints.
 
 ```typescript
 Task({

@@ -18,10 +18,12 @@ import { x402HttpOptions } from "../core/x402/client.js";
 import {
   loadAgentState,
   deleteAgentState,
+  listAgentStates,
   getFullWallet,
   releaseWallet,
 } from "../core/subagent/index.js";
 import { withRetry } from "../core/utils/retry.js";
+import { stopCaffeinate } from "../core/utils/caffeinate.js";
 
 const RevokeSubAgentSchema = z.object({
   subAgentId: z.string().describe("The sub-agent ID (UUID) to revoke"),
@@ -192,6 +194,19 @@ async function revokeSubAgentHandler(
 
     // Delete agent state directory (no need to keep revoked agents)
     await deleteAgentState(params.subAgentId);
+
+    // Stop caffeinate if no more active agents
+    try {
+      const remaining = await listAgentStates();
+      const hasActive = remaining.some(
+        (a) => a.status === "running" || a.status === "pending" || a.status === "paused"
+      );
+      if (!hasActive) {
+        stopCaffeinate();
+      }
+    } catch {
+      // Non-critical
+    }
 
     return {
       success: true,

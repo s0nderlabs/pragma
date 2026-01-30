@@ -1,6 +1,6 @@
 ---
 name: pragma-core
-description: Operates pragma wallet for on-chain trading. Executes swaps, transfers, staking, balance checks, and wallet management. Use when user mentions pragma, wallet, balance, portfolio, swap, trade, buy, sell, transfer, send, stake, unstake, wrap, unwrap, tokens, or DeFi operations.
+description: Operates pragma wallet for on-chain trading and market intelligence. Use when user mentions pragma, wallet, balance, portfolio, swap, trade, buy, sell, transfer, send, stake, unstake, wrap, unwrap, tokens, DeFi, price, chart, market, position, leverage, perps, perpetuals, memecoin, nadfun, nad.fun, leverup, transaction, contract, block, gas, news, economic, forex, currency, MON, USDC, WMON, LVUSD, Monad, or any on-chain operation.
 allowed-tools:
   - mcp__pragma__has_wallet
   - mcp__pragma__has_providers
