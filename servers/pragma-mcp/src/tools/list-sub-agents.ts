@@ -11,7 +11,7 @@ import { formatTimeRemaining, formatLocalTimestamp } from "../core/utils/index.j
 
 const ListSubAgentsSchema = z.object({
   status: z
-    .enum(["all", "running", "paused", "completed", "failed", "revoked"])
+    .enum(["all", "pending", "running", "paused", "completed", "failed", "revoked"])
     .optional()
     .describe(
       "Filter by status. Default: 'all'. " +
@@ -129,7 +129,7 @@ async function listSubAgentsHandler(
     const subAgents = filteredStates.map(formatSubAgentSummary);
 
     // Build summary counts in single pass
-    const summary = { total: allStates.length, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 };
+    const summary = { total: allStates.length, pending: 0, running: 0, paused: 0, completed: 0, failed: 0, revoked: 0 };
     for (const s of allStates) {
       if (s.status in summary) {
         summary[s.status as keyof typeof summary]++;
@@ -143,7 +143,13 @@ async function listSubAgentsHandler(
     } else if (params.status && params.status !== "all") {
       message = `Found ${filteredStates.length} ${params.status} sub-agent(s)`;
     } else {
-      message = `Found ${allStates.length} sub-agent(s): ${summary.running} running, ${summary.completed} completed`;
+      const parts: string[] = [];
+      if (summary.pending > 0) parts.push(`${summary.pending} pending`);
+      if (summary.running > 0) parts.push(`${summary.running} running`);
+      if (summary.completed > 0) parts.push(`${summary.completed} completed`);
+      if (summary.failed > 0) parts.push(`${summary.failed} failed`);
+      if (summary.revoked > 0) parts.push(`${summary.revoked} revoked`);
+      message = `Found ${allStates.length} sub-agent(s): ${parts.join(", ")}`;
     }
 
     return {

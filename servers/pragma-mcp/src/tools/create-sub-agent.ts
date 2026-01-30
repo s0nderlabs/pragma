@@ -123,9 +123,13 @@ function buildAllowedTargets(
   nadfunRouter: Address | undefined
 ): Address[] {
   switch (agentType) {
-    case "kairos":
-      // kairos: perps + ERC20 tokens for autonomous approvals
-      return [LEVERUP_DIAMOND, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS];
+    case "kairos": {
+      // kairos: perps + swaps + wrap/unwrap + ERC20 tokens for autonomous approvals
+      const targets: Address[] = [LEVERUP_DIAMOND, WMON_ADDRESS];
+      if (dexAggregator) targets.push(dexAggregator);
+      targets.push(USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS);
+      return targets;
+    }
 
     case "thymos": {
       // thymos: memecoins (nadfun + WMON + dex) + ERC20 tokens for autonomous approvals
@@ -298,6 +302,12 @@ async function createSubAgentHandler(
           ? { [USDC_ADDRESS.toLowerCase()]: BigInt(Math.floor(params.budgetUsdc * 1e6)) }
           : undefined;
 
+      // Set group budgets for ledger-based budget enforcement
+      const groupBudgets: Record<string, bigint> | undefined =
+        params.budgetUsdc && params.budgetUsdc > 0
+          ? { USD: BigInt(Math.floor(params.budgetUsdc * 1e6)) }
+          : undefined;
+
       await createAgentState({
         id: agentId,
         walletId: poolWallet.id,
@@ -307,6 +317,7 @@ async function createSubAgentHandler(
         budget: {
           monAllocated: totalBudgetWei,
           tokenLimits,
+          groupBudgets,
         },
         maxTrades: params.maxTrades,
         expiresAt: delegationResult.expiresAt * 1000, // Convert to milliseconds

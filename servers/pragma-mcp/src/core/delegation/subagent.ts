@@ -145,7 +145,11 @@ export const DEX_SELECTORS = {
 export function getSelectorsForAgentType(agentType: "kairos" | "thymos" | "pragma"): Hex[] {
   switch (agentType) {
     case "kairos":
-      return [...Object.values(LEVERUP_SELECTORS)];
+      return [
+        ...Object.values(LEVERUP_SELECTORS),
+        ...Object.values(WMON_SELECTORS),
+        ...Object.values(DEX_SELECTORS),
+      ];
     case "thymos":
       return [
         ...Object.values(NADFUN_SELECTORS),
@@ -343,9 +347,10 @@ export function createKairosSubDelegation(
     subAgentAddress,
     mainAgentAddress,
     parentDelegation,
-    // Include LeverUp Diamond + ERC20 tokens (for approve() calls)
+    // Include LeverUp Diamond + WMON + ERC20 tokens (for approve() calls)
+    // Note: dexAggregator not included here — use buildAllowedTargets in create-sub-agent.ts instead
     allowedTargets: [leverUpDiamond, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS],
-    // No selector restriction - allow all LeverUp methods + approve
+    // No selector restriction - allow all LeverUp + WMON + DEX methods + approve
     expiryDays,
     valueLtePerTx,
     maxCalls,

@@ -897,4 +897,11 @@ User: "swap all my CHOG to MON"
 
 For autonomous trading with sub-agents, see the dedicated **autonomous-mode** skill.
 
-**Trigger keywords:** autonomous, sub-agent, background trading, AFK trading, spawn agent, delegate trading
+### Detection Matrix
+
+| Signal Type        | Examples                                                       | Route To                         |
+| ------------------ | -------------------------------------------------------------- | -------------------------------- |
+| Autonomous         | "while I sleep", "monitor and execute when...", "spawn agent"  | Invoke **autonomous-mode** skill |
+| Assistant          | "swap X for Y", "check balance", "what's the price of..."     | Handle directly in pragma-core   |
+| Ambiguous          | No temporal or autonomy indicators                             | Default to assistant mode        |
+| Mixed              | "swap now AND monitor overnight"                               | Ask user to clarify              |

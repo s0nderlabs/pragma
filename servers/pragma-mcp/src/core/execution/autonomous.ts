@@ -23,10 +23,13 @@ import {
   loadDelegation,
   appendTrade,
   updateTokenSpent,
+  updateTokenFlows,
+  checkGroupBudget,
   updateAgentState,
   addError,
   NATIVE_TOKEN_ADDRESS,
   type TradeRecord,
+  type TokenFlowUpdate,
 } from "../subagent/state.js";
 import { getFullWallet, getSubAgentAccount } from "../subagent/index.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
@@ -118,6 +121,8 @@ export interface ExecutionOptions {
   skipBudgetTracking?: boolean;
   /** Skip trade logging for this execution (e.g., for approvals) */
   skipTradeLogging?: boolean;
+  /** Token flow update for ledger-based tracking (outflows + inflows) */
+  tokenFlows?: TokenFlowUpdate;
 }
 
 /**
@@ -179,6 +184,18 @@ export async function executeWithDelegationChain(
         success: false,
         error: `Insufficient MON budget. Allocated: ${monAllocated}, Spent: ${monSpent}, Required: ${execution.value}`,
       };
+    }
+  }
+
+  // 3b. Validate group budgets for ERC-20 token outflows
+  if (options?.tokenFlows && !options?.skipBudgetTracking) {
+    for (const { token, amount } of options.tokenFlows.outflows) {
+      // Skip native MON — already checked above via execution.value
+      if (token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) continue;
+      const check = checkGroupBudget(state, token, amount);
+      if (!check.allowed) {
+        return { success: false, error: `Budget exceeded: ${check.reason}` };
+      }
     }
   }
 
@@ -286,9 +303,28 @@ export async function executeWithDelegationChain(
       });
     }
 
-    // Track native MON spent (skip for approvals)
-    if (execution.value > 0n && !options?.skipBudgetTracking) {
-      await updateTokenSpent(agentId, NATIVE_TOKEN_ADDRESS, execution.value);
+    // Track token flows (ledger recording) or legacy MON tracking
+    if (!options?.skipBudgetTracking) {
+      if (options?.tokenFlows) {
+        // Ledger-based: record all outflows and inflows
+        const flows: TokenFlowUpdate = {
+          outflows: [...options.tokenFlows.outflows],
+          inflows: [...options.tokenFlows.inflows],
+        };
+        // Include native MON value if not already in flows
+        if (
+          execution.value > 0n &&
+          !flows.outflows.some(
+            (f) => f.token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()
+          )
+        ) {
+          flows.outflows.push({ token: NATIVE_TOKEN_ADDRESS, amount: execution.value });
+        }
+        await updateTokenFlows(agentId, flows);
+      } else if (execution.value > 0n) {
+        // Legacy: only track native MON
+        await updateTokenSpent(agentId, NATIVE_TOKEN_ADDRESS, execution.value);
+      }
     }
 
     return {
@@ -436,7 +472,8 @@ export async function executeWithApprovalIfNeeded(
   spender: Address,
   requiredAmount: bigint,
   tradeExecution: AutonomousExecution,
-  tradeInfo: TradeInfo
+  tradeInfo: TradeInfo,
+  options?: ExecutionOptions
 ): Promise<AutonomousExecutionResult> {
   const config = await loadConfig();
   if (!config?.wallet) {
@@ -445,7 +482,7 @@ export async function executeWithApprovalIfNeeded(
 
   // Skip approval check for native MON (NATIVE_TOKEN_ADDRESS)
   if (token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) {
-    return await executeWithDelegationChain(agentId, tradeExecution, tradeInfo);
+    return await executeWithDelegationChain(agentId, tradeExecution, tradeInfo, options);
   }
 
   // Validate spender is whitelisted
@@ -492,7 +529,7 @@ export async function executeWithApprovalIfNeeded(
   }
 
   // Execute the actual trade
-  return await executeWithDelegationChain(agentId, tradeExecution, tradeInfo);
+  return await executeWithDelegationChain(agentId, tradeExecution, tradeInfo, options);
 }
 
 // ============================================================================
@@ -545,6 +582,12 @@ export async function executeAutonomousNadFunBuy(
     };
   }
 
+  // Build token flows: MON out, tokens in
+  const tokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: NATIVE_TOKEN_ADDRESS, amount: executionData.value }],
+    inflows: [{ token: quote.token as Address, amount: quote.expectedOutputWei }],
+  };
+
   // Execute using delegation chain
   const result = await executeWithDelegationChain(
     agentId,
@@ -562,7 +605,8 @@ export async function executeAutonomousNadFunBuy(
         amountIn: quote.amountIn,
         amountOut: quote.expectedOutput,
       },
-    }
+    },
+    { tokenFlows }
   );
 
   if (!result.success) {
@@ -644,6 +688,12 @@ export async function executeAutonomousNadFunSell(
   // Parse amount for approval check
   const amountInWei = parseUnits(quote.amountIn, 18); // nad.fun tokens are 18 decimals
 
+  // Build token flows: tokens out, MON in
+  const tokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: quote.token as Address, amount: amountInWei }],
+    inflows: [{ token: NATIVE_TOKEN_ADDRESS, amount: quote.expectedOutputWei }],
+  };
+
   // Use executeWithApprovalIfNeeded for automatic approval handling
   const result = await executeWithApprovalIfNeeded(
     agentId,
@@ -664,7 +714,8 @@ export async function executeAutonomousNadFunSell(
         amountIn: quote.amountIn,
         amountOut: quote.expectedOutput,
       },
-    }
+    },
+    { tokenFlows }
   );
 
   if (!result.success) {
@@ -918,6 +969,13 @@ export async function executeAutonomousLeverUpUpdateMargin(
 
   const execution = executeAddMargin(tradeHash, tokenAddress, amountWei, isNativeMon);
 
+  // Build token flows: collateral out (margin added to position)
+  const marginTokenAddress = isNativeMon ? NATIVE_TOKEN_ADDRESS : tokenAddress;
+  const marginTokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: marginTokenAddress, amount: amountWei }],
+    inflows: [],
+  };
+
   let result: AutonomousExecutionResult;
 
   if (isNativeMon) {
@@ -938,7 +996,8 @@ export async function executeAutonomousLeverUpUpdateMargin(
           amount: amount,
           collateral: collateralToken,
         },
-      }
+      },
+      { tokenFlows: marginTokenFlows }
     );
   } else {
     // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
@@ -961,7 +1020,8 @@ export async function executeAutonomousLeverUpUpdateMargin(
           amount: amount,
           collateral: collateralToken,
         },
-      }
+      },
+      { tokenFlows: marginTokenFlows }
     );
   }
 
@@ -1069,6 +1129,12 @@ export async function executeAutonomousTransfer(
     });
   }
 
+  // Build token flows: token out, no inflow (transfer leaves the system)
+  const tokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: tokenAddress, amount: amountWei }],
+    inflows: [],
+  };
+
   const result = await executeWithDelegationChain(
     agentId,
     {
@@ -1085,7 +1151,8 @@ export async function executeAutonomousTransfer(
         recipient: to,
         amount: amount,
       },
-    }
+    },
+    { tokenFlows }
   );
 
   if (!result.success) {
@@ -1183,6 +1250,12 @@ export async function executeAutonomousWrap(
     functionName: "deposit",
   });
 
+  // Build token flows: MON out, WMON in (1:1)
+  const tokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: NATIVE_TOKEN_ADDRESS, amount: amountWei }],
+    inflows: [{ token: wmonAddress, amount: amountWei }],
+  };
+
   const result = await executeWithDelegationChain(
     agentId,
     {
@@ -1197,7 +1270,8 @@ export async function executeAutonomousWrap(
         operation: "wrap",
         amount: amount,
       },
-    }
+    },
+    { tokenFlows }
   );
 
   if (!result.success) {
@@ -1249,6 +1323,12 @@ export async function executeAutonomousUnwrap(
     args: [amountWei],
   });
 
+  // Build token flows: WMON out, MON in (1:1)
+  const tokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: wmonAddress, amount: amountWei }],
+    inflows: [{ token: NATIVE_TOKEN_ADDRESS, amount: amountWei }],
+  };
+
   const result = await executeWithDelegationChain(
     agentId,
     {
@@ -1263,7 +1343,8 @@ export async function executeAutonomousUnwrap(
         operation: "unwrap",
         amount: amount,
       },
-    }
+    },
+    { tokenFlows }
   );
 
   if (!result.success) {
@@ -1376,6 +1457,18 @@ export async function executeAutonomousSwap(
     const isNativeSwap = quote.fromToken.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
     const swapValue = isNativeSwap ? (executionData.value || quote.amountInWei) : 0n;
 
+    // Build token flows: fromToken out, toToken in
+    const swapTokenFlows: TokenFlowUpdate = {
+      outflows: [{
+        token: quote.fromToken.address as Address,
+        amount: isNativeSwap ? swapValue : quote.amountInWei,
+      }],
+      inflows: [{
+        token: quote.toToken.address as Address,
+        amount: quote.expectedOutputWei,
+      }],
+    };
+
     let result: AutonomousExecutionResult;
 
     if (isNativeSwap) {
@@ -1396,7 +1489,8 @@ export async function executeAutonomousSwap(
             amountIn: quote.amountIn,
             amountOut: quote.expectedOutput,
           },
-        }
+        },
+        { tokenFlows: swapTokenFlows }
       );
     } else {
       // ERC20 swap - use executeWithApprovalIfNeeded for automatic approval
@@ -1419,7 +1513,8 @@ export async function executeAutonomousSwap(
             amountIn: quote.amountIn,
             amountOut: quote.expectedOutput,
           },
-        }
+        },
+        { tokenFlows: swapTokenFlows }
       );
     }
 
@@ -1611,6 +1706,19 @@ export async function executeAutonomousLeverUpOpen(
     };
   }
 
+  // Build token flows: collateral out, no inflow (position opened)
+  const collateralAddresses: Record<CollateralToken, Address> = {
+    MON: NATIVE_TOKEN_ADDRESS,
+    USDC: USDC_ADDRESS,
+    LVUSD: LVUSD_ADDRESS,
+    LVMON: LVMON_ADDRESS,
+  };
+  const collateralAddress = collateralAddresses[collateral];
+  const openTokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: collateralAddress, amount: marginWei }],
+    inflows: [], // Position opened — no token received
+  };
+
   let result: AutonomousExecutionResult;
 
   if (collateral === "MON") {
@@ -1632,17 +1740,11 @@ export async function executeAutonomousLeverUpOpen(
           margin: params.marginAmount,
           collateral: collateral,
         },
-      }
+      },
+      { tokenFlows: openTokenFlows }
     );
   } else {
     // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
-    // Get token address based on collateral type
-    const collateralAddresses: Record<CollateralToken, Address> = {
-      MON: WMON_ADDRESS,
-      USDC: USDC_ADDRESS,
-      LVUSD: LVUSD_ADDRESS,
-      LVMON: LVMON_ADDRESS,
-    };
     const tokenAddress = collateralAddresses[collateral];
 
     result = await executeWithApprovalIfNeeded(
@@ -1665,7 +1767,8 @@ export async function executeAutonomousLeverUpOpen(
           margin: params.marginAmount,
           collateral: collateral,
         },
-      }
+      },
+      { tokenFlows: openTokenFlows }
     );
   }
 
@@ -1840,6 +1943,19 @@ export async function executeAutonomousLeverUpLimitOrder(
     };
   }
 
+  // Build token flows: collateral out (margin locked for limit order)
+  const limitCollateralAddresses: Record<CollateralToken, Address> = {
+    MON: NATIVE_TOKEN_ADDRESS,
+    USDC: USDC_ADDRESS,
+    LVUSD: LVUSD_ADDRESS,
+    LVMON: LVMON_ADDRESS,
+  };
+  const limitCollateralAddress = limitCollateralAddresses[collateral];
+  const limitTokenFlows: TokenFlowUpdate = {
+    outflows: [{ token: limitCollateralAddress, amount: marginWei }],
+    inflows: [],
+  };
+
   let result: AutonomousExecutionResult;
 
   if (collateral === "MON") {
@@ -1863,17 +1979,12 @@ export async function executeAutonomousLeverUpLimitOrder(
           margin: params.marginAmount,
           collateral: collateral,
         },
-      }
+      },
+      { tokenFlows: limitTokenFlows }
     );
   } else {
     // ERC20 collateral - use executeWithApprovalIfNeeded for automatic approval
-    const collateralAddresses: Record<CollateralToken, Address> = {
-      MON: WMON_ADDRESS,
-      USDC: USDC_ADDRESS,
-      LVUSD: LVUSD_ADDRESS,
-      LVMON: LVMON_ADDRESS,
-    };
-    const tokenAddress = collateralAddresses[collateral];
+    const tokenAddress = limitCollateralAddresses[collateral];
 
     result = await executeWithApprovalIfNeeded(
       agentId,
@@ -1897,7 +2008,8 @@ export async function executeAutonomousLeverUpLimitOrder(
           margin: params.marginAmount,
           collateral: collateral,
         },
-      }
+      },
+      { tokenFlows: limitTokenFlows }
     );
   }
 

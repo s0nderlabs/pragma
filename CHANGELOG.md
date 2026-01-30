@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-01-30
+
+### Added
+- **Ledger-based ERC-20 budget tracking** - Token flow ledger records outflows and inflows per token. Token Groups (MON, USD) enable net-outflow budget enforcement across fungible tokens (e.g. USDC and LVUSD share a USD budget)
+- **Agent definition overhaul** - Kairos (32 tools, 7-phase institutional workflow), Thymos (23 tools, 5-phase momentum workflow), Pragma (46 tools, conditional execution framework)
+- **Autonomous detection matrix** - pragma-core skill routes requests to assistant or autonomous mode based on signal analysis
+- **x402 cost awareness** - Agent spawn prompts include per-tool USDC costs and conservation rules for monitoring loops
+
+### Fixed
+- **USD group budget decimal mismatch** - LVUSD (18 decimals) now normalized to canonical 6-decimal precision before budget comparison
+- **Kairos missing DEX + WMON targets** - Added dexAggregator and WMON to Kairos delegation scope for swap and wrap operations
+- **Agent status lifecycle** - `create_sub_agent` sets initial status to `pending`; agents report `running` on start
+
 ## [0.8.3] - 2026-01-28
 
 ### Added

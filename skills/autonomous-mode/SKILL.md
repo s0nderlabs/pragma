@@ -39,12 +39,18 @@ Autonomous mode allows sub-agents to execute trades WITHOUT Touch ID by using pr
    └── Assigns wallet from pool
    └── Creates sub-delegation (signed by session key)
    └── Funds sub-agent wallet with MON for gas
+   └── Status starts as "pending"
 
-3. Sub-agent executes trades
+3. Sub-agent is spawned via Task tool
+   └── Agent calls report_agent_status("running")
+   └── Status flips: pending → running
+
+4. Sub-agent executes trades
    └── Passes agentId to trading tools
    └── Tool uses delegation chain (no Touch ID)
    └── User's Smart Account executes the trade
    └── Sub-agent pays gas from its wallet
+   └── Token flows recorded in ledger (in + out per token)
 ```
 
 ## Dual-Mode Trading Tools
@@ -72,25 +78,88 @@ These tools support both modes via the `agentId` parameter:
 
 The delegation allows the sub-agent to execute trades on behalf of the user's Smart Account. The trade itself is executed by the Smart Account, not the sub-agent wallet.
 
+## Agent Type Capabilities
+
+Each agent type has a specific delegation scope controlling which contracts/methods it can access:
+
+| Capability | Kairos | Thymos | Pragma |
+|------------|--------|--------|--------|
+| LeverUp perps | YES | NO | YES |
+| nad.fun memecoins | NO | YES | YES |
+| DEX swaps | YES | YES | YES |
+| Wrap/unwrap MON | YES | YES | YES |
+| ERC20 approve | YES | YES | YES |
+
+**Kairos:** Strategic perps trader with swap + wrap capability for collateral management.
+**Thymos:** Fast memecoin trader on nad.fun with DEX swap support.
+**Pragma:** General-purpose agent with full access to all protocols.
+
 ## Sub-Agent Lifecycle
 
 ```
 create_sub_agent
 ├── Assigns wallet from pool
 ├── Creates sub-delegation
-├── Funds wallet with MON (default: 1 MON)
+├── Funds wallet with MON (default: 1 MON; skipped if already funded)
+├── Status: "pending"
 └── Returns agentId (UUID)
+
+Spawn via Task tool:
+├── Agent calls report_agent_status("running")
+├── Status: "running"
+└── Agent begins executing task
 
 During operation:
 ├── Sub-agent passes agentId to trading tools
 ├── Tools execute via delegation chain
+├── Token flows recorded (outflows + inflows per token)
+├── Group budgets enforced (MON group, USD group)
 └── Gas paid from sub-agent wallet
 
 When done:
-├── close_sub_agent
+├── Agent calls report_agent_status("completed" or "failed")
+├── Main Claude calls revoke_sub_agent
 ├── Returns wallet to pool
 └── Remaining gas stays in wallet for next agent
 ```
+
+## Budget Tracking
+
+### MON Budget (On-chain + Off-chain)
+
+- `budgetMon` sets the total MON allocation
+- On-chain enforced via `valueLte` caveat (per-tx limit × maxTrades)
+- Off-chain tracked via `monSpent` and `tokenFlows`
+
+### USD Budget (Off-chain, Ledger-based)
+
+- `budgetUsdc` sets the USD group budget (optional)
+- Tracked via `groupBudgets.USD` using canonical 6-decimal precision
+- Covers both USDC (6 decimals) and LVUSD (18 decimals)
+- Amounts normalized to canonical decimals before comparison
+
+### Token Flow Ledger
+
+Every trade records both outflows (tokens sent) and inflows (tokens received):
+
+```
+tokenFlows: {
+  "0x754704...": { out: "5000000", in: "0" },      // USDC: sent 5, received 0
+  "0xfd44b3...": { out: "0", in: "4950000000..." }  // LVUSD: sent 0, received ~4.95
+}
+```
+
+**Token Groups** share budgets across fungible equivalents:
+- **MON group** (18 dec canonical): MON, WMON, LVMON
+- **USD group** (6 dec canonical): USDC, LVUSD
+
+Net outflow = sum(out - in) across all tokens in group, normalized to canonical decimals.
+
+### Budget Enforcement
+
+- Pre-trade: `checkGroupBudget()` validates the outflow won't exceed group budget
+- Post-trade: `updateTokenFlows()` records actual flows in the ledger
+- Legacy `tokenSpent` and `monSpent` still updated for backwards compatibility
 
 ## Sub-Agent Funding
 
@@ -104,7 +173,7 @@ When done:
 - Transfer: ~0.04 MON
 - Wrap/Unwrap: ~0.04 MON
 
-**1 MON default ≈ 7 swaps**
+**1 MON default = ~7 swaps**
 
 ## Autonomous Mode Limitations
 
@@ -112,6 +181,7 @@ When done:
 2. **Budget is soft-enforced** - Agent tracks spending, contract enforces per-tx limits
 3. **Delegation has expiry** - Sub-agent stops working when delegation expires
 4. **Max trades enforced** - `limitedCalls` caveat limits total operations
+5. **Decimal normalization** - USD group budget uses 6-decimal canonical; LVUSD (18 dec) is normalized before comparison
 
 ## When to Use Which Mode
 
@@ -136,20 +206,22 @@ Extract configuration from user's request:
 
 | Keywords | Agent | Reasoning |
 |----------|-------|-----------|
-| perps, perpetual, leverage, long, short, BTC/ETH position | `kairos` | LeverUp perps specialist |
-| memecoin, nad.fun, meme, token launch, ape, trending | `thymos` | Fast memecoin trader |
-| general, flexible, no specific type | `pragma` | All-purpose |
+| perps, perpetual, leverage, long, short, BTC/ETH position | `kairos` | LeverUp perps + swap + wrap |
+| memecoin, nad.fun, meme, token launch, ape, trending | `thymos` | nad.fun + DEX swap + wrap |
+| general, flexible, no specific type | `pragma` | All-purpose (perps + memecoins + swaps) |
 
-**B. Time Keywords → expiryHours**
+**B. Time Keywords → expiryDays**
 
 | Keywords | Duration |
 |----------|----------|
-| "for an hour", "quick session" | 1-2h |
-| "while I'm away", "AFK" | 4h |
-| "while I sleep", "overnight" | 8h |
-| "for the day", "today" | 12-24h |
+| "for an hour", "quick session" | 1 day (minimum) |
+| "while I'm away", "AFK" | 1 day |
+| "while I sleep", "overnight" | 1 day |
+| "for the day", "today" | 1 day |
 | "this week" | 7 days |
-| No mention | 4h (default) |
+| No mention | 1 day (default) |
+
+Note: `expiryDays` minimum is 1, maximum is 30. The parameter is in days, not hours.
 
 **C. Scope Keywords → maxTrades**
 
@@ -161,13 +233,15 @@ Extract configuration from user's request:
 | "aggressive", "ape everything" | 50+ |
 | No mention | 10 (default) |
 
-**D. Gas Funding → Always 1 MON**
+**D. Gas Funding → Default 1 MON**
+
+`create_sub_agent` checks the pool wallet's existing balance before funding. If the wallet already holds >= `fundAmount`, funding is skipped automatically. Set `fundAmount: 0` to explicitly skip funding.
 
 ### Step 2: Check User Balances
 
 **ALWAYS** check balances first to provide context:
 ```
-get_all_balances → User has X MON, Y USDC, etc.
+get_all_balances → User has X MON, Y USDC, Z LVUSD, etc.
 ```
 
 ### Step 3: Ask User for Budget
@@ -189,6 +263,22 @@ Description: |
   Unused budget stays in your wallet.
 ```
 
+If the user's task involves USD-denominated collateral (e.g., LeverUp with LVUSD/USDC), also ask for USDC budget:
+
+```
+Header: "USD Budget"
+Question: "How much USD collateral can this agent use?"
+Options:
+  - 5 USDC
+  - 10 USDC
+  - 25 USDC
+  - Custom amount
+Description: |
+  Your balance: X USDC + Y LVUSD
+
+  This covers both USDC and LVUSD (they share the USD budget).
+```
+
 ### Step 4: Present Tailored Configuration
 
 Show the complete config for validation:
@@ -204,9 +294,9 @@ Description: |
   TASK: [summarize user's task]
 
   Agent: [type] ([one-line description])
-  Budget: [X] MON
-  Duration: [Y] hours
-  Max trades: [Z]
+  Budget: [X] MON + [Y] USDC (if applicable)
+  Duration: [Z] days
+  Max trades: [N]
   Gas: 1 MON
 
   Why: [brief reasoning for config choices]
@@ -230,10 +320,18 @@ Then ask ONE follow-up for the specific value.
 
 ### Step 6: Pre-flight Checks
 
-Before creating:
+Before creating the sub-agent:
 
-1. **Root delegation:** Will require Touch ID if first time or expired
+1. **Root delegation:** Call `check_delegation_status()` (no agentId)
+   - If `valid: true` and enough `remaining` calls → proceed
+   - If `valid: false`, expired, or insufficient calls → call `create_root_delegation` (requires Touch ID)
 2. **Session key balance:** Need 1 MON (gas) + ~0.05 MON (delegation tx)
+   - Call `check_session_key_balance` to verify
+3. **x402 USDC balance (if x402 mode):** Market intelligence tools consume USDC per call
+   - Call `check_session_key_balance` and check USDC balance
+   - Minimum recommended: 0.50 USDC for monitoring agents, 0.20 USDC for quick trades
+   - If USDC is low, warn user: "Session key has X USDC. Market intelligence tools cost $0.005-0.02 per call. Monitoring agents may exhaust this in ~Y hours."
+   - Soft warning only, not a blocker -- user decides whether to top up
 
 ### Step 7: Create Sub-Agent
 
@@ -241,18 +339,20 @@ Before creating:
 create_sub_agent(
   agentType: [inferred],
   budgetMon: [user specified],
+  budgetUsdc: [user specified, optional],
   maxTrades: [inferred],
-  expiryDays: [calculated from hours],
-  fundAmount: 1  // Always 1 MON
+  expiryDays: [calculated],
+  fundAmount: 1  // Default 1 MON (skipped if wallet already funded)
 )
 → Returns agentId (pragma agent ID)
+→ Agent status starts as "pending"
 ```
 
 ### Step 8: Spawn via Task Tool
 
 ```typescript
 Task({
-  subagent_type: "pragma:kairos", // or thymos, pragma
+  subagent_type: "pragma:kairos", // or pragma:thymos, pragma:pragma
   prompt: `
     You are an autonomous trading agent.
 
@@ -263,6 +363,21 @@ Task({
     2. NEVER trigger Touch ID - if prompted, you forgot agentId
     3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
     4. Stop when budget depleted or max trades reached
+    5. Market intelligence tools cost USDC via x402 (sorted by cost):
+       - market_get_critical_news: $0.02
+       - market_search_news: $0.015
+       - market_get_currency_strength: $0.01
+       - market_get_economic_events: $0.01
+       - market_get_chart: $0.005
+       - RPC calls: $0.001-0.002
+       Be conservative with expensive calls. In monitoring loops:
+       - Prefer chart ($0.005) over news ($0.02) for routine checks
+       - Run full macro scans only at start and before entries, not every cycle
+       - Limit full analysis cycles to every 15-20 minutes
+
+    FIRST ACTION - MANDATORY:
+    Call report_agent_status(agentId: "${agentId}", status: "running")
+    This flips your status from "pending" to "running".
 
     BEFORE TERMINATING - MANDATORY:
     You MUST call report_agent_status before finishing:
@@ -280,7 +395,7 @@ Task({
 
     TASK: ${userTask}
 
-    BUDGET: ${budget} MON
+    BUDGET: ${budgetMon} MON + ${budgetUsdc} USDC
     MAX TRADES: ${maxTrades}
     EXPIRES: ${expiresAt}
   `,
@@ -335,15 +450,17 @@ The `taskAgentId` comes from `get_sub_agent_state` (stored in Step 9).
 
 ### Listing Agents
 ```
-list_sub_agents(status: "all" | "running" | "paused" | "completed" | "failed" | "revoked")
+list_sub_agents(status: "all" | "pending" | "running" | "paused" | "completed" | "failed" | "revoked")
 - Shows all agents with status, budget remaining, trades executed, taskAgentId
 - Filter by status to find specific agents
+- Summary includes pending count
 ```
 
 ### Checking Agent State
 ```
 get_sub_agent_state(subAgentId, taskAgentId?)
 - Full details: wallet balance, delegation, budget breakdown, recent trades
+- Includes tokenFlows (per-token in/out/net) and groupBudgets (per-group utilization)
 - Pass taskAgentId to store it for resume capability
 ```
 
@@ -351,7 +468,8 @@ get_sub_agent_state(subAgentId, taskAgentId?)
 ```
 report_agent_status(agentId, status, reason?)
 - Sub-agents call this to report their status
-- Required for: completed, failed, paused, running
+- Required statuses: running, paused, completed, failed
+- "running" = flip from pending when agent starts
 - "completed" = goal achieved, "failed" = goal not achieved
 ```
 
@@ -389,13 +507,36 @@ revoke_sub_agent(subAgentId, sweepBalance?)
 
 | Status | Meaning | Who Sets It |
 |--------|---------|-------------|
-| `running` | Agent is actively working on its task | Sub-agent (default) |
+| `pending` | Created but not yet started (Task not spawned or agent hasn't reported running) | System (create_sub_agent) |
+| `running` | Agent is actively working on its task | Sub-agent (report_agent_status) |
 | `paused` | Temporarily stopped, can resume (e.g., low gas) | Sub-agent |
 | `completed` | User's goal was **achieved** | Sub-agent |
 | `failed` | User's goal was **NOT achieved** (any reason) | Sub-agent or system |
 | `revoked` | Main Claude stopped/cleaned up the agent | Main Claude |
 
-**Key Rule:** `completed` means SUCCESS - the user's goal was reached. All other terminations where the goal wasn't achieved use `failed`.
+**Key Rules:**
+- `pending` is the initial status set by `create_sub_agent`
+- Agents MUST call `report_agent_status("running")` as their first action
+- `completed` means SUCCESS - the user's goal was reached
+- All other terminations where the goal wasn't achieved use `failed`
+
+### Status Flow
+
+```
+create_sub_agent → "pending"
+                       │
+         agent starts  ▼
+report_agent_status → "running"
+                       │
+              ┌────────┼────────┐
+              ▼        ▼        ▼
+         "completed" "failed" "paused"
+                                │
+                     fund + resume
+                                │
+                                ▼
+                           "running"
+```
 
 ### Reporting Status
 
@@ -410,6 +551,7 @@ report_agent_status(
 ```
 
 **Examples:**
+- `running` + (no reason needed, first action after spawn)
 - `completed` + "Target reached - opened BTC long at $95,200"
 - `failed` + "Delegation expired before target was hit"
 - `failed` + "Max trades reached (10/10) - target not achieved"
@@ -418,7 +560,7 @@ report_agent_status(
 
 ### Lazy Expiry Detection
 
-When any tool loads an agent's state, it automatically checks if the delegation has expired. If expired and status is still `running` or `paused`, it's auto-updated to `failed`.
+When any tool loads an agent's state, it automatically checks if the delegation has expired. If expired and status is still `pending`, `running`, or `paused`, it's auto-updated to `failed`.
 
 ### Cleanup Responsibility Matrix
 
@@ -430,6 +572,7 @@ When any tool loads an agent's state, it automatically checks if the delegation 
 | Budget depleted | Sub-agent | `failed` | Main Claude |
 | Low gas (recoverable) | Sub-agent | `paused` | Fund → Resume |
 | User kills process | N/A | unchanged | Main Claude |
+| Never spawned | N/A | `pending` | Main Claude |
 
 ### Agent Cleanup Flow
 
@@ -478,18 +621,23 @@ When a sub-agent pauses due to low gas:
 **User:** "Monitor BTC and open a long if it breaks $95k, I'll be AFK for a few hours"
 
 **Claude analyzes:**
-- "long" → kairos (perps)
-- "AFK for a few hours" → 4h duration
+- "long" → kairos (perps + swap + wrap)
+- "AFK for a few hours" → 1 day expiry
 - "if it breaks $95k" → single position → 5 max trades
 
 **Claude:**
-1. `get_all_balances` → User has 50 MON
+1. `get_all_balances` → User has 50 MON, 10 LVUSD
 2. `AskUserQuestion` → "How much MON?" → User: "10 MON"
-3. `AskUserQuestion` → "Create kairos agent: 10 MON budget, 4h, 5 trades?" → User: "Approve"
-4. `create_sub_agent(kairos, 10 MON, 5 trades, 4h)` → agentId: "xyz-123"
-5. `Task(prompt: "Monitor BTC...")` → taskAgentId: "a32dec1"
-6. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1)` → stores for resume
-7. Report: "Kairos agent monitoring BTC for breakout above $95k."
+3. `AskUserQuestion` → "USD budget for collateral?" → User: "10 USDC"
+4. `AskUserQuestion` → "Create kairos agent: 10 MON + 10 USDC budget, 1 day, 5 trades?" → User: "Approve"
+5. `check_delegation_status()` → valid, 80 calls remaining → proceed
+6. `create_sub_agent(kairos, 10 MON, 10 USDC, 5 trades, 1 day)` → agentId: "xyz-123", status: "pending"
+7. `Task(prompt: "Monitor BTC...")` → taskAgentId: "a32dec1"
+8. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1)` → stores for resume
+9. Report: "Kairos agent monitoring BTC for breakout above $95k."
+
+**Agent starts:**
+1. `report_agent_status("xyz-123", "running")` → pending → running
 
 **Later (gas depleted):**
 

@@ -14,8 +14,11 @@ import {
   loadTrades,
   loadLoopConfig,
   getAllTokenSpending,
+  getAllTokenFlows,
+  getGroupNetOutflow,
   NATIVE_TOKEN_ADDRESS,
   USDC_ADDRESS,
+  TOKEN_GROUPS,
 } from "../core/subagent/index.js";
 import { formatTimeRemaining, formatLocalTimestamp } from "../core/utils/index.js";
 import { withRetry } from "../core/utils/retry.js";
@@ -67,6 +70,23 @@ interface GetSubAgentStateResult {
         spent: string;
         limit: string | null;
         remaining: string | null;
+      }>;
+      // Ledger-based token flows (in + out per token)
+      tokenFlows?: Array<{
+        address: string;
+        symbol: string;
+        out: string;
+        in: string;
+        net: string; // positive = profit, negative = cost
+        group: string | null;
+      }>;
+      // Group-level budget enforcement
+      groupBudgets?: Array<{
+        group: string;
+        budget: string;
+        netOutflow: string;
+        remaining: string;
+        utilization: string; // percentage
       }>;
     };
     trades: {
@@ -188,8 +208,12 @@ async function getSubAgentStateHandler(
     const TOKEN_INFO: Record<string, { symbol: string; decimals: number }> = {
       [NATIVE_TOKEN_ADDRESS.toLowerCase()]: { symbol: "MON", decimals: 18 },
       [USDC_ADDRESS.toLowerCase()]: { symbol: "USDC", decimals: 6 },
+      "0x754704bc059f8c67012fed69bc8a327a5aafb603": { symbol: "USDC", decimals: 6 }, // Actual Monad mainnet USDC
       "0x0f0bdebf0f83cd1ee3974779bcb7315f9808c714": { symbol: "USDT", decimals: 6 },
       "0xe0590015a873bf326bd645c3e1266d4db41c4e6b": { symbol: "WMON", decimals: 18 },
+      "0x3bd359c1119da7da1d913d1c4d2b7c461115433a": { symbol: "WMON", decimals: 18 },
+      "0xfd44b35139ae53fff7d8f2a9869c503d987f00d1": { symbol: "LVUSD", decimals: 18 },
+      "0x91b81bfbe3a747230f0529aa28d8b2bc898e6d56": { symbol: "LVMON", decimals: 18 },
     };
 
     // Format token spending for output
@@ -207,6 +231,68 @@ async function getSubAgentStateHandler(
           };
         })
       : [];
+
+    // Format token flows for output (ledger-based tracking)
+    const tokenFlowsMap = await getAllTokenFlows(params.subAgentId);
+    const tokenFlowsList = tokenFlowsMap
+      ? Object.entries(tokenFlowsMap)
+          .filter(([, flow]) => flow.out > 0n || flow.in > 0n) // Only show tokens with activity
+          .map(([addr, flow]) => {
+            const { symbol, decimals } = TOKEN_INFO[addr] || { symbol: addr.slice(0, 10), decimals: 18 };
+            const fmt = (v: bigint): string => `${formatUnits(v < 0n ? -v : v, decimals)} ${symbol}`;
+            return {
+              address: addr,
+              symbol,
+              out: fmt(flow.out),
+              in: fmt(flow.in),
+              net: `${flow.net >= 0n ? "+" : "-"}${fmt(flow.net >= 0n ? flow.net : -flow.net)}`,
+              group: flow.group,
+            };
+          })
+      : undefined;
+
+    // Compute group budget status
+    const groupBudgetsList: Array<{
+      group: string;
+      budget: string;
+      netOutflow: string;
+      remaining: string;
+      utilization: string;
+    }> = [];
+
+    // Always include MON group
+    const monGroupNetOutflow = getGroupNetOutflow(state, "MON");
+    const monGroupBudget = state.budget.groupBudgets?.MON
+      ? BigInt(state.budget.groupBudgets.MON)
+      : monAllocated;
+    const monGroupRemaining = monGroupBudget - monGroupNetOutflow;
+    const monGroupUtilPct = monGroupBudget > 0n
+      ? Number((monGroupNetOutflow * 10000n) / monGroupBudget) / 100
+      : 0;
+    groupBudgetsList.push({
+      group: "MON",
+      budget: formatEther(monGroupBudget) + " MON",
+      netOutflow: formatEther(monGroupNetOutflow) + " MON",
+      remaining: formatEther(monGroupRemaining) + " MON",
+      utilization: `${monGroupUtilPct.toFixed(1)}%`,
+    });
+
+    // Include USD group if budget is set
+    if (state.budget.groupBudgets?.USD) {
+      const usdBudget = BigInt(state.budget.groupBudgets.USD);
+      const usdNetOutflow = getGroupNetOutflow(state, "USD");
+      const usdRemaining = usdBudget - usdNetOutflow;
+      const usdUtilPct = usdBudget > 0n
+        ? Number((usdNetOutflow * 10000n) / usdBudget) / 100
+        : 0;
+      groupBudgetsList.push({
+        group: "USD",
+        budget: formatUnits(usdBudget, 6) + " USD",
+        netOutflow: formatUnits(usdNetOutflow, 6) + " USD",
+        remaining: formatUnits(usdRemaining, 6) + " USD",
+        utilization: `${usdUtilPct.toFixed(1)}%`,
+      });
+    }
 
     // Load loop config
     const loopConfig = await loadLoopConfig(params.subAgentId);
@@ -248,6 +334,8 @@ async function getSubAgentStateHandler(
           monSpent: formatEther(monSpent) + " MON",
           monRemaining: formatEther(monAllocated - monSpent) + " MON",
           tokenSpending,
+          tokenFlows: tokenFlowsList,
+          groupBudgets: groupBudgetsList.length > 0 ? groupBudgetsList : undefined,
         },
         trades: {
           executed: state.trades.executed,
