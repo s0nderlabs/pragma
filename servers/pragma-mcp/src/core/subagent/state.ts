@@ -10,6 +10,7 @@ import {
   appendFileSync,
   readdirSync,
   rmSync,
+  renameSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
@@ -649,7 +650,7 @@ export async function listAgentStates(): Promise<SubAgentState[]> {
   const states: SubAgentState[] = [];
 
   for (const entry of entries) {
-    if (entry.isDirectory()) {
+    if (entry.isDirectory() && entry.name !== "archive") {
       const state = await loadAgentState(entry.name);
       if (state) {
         states.push(state);
@@ -661,12 +662,33 @@ export async function listAgentStates(): Promise<SubAgentState[]> {
 }
 
 /**
- * Delete agent state directory
+ * Archive agent state directory.
+ * Moves ~/.pragma/agents/<id>/ to ~/.pragma/agents/archive/<id>/
+ * so trade history and lifecycle data are preserved for review.
+ *
+ * Named `deleteAgentState` for backwards compatibility with callers.
  */
 export async function deleteAgentState(agentId: string): Promise<void> {
   const agentDir = getAgentDir(agentId);
 
-  if (existsSync(agentDir)) {
+  if (!existsSync(agentDir)) return;
+
+  const archiveDir = path.join(getAgentsDir(), "archive");
+  if (!existsSync(archiveDir)) {
+    mkdirSync(archiveDir, { recursive: true });
+  }
+
+  const archiveDest = path.join(archiveDir, agentId);
+
+  // If archive already exists for this ID (re-revoke), remove old archive first
+  if (existsSync(archiveDest)) {
+    rmSync(archiveDest, { recursive: true, force: true });
+  }
+
+  try {
+    renameSync(agentDir, archiveDest);
+  } catch {
+    // If rename fails (cross-device etc), fall back to delete
     rmSync(agentDir, { recursive: true, force: true });
   }
 }

@@ -523,7 +523,7 @@ export async function revokeRootDelegation(): Promise<{
       }
     }
 
-    // Delete agent state directory
+    // Archive agent state directory
     try {
       await deleteAgentState(agent.id);
       subAgentsCleanedUp++;

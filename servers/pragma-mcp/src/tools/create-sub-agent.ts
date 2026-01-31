@@ -59,11 +59,11 @@ const CreateSubAgentSchema = z.object({
       "MON budget for this sub-agent. Used for valueLte calculation. " +
         "The total budget is valueLtePerTx × maxTrades."
     ),
-  budgetUsdc: z
+  budgetUsd: z
     .number()
     .min(0)
     .optional()
-    .describe("USDC budget (soft limit, agent self-tracks). Default: 0"),
+    .describe("USD group budget covering USDC + LVUSD (soft limit, agent self-tracks). Default: 0"),
   expiryDays: z
     .number()
     .min(1)
@@ -139,7 +139,7 @@ interface CreateSubAgentResult {
     agentType: string;
     budget: {
       mon: string;
-      usdc: string;
+      usd: string;
       perTransaction: string;
     };
     maxTrades: number;
@@ -346,16 +346,16 @@ async function createSubAgentHandler(
         message: delegationResult.typedData.message,
       });
 
-      // Create agent state with optional USDC limit
+      // Create agent state with optional USD group limit
       const tokenLimits: Record<string, bigint> | undefined =
-        params.budgetUsdc && params.budgetUsdc > 0
-          ? { [USDC_ADDRESS.toLowerCase()]: BigInt(Math.floor(params.budgetUsdc * 1e6)) }
+        params.budgetUsd && params.budgetUsd > 0
+          ? { [USDC_ADDRESS.toLowerCase()]: BigInt(Math.floor(params.budgetUsd * 1e6)) }
           : undefined;
 
       // Set group budgets for ledger-based budget enforcement
       const groupBudgets: Record<string, bigint> | undefined =
-        params.budgetUsdc && params.budgetUsdc > 0
-          ? { USD: BigInt(Math.floor(params.budgetUsdc * 1e6)) }
+        params.budgetUsd && params.budgetUsd > 0
+          ? { USD: BigInt(Math.floor(params.budgetUsd * 1e6)) }
           : undefined;
 
       await createAgentState({
@@ -508,7 +508,7 @@ async function createSubAgentHandler(
           agentType: params.agentType,
           budget: {
             mon: params.budgetMon + " MON",
-            usdc: (params.budgetUsdc || 0) + " USDC",
+            usd: (params.budgetUsd || 0) + " USD",
             perTransaction: formatEther(valueLtePerTx) + " MON/tx",
           },
           maxTrades: params.maxTrades,

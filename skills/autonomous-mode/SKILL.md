@@ -133,9 +133,9 @@ When done:
 
 ### USD Budget (Off-chain, Ledger-based)
 
-- `budgetUsdc` sets the USD group budget (optional)
+- `budgetUsd` sets the USD group budget (covers USDC + LVUSD, optional)
 - Tracked via `groupBudgets.USD` using canonical 6-decimal precision
-- Covers both USDC (6 decimals) and LVUSD (18 decimals)
+- Both USDC (6 decimals) and LVUSD (18 decimals) normalized before comparison
 - Amounts normalized to canonical decimals before comparison
 
 ### Token Flow Ledger
@@ -395,7 +395,7 @@ Before creating the sub-agent:
 create_sub_agent(
   agentType: [inferred],
   budgetMon: [user specified],
-  budgetUsdc: [user specified, optional],
+  budgetUsd: [user specified, optional],
   maxTrades: [inferred],
   expiryDays: [calculated],
   fundAmount: 1,
@@ -463,7 +463,7 @@ Task({
 
     TASK: ${userTask}
 
-    BUDGET: ${budgetMon} MON + ${budgetUsdc} USDC
+    BUDGET: ${budgetMon} MON + ${budgetUsd} USD
     MAX TRADES: ${maxTrades}
     EXPIRES: ${expiresAt}
   `,
@@ -561,7 +561,7 @@ fund_sub_agent(subAgentId, amountMon)
 ### Cleaning Up an Agent
 ```
 revoke_sub_agent(subAgentId, sweepBalance?)
-- Deletes agent state (no history kept for revoked agents)
+- Archives agent state to `~/.pragma/agents/archive/` (trade history preserved)
 - sweepBalance: false (default) keeps gas in wallet for reuse
              true sweeps gas back to session key
 - Returns wallet to pool for reuse
@@ -655,7 +655,7 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
 
 3. Clean up resources:
    revoke_sub_agent(subAgentId, sweepBalance: false)
-   → Deletes agent state
+   → Archives agent state
    → Releases wallet to pool
    → Keeps gas in wallet for reuse
 

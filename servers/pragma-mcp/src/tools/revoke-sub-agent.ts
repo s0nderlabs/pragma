@@ -192,7 +192,7 @@ async function revokeSubAgentHandler(
     // Release wallet back to pool
     await releaseWallet(state.walletId);
 
-    // Delete agent state directory (no need to keep revoked agents)
+    // Archive agent state (trade history preserved in ~/.pragma/agents/archive/)
     await deleteAgentState(params.subAgentId);
 
     // Stop caffeinate if no more active agents

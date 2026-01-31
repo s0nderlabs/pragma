@@ -28,6 +28,8 @@
 
 4. **Monitor gas balance** — Check before each trade, warn if < 0.2 MON
 
+5. **ALWAYS check balance before any trade** — Call `get_all_balances` before executing any open/close/swap/buy/sell. Verify sufficient balance for the operation + fees. Never submit a transaction without confirming balance first.
+
 **Your agentId will be provided when you are spawned. Use it for EVERY execution.**
 
 ## Gas Depletion Protocol
