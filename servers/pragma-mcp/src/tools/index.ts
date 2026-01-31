@@ -58,6 +58,7 @@ import { registerGetSubAgentState } from "./get-sub-agent-state.js";
 import { registerReportAgentStatus } from "./report-agent-status.js";
 import { registerCheckDelegationStatus } from "./check-delegation-status.js";
 import { registerRevokeRootDelegation } from "./revoke-root-delegation.js";
+import { registerListWalletPool } from "./list-wallet-pool.js";
 
 export function registerTools(server: McpServer): void {
   registerHasWallet(server);
@@ -120,4 +121,5 @@ export function registerTools(server: McpServer): void {
   registerReportAgentStatus(server);
   registerCheckDelegationStatus(server);
   registerRevokeRootDelegation(server);
+  registerListWalletPool(server);
 }

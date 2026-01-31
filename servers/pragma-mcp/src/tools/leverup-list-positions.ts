@@ -22,6 +22,8 @@ interface LeverUpListPositionsResult {
       size: string;
       margin: string;
       entryPrice: string;
+      stopLoss: string;
+      takeProfit: string;
       unrealizedPnL: string;
       pnlPercentage: string;
       liqPrice: string;
@@ -80,6 +82,8 @@ async function leverupListPositionsHandler(
       size: formatUnits(p.position.qty, 10),
       margin: formatUnits(p.position.margin, 18),
       entryPrice: `$${formatUnits(p.position.entryPrice, 18)}`,
+      stopLoss: p.position.stopLoss > 0n ? `$${Number(formatUnits(p.position.stopLoss, 18)).toFixed(2)}` : "Not set",
+      takeProfit: p.position.takeProfit > 0n ? `$${Number(formatUnits(p.position.takeProfit, 18)).toFixed(2)}` : "Not set",
       unrealizedPnL: p.analysis.unrealizedPnL,
       pnlPercentage: p.analysis.pnlPercentage,
       liqPrice: `$${p.analysis.liqPrice}`,
