@@ -88,7 +88,7 @@ export const ALLOWED_TARGETS_ENFORCER = "0x7F20f61b1f09b08D970938F6fa563634d65c4
 
 /**
  * ValueLteEnforcer address
- * Validates msg.value <= terms (max value per tx)
+ * Validates execution.value <= terms (max native MON value per delegation call)
  * We filter this out from scope-generated caveats to avoid 0-value issues
  */
 export const VALUE_LTE_ENFORCER = "0x92Bf12322527cAA612fd31a0e810472BBB106A8F" as Address;

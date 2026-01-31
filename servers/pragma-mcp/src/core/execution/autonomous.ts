@@ -278,7 +278,9 @@ export async function executeWithDelegationChain(
       if (monSpent + execution.value > monAllocated) {
         return {
           success: false,
-          error: `Insufficient MON budget. Allocated: ${monAllocated}, Spent: ${monSpent}, Required: ${execution.value}`,
+          error: `Insufficient MON budget. Allocated: ${monAllocated}, Spent: ${monSpent}, Required: ${execution.value}. ` +
+            `Note: LeverUp trades require native MON for Pyth oracle fees even with ERC20 collateral. ` +
+            `Ensure budgetMon >= 1 when creating sub-agents.`,
         };
       }
 

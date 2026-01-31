@@ -155,7 +155,7 @@ These caveats are embedded in the delegation and enforced by smart contracts:
 | `ValueLteEnforcer` | `maxValuePerTx` (user-specified) | `budgetMon / maxCalls` (derived) |
 | `LogicalOrWrapperEnforcer` | All protocols | Agent-specific protocols |
 
-`ValueLteEnforcer` checks `msg.value <= limit` per `redeemDelegations()` call. It only affects native MON sends (`msg.value`), not ERC-20 transfers. Setting it to 0 blocks all native MON transactions while allowing USD-only strategies.
+`ValueLteEnforcer` checks `execution.value <= limit` per `redeemDelegations()` call — it validates the value field inside the delegation's Execution struct, not the outer tx's `msg.value`. It only affects native MON sends, not ERC-20 transfers. Setting it to 0 blocks ALL native MON transactions, including Pyth oracle fees required by LeverUp (even with ERC20 collateral like LVUSD/USDC). **Important:** `budgetMon` must be >= 1 for any sub-agent that may use LeverUp, and root `maxValuePerTx` must be > 0.
 
 ### Off-Chain Enforcement (Soft Limits)
 
@@ -220,6 +220,7 @@ Net outflow = sum(out - in) across all tokens in group, normalized to canonical 
 3. **Delegation has expiry** - Sub-agent stops working when delegation expires
 4. **Max calls enforced** - `limitedCalls` caveat limits total delegation calls (trades + approvals)
 5. **Decimal normalization** - USD group budget uses 6-decimal canonical; LVUSD (18 dec) is normalized before comparison
+6. **LeverUp requires budgetMon >= 1** - All LeverUp trades (even with ERC20 collateral like LVUSD/USDC) send a Pyth oracle fee as `execution.value`. With `budgetMon: 0`, both the off-chain budget check and on-chain `ValueLteEnforcer` block the trade. Only thymos agents (no LeverUp) can use `budgetMon: 0`
 
 ## When to Use Which Mode
 
@@ -338,8 +339,10 @@ Options:
 Description: |
   Your balance: X MON
 
-  This is the max MON trading capital. 0 = block all native MON trades
-  (for USD-only strategies like USDC/LVUSD collateral).
+  This is the max MON trading capital. 0 = block all native MON trades.
+  ⚠ 0 MON cannot be used with LeverUp (kairos/pragma agents) —
+  LeverUp requires native MON for Pyth oracle fees even with
+  ERC20 collateral (LVUSD/USDC). Use at least 1 MON for LeverUp.
 ```
 
 If the user's task involves USD-denominated collateral (e.g., LeverUp with LVUSD/USDC), also ask for USDC budget:

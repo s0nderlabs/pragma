@@ -49,7 +49,9 @@ const CreateRootDelegationSchema = z.object({
     .describe(
       "Maximum native MON per single transaction. " +
         "On-chain enforced via ValueLteEnforcer. " +
-        "0 = block all native MON transactions (for USD-only strategies). Default: 10"
+        "0 = block ALL native MON transactions including Pyth oracle fees " +
+        "(prevents LeverUp even with ERC20 collateral). " +
+        "Set > 0 if any agent will use LeverUp or native MON. Default: 10"
     ),
   maxCalls: z
     .number()
@@ -162,7 +164,7 @@ async function createRootDelegationHandler(
     const chainId = config.network.chainId;
 
     // ValueLteEnforcer per-tx limit: user-specified maxValuePerTx
-    // This caps msg.value (native MON) per redeemDelegations() call on-chain
+    // This caps execution.value (native MON) per redeemDelegations() call on-chain
     const valueLtePerTx = parseEther(params.maxValuePerTx.toString());
 
     // Validate parameters

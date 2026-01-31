@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.12] - 2026-01-31
+
+### Fixed
+- **LeverUp Pyth oracle fee requires budgetMon >= 1** - LeverUp trades send a Pyth oracle fee as `execution.value` even for ERC20 collateral (LVUSD/USDC). With `budgetMon: 0`, both the off-chain budget check and on-chain `ValueLteEnforcer` blocked these trades. Now enforced at sub-agent creation: kairos/pragma agents require `budgetMon >= 1`, thymos agents can still use 0 for ERC20-only strategies
+- **ValueLteEnforcer documentation corrected** - Enforcer checks `execution.value` (the value field inside the delegation's Execution struct), not the outer tx's `msg.value`. Fixed comments across `root.ts`, `subagent.ts`, `constants.ts`, `create-root-delegation.ts`, and `SKILL.md`
+- **Improved MON budget error message** - When off-chain budget check rejects a trade, error now explains that LeverUp needs native MON for Pyth oracle fees
+
 ## [0.8.11] - 2026-01-31
 
 ### Added

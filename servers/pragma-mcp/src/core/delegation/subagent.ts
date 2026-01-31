@@ -327,7 +327,7 @@ export function createSubDelegation(params: SubDelegationParams): SubDelegationR
   delegation.caveats.unshift(logicalOrCaveat);
 
   // Re-add ValueLteEnforcer with the sub-agent's per-tx limit (budgetMon / maxCalls)
-  // This caps msg.value (native MON) per redeemDelegations() call
+  // This caps execution.value (native MON) per redeemDelegations() call
   delegation.caveats.push({
     enforcer: VALUE_LTE_ENFORCER,
     terms: encodeAbiParameters([{ type: "uint256" }], [valueLtePerTx]),
