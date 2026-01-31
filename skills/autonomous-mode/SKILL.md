@@ -514,6 +514,178 @@ This enables resuming the agent after gas top-up.
 
 ---
 
+## Multi-Agent Spawn (Worked Example)
+
+When the user's task spans multiple protocols or strategies, split into specialized agents.
+
+### Example Prompt
+
+> "Trade perps and memecoins overnight with 50 MON and 15 USDC"
+
+### Step 0: Check Existing Agents
+
+Same as single-agent flow — `list_sub_agents(status: "all")`, handle orphans.
+
+### Step 1: Analyze Intent
+
+Two distinct strategies detected:
+- **Perps** (LeverUp) → Kairos agent
+- **Memecoins** (nad.fun) → Thymos agent
+
+### Step 2: Check Balances
+
+```
+get_all_balances → User has 80 MON, 20 USDC, 5 LVUSD
+```
+
+### Step 3: Ask User for Budget Split
+
+Use `AskUserQuestion` with multiple tabs to confirm the split:
+
+```
+Tab 1:
+  Header: "Budget Split"
+  Question: "How should we split your 50 MON between agents?"
+  Options:
+    - 30 MON Kairos / 20 MON Thymos (Recommended)
+    - 25 MON / 25 MON (Equal)
+    - 40 MON Kairos / 10 MON Thymos
+  Description: |
+    Kairos (perps) needs more MON for leverage margin.
+    Thymos (memecoins) needs less — nad.fun buys are smaller.
+
+Tab 2:
+  Header: "USD Budget"
+  Question: "How much USD collateral for Kairos perps?"
+  Options:
+    - 15 USDC (all to Kairos)
+    - 10 USDC
+    - 5 USDC
+  Description: |
+    Your balance: 20 USDC + 5 LVUSD
+    Thymos trades in MON on nad.fun — doesn't need USD budget.
+
+Tab 3:
+  Header: "Allowed Tokens"
+  Question: "Restrict which tokens agents can spend?"
+  Options:
+    - Kairos: MON+USD, Thymos: MON only (Recommended)
+    - Both unrestricted
+  Description: |
+    Kairos needs both MON (margin) and USD (LVUSD/USDC collateral).
+    Thymos only uses MON for nad.fun buys.
+```
+
+### Step 4: Present Combined Configuration
+
+```
+Header: "Multi-Agent Setup"
+Question: "Create both agents with this configuration?"
+Options:
+  - Approve and start (Recommended)
+  - Adjust settings
+  - Cancel
+Description: |
+  TASK: Trade perps + memecoins overnight
+
+  Agent 1: Kairos (LeverUp perps)
+    Budget: 30 MON + 15 USDC
+    Allowed: MON + USD groups
+    Max trades: 20, Duration: 1 day
+    Loop: continuous
+
+  Agent 2: Thymos (nad.fun memecoins)
+    Budget: 20 MON
+    Allowed: MON group only
+    Max trades: 30, Duration: 1 day
+    Loop: continuous
+
+  Root delegation needs: 50 maxCalls (20 + 30)
+  Gas: 1 MON each (from session key)
+```
+
+### Step 5: Pre-flight — Root Delegation Sizing
+
+**Key:** Root delegation `maxCalls` must cover ALL agents combined.
+
+```
+check_delegation_status()
+→ If valid and remaining >= 50 → proceed
+→ If remaining < 50 or expired →
+    create_root_delegation(
+      budgetMon: 50,
+      expiryDays: 7,
+      maxTrades: 60  ← headroom above 50 for gas ops
+    )
+    → Requires Touch ID (once for both agents)
+```
+
+### Step 6: Sequential Spawn
+
+Create agents one at a time. If agent 1 fails, don't create agent 2.
+
+**Agent 1 — Kairos:**
+```
+create_sub_agent(
+  agentType: "kairos",
+  budgetMon: 30,
+  budgetUsd: 15,
+  allowedGroups: ["MON", "USD"],
+  maxTrades: 20,
+  expiryDays: 1,
+  fundAmount: 1,
+  loopType: "continuous",
+  mission: "Trade perps on LeverUp. Budget: 30 MON + 15 USDC. Goal: profit overnight.",
+  maxIterations: 0
+)
+→ Returns kairosAgentId
+```
+
+Spawn Kairos via Task tool (Step 8 from single-agent flow).
+
+**Agent 2 — Thymos:**
+```
+create_sub_agent(
+  agentType: "thymos",
+  budgetMon: 20,
+  allowedGroups: ["MON"],
+  maxTrades: 30,
+  expiryDays: 1,
+  fundAmount: 1,
+  loopType: "continuous",
+  mission: "Trade memecoins on nad.fun. Budget: 20 MON. Goal: profit overnight.",
+  maxIterations: 0
+)
+→ Returns thymosAgentId
+```
+
+Spawn Thymos via Task tool.
+
+### Step 7: Report to User
+
+```
+Both agents are running:
+
+  Kairos (perps): 30 MON + 15 USDC, 20 trades, expires in 1 day
+  Thymos (memecoins): 20 MON, 30 trades, expires in 1 day
+
+  Root delegation: 50/60 calls allocated
+
+  Use list_sub_agents to check status.
+  Use revoke_sub_agent to stop an individual agent.
+  Use revoke_root_delegation to stop everything.
+```
+
+### Multi-Agent Rules
+
+1. **One root delegation, many sub-agents** — Size `maxCalls` for the sum of all agents plus headroom
+2. **Sequential creation** — Create and spawn one agent at a time; abort remaining if one fails
+3. **Independent operation** — Agents cannot communicate with each other (no TeammateTool yet)
+4. **Independent budgets** — Each agent has its own budget, allowlist, and trade limit
+5. **Individual cleanup** — Revoke agents individually via `revoke_sub_agent`, or all at once via `revoke_root_delegation`
+
+---
+
 ## Gas Depletion → Fund → Resume Flow
 
 When a sub-agent runs low on gas (< 0.1 MON):
