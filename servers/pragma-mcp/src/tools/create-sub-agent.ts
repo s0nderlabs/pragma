@@ -25,6 +25,8 @@ import {
   createContinuousLoop,
   createConditionLoop,
   createIntervalLoop,
+  sumActiveMonAllocations,
+  sumActiveUsdAllocations,
   type StoredDelegation,
 } from "../core/subagent/index.js";
 import { withRetry } from "../core/utils/retry.js";
@@ -53,11 +55,11 @@ const CreateSubAgentSchema = z.object({
     ),
   budgetMon: z
     .number()
-    .min(0.1)
+    .min(0)
     .max(100)
     .describe(
-      "MON budget for this sub-agent. Used for valueLte calculation. " +
-        "The total budget is valueLtePerTx × maxTrades."
+      "MON trading capital for this sub-agent. Must fit within root budgetMon. " +
+        "0 for USD-only strategies (blocks native MON on-chain via ValueLteEnforcer)."
     ),
   budgetUsd: z
     .number()
@@ -79,12 +81,15 @@ const CreateSubAgentSchema = z.object({
     .max(30)
     .default(7)
     .describe("How many days until delegation expires. Default: 7"),
-  maxTrades: z
+  maxCalls: z
     .number()
     .min(1)
     .max(100)
     .default(20)
-    .describe("Maximum number of trades allowed. Default: 20"),
+    .describe(
+      "Maximum delegation calls (trades + approvals). " +
+        "Each trade may need 1-2 calls (approve + execute). Default: 20"
+    ),
   fundAmount: z
     .number()
     .min(0)
@@ -152,7 +157,7 @@ interface CreateSubAgentResult {
       perTransaction: string;
       allowedGroups: string[] | string;
     };
-    maxTrades: number;
+    maxCalls: number;
     expiresAt: string;
     expiresIn: string;
     funding: {
@@ -297,11 +302,55 @@ async function createSubAgentHandler(
 
     // Wrap all operations in try-catch to release wallet on failure
     try {
-      // Calculate valueLtePerTx
-      // Total budget = valueLtePerTx × maxTrades
-      // So valueLtePerTx = totalBudget / maxTrades
+      // Calculate valueLtePerTx for on-chain ValueLteEnforcer
+      // Per-tx native MON cap = budgetMon / maxCalls
+      // 0 budgetMon → 0 valueLtePerTx → blocks all native MON on-chain
       const totalBudgetWei = parseEther(params.budgetMon.toString());
-      const valueLtePerTx = totalBudgetWei / BigInt(params.maxTrades);
+      const valueLtePerTx = params.maxCalls > 0 ? totalBudgetWei / BigInt(params.maxCalls) : 0n;
+
+      // Validate against root delegation budget (user's consent boundary)
+      if (rootDelegation.budgetMon !== undefined) {
+        const rootBudgetMon = parseFloat(rootDelegation.budgetMon);
+        const existingMonWei = await sumActiveMonAllocations();
+        const existingMon = parseFloat(formatEther(existingMonWei));
+        if (existingMon + params.budgetMon > rootBudgetMon) {
+          await releaseWallet(poolWallet.id);
+          return {
+            success: false,
+            message: "Exceeds root MON budget",
+            error: `Root authorized ${rootBudgetMon} MON. Already allocated: ${existingMon} MON. Requested: ${params.budgetMon} MON. Total ${existingMon + params.budgetMon} exceeds ${rootBudgetMon}.`,
+          };
+        }
+      }
+
+      if (rootDelegation.budgetUsd !== undefined && params.budgetUsd && params.budgetUsd > 0) {
+        const rootBudgetUsd = parseFloat(rootDelegation.budgetUsd);
+        if (rootBudgetUsd > 0) {
+          const existingUsdRaw = await sumActiveUsdAllocations();
+          const existingUsd = parseFloat(existingUsdRaw.toString()) / 1e6; // USD uses 6-decimal canonical
+          if (existingUsd + params.budgetUsd > rootBudgetUsd) {
+            await releaseWallet(poolWallet.id);
+            return {
+              success: false,
+              message: "Exceeds root USD budget",
+              error: `Root authorized ${rootBudgetUsd} USD. Already allocated: ${existingUsd} USD. Requested: ${params.budgetUsd} USD.`,
+            };
+          }
+        }
+      }
+
+      // Validate sub-agent per-tx value doesn't exceed root's maxValuePerTx
+      if (rootDelegation.maxValuePerTx !== undefined) {
+        const rootMaxPerTx = parseEther(rootDelegation.maxValuePerTx);
+        if (valueLtePerTx > rootMaxPerTx) {
+          await releaseWallet(poolWallet.id);
+          return {
+            success: false,
+            message: "Sub-agent per-tx value exceeds root limit",
+            error: `Sub-agent valueLtePerTx (${formatEther(valueLtePerTx)} MON) exceeds root maxValuePerTx (${rootDelegation.maxValuePerTx} MON).`,
+          };
+        }
+      }
 
       // Build allowed targets based on agent type
       const chainConfig = SUPPORTED_CHAINS[chainId];
@@ -320,7 +369,7 @@ async function createSubAgentHandler(
         allowedSelectors,
         expiryDays: params.expiryDays,
         valueLtePerTx,
-        maxCalls: params.maxTrades,
+        maxCalls: params.maxCalls,
         chainId,
       });
 
@@ -343,7 +392,7 @@ async function createSubAgentHandler(
         allowedSelectors,
         expiryDays: params.expiryDays,
         valueLtePerTx,
-        maxCalls: params.maxTrades,
+        maxCalls: params.maxCalls,
         chainId,
       });
 
@@ -380,7 +429,7 @@ async function createSubAgentHandler(
           groupBudgets,
           allowedGroups: params.allowedGroups,
         },
-        maxTrades: params.maxTrades,
+        maxCalls: params.maxCalls,
         expiresAt: delegationResult.expiresAt * 1000, // Convert to milliseconds
       });
 
@@ -523,7 +572,7 @@ async function createSubAgentHandler(
             perTransaction: formatEther(valueLtePerTx) + " MON/tx",
             allowedGroups: params.allowedGroups || "unrestricted",
           },
-          maxTrades: params.maxTrades,
+          maxCalls: params.maxCalls,
           expiresAt: expiresAt.toISOString(),
           expiresIn,
           funding: {

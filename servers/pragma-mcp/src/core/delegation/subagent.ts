@@ -4,7 +4,7 @@
 // Copyright (c) 2026 s0nderlabs
 
 import type { Address, Hex } from "viem";
-import { toHex } from "viem";
+import { toHex, encodeAbiParameters } from "viem";
 import {
   createDelegation,
   type Delegation,
@@ -136,6 +136,15 @@ export const DEX_SELECTORS = {
 } as const;
 
 /**
+ * ERC20 selectors (generic token operations beyond approve)
+ * Note: approve() is handled by Group 0 (APPROVE) in LogicalOrWrapperEnforcer
+ */
+export const ERC20_SELECTORS = {
+  // transfer(address,uint256)
+  transfer: "0xa9059cbb" as Hex,
+} as const;
+
+/**
  * Get all selectors for a given agent type (Group 1 - TRADING)
  *
  * Note: ERC20 approve() is NOT included here - it's handled by
@@ -149,12 +158,14 @@ export function getSelectorsForAgentType(agentType: "kairos" | "thymos" | "pragm
         ...Object.values(LEVERUP_SELECTORS),
         ...Object.values(WMON_SELECTORS),
         ...Object.values(DEX_SELECTORS),
+        ...Object.values(ERC20_SELECTORS),
       ];
     case "thymos":
       return [
         ...Object.values(NADFUN_SELECTORS),
         ...Object.values(WMON_SELECTORS),
         ...Object.values(DEX_SELECTORS),
+        ...Object.values(ERC20_SELECTORS),
       ];
     case "pragma":
       return [
@@ -162,6 +173,7 @@ export function getSelectorsForAgentType(agentType: "kairos" | "thymos" | "pragm
         ...Object.values(NADFUN_SELECTORS),
         ...Object.values(WMON_SELECTORS),
         ...Object.values(DEX_SELECTORS),
+        ...Object.values(ERC20_SELECTORS),
       ];
   }
 }
@@ -296,10 +308,10 @@ export function createSubDelegation(params: SubDelegationParams): SubDelegationR
   };
   delegation.authority = hashDelegation(parentForHash);
 
-  // CRITICAL: Replace scope-based enforcers with LogicalOrWrapperEnforcer
+  // CRITICAL: Replace scope-based enforcers with our custom set
   // DTK generates AllowedTargets + AllowedMethods from scope, but we need
   // OR logic instead of AND logic for approve() on arbitrary tokens.
-  // Also filter out ValueLteEnforcer (DTK adds with 0 value which can cause issues)
+  // DTK also adds ValueLteEnforcer with 0 value — we filter it and re-add with correct value.
   const scopeEnforcers = [
     ALLOWED_TARGETS_ENFORCER.toLowerCase(),
     ALLOWED_METHODS_ENFORCER.toLowerCase(),
@@ -313,6 +325,14 @@ export function createSubDelegation(params: SubDelegationParams): SubDelegationR
   // Add LogicalOrWrapperEnforcer caveat at the beginning
   const logicalOrCaveat = buildLogicalOrCaveat(allowedTargets, selectorsToUse);
   delegation.caveats.unshift(logicalOrCaveat);
+
+  // Re-add ValueLteEnforcer with the sub-agent's per-tx limit (budgetMon / maxCalls)
+  // This caps msg.value (native MON) per redeemDelegations() call
+  delegation.caveats.push({
+    enforcer: VALUE_LTE_ENFORCER,
+    terms: encodeAbiParameters([{ type: "uint256" }], [valueLtePerTx]),
+    args: "0x" as Hex,
+  });
 
   // Build typed data for signing (with modified caveats)
   const typedData = buildDelegationTypedData(delegation, chainId);
@@ -459,8 +479,8 @@ export function validateSubDelegationParams(params: Omit<SubDelegationParams, 'p
     errors.push("maxCalls must be between 1 and 1000");
   }
 
-  if (params.valueLtePerTx <= 0n) {
-    errors.push("valueLtePerTx must be positive");
+  if (params.valueLtePerTx < 0n) {
+    errors.push("valueLtePerTx must be non-negative");
   }
 
   if (params.allowedTargets.length === 0) {

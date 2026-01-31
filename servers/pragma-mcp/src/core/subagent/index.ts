@@ -67,6 +67,8 @@ export {
   listAgentStates,
   deleteAgentState,
   agentExists,
+  sumActiveMonAllocations,
+  sumActiveUsdAllocations,
 } from "./state.js";
 
 // Loop enforcement

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.11] - 2026-01-31
+
+### Added
+- **Root delegation as consent boundary** - Root delegation now stores the user's full authorization: `budgetMon` (total MON ceiling), `budgetUsd` (total USD ceiling), `maxValuePerTx` (per-tx MON cap), `maxCalls` (total delegation calls). Sub-agents validate allocations against root at creation time
+- **Root budget validation** - `create_sub_agent` now enforces that sum of all active sub-agent allocations stays within root delegation limits (MON, USD, and per-tx value)
+- **`budgetMon: 0` for USD-only strategies** - Sub-agents can now be created with zero MON budget. `ValueLteEnforcer` with limit=0 blocks native MON transactions while allowing all ERC-20 operations
+
+### Fixed
+- **ValueLteEnforcer re-enabled** - On-chain per-transaction native MON cap restored on both root and sub-delegations. Previously filtered out (dead code), now correctly enforces user-specified limits via `encodeAbiParameters`
+- **`maxTrades` renamed to `maxCalls`** - Clarifies that each `redeemDelegations()` call (including ERC20 approvals) consumes one count. Renamed across all code, types, and documentation
+- **ERC20 `transfer` selector missing from autonomous scope** - Added `ERC20_SELECTORS` group with `transfer(address,uint256)` (`0xa9059cbb`) to all agent scopes and root delegation. Previously, autonomous sub-agents could not execute ERC20 transfers despite the tool accepting `agentId`
+
+### Changed
+- **`create_root_delegation` schema** - New parameters: `budgetUsd` (USD ceiling), `maxValuePerTx` (explicit per-tx cap). Removed derived `valueLtePerTx = budgetMon / maxTrades` computation
+- **SKILL.md budget documentation** - Rewritten with two-layer enforcement model (on-chain hard limits + off-chain soft tracking), root vs sub-agent parameter comparison table, and corrected multi-agent example
+
 ## [0.8.10] - 2026-01-31
 
 ### Added

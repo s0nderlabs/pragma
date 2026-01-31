@@ -206,7 +206,7 @@ export interface CreateAgentStateParams {
     // Restricts which token groups the agent can spend
     allowedGroups?: string[];
   };
-  maxTrades: number;
+  maxCalls: number;
   expiresAt: number;
 }
 
@@ -275,7 +275,7 @@ export async function createAgentState(params: CreateAgentStateParams): Promise<
     },
     trades: {
       executed: 0,
-      maxAllowed: params.maxTrades,
+      maxAllowed: params.maxCalls,
     },
     createdAt: now,
     lastActivityAt: now,
@@ -669,6 +669,38 @@ export async function listAgentStates(): Promise<SubAgentState[]> {
   }
 
   return states;
+}
+
+/**
+ * Sum monAllocated across all active (running/pending/paused) agent states.
+ * Used to validate sub-agent creation against root delegation budget.
+ */
+export async function sumActiveMonAllocations(): Promise<bigint> {
+  const states = await listAgentStates();
+  let total = 0n;
+  for (const state of states) {
+    if (state.status === "running" || state.status === "pending" || state.status === "paused") {
+      total += BigInt(state.budget.monAllocated);
+    }
+  }
+  return total;
+}
+
+/**
+ * Sum USD group budgets across all active (running/pending/paused) agent states.
+ * Used to validate sub-agent creation against root delegation budget.
+ */
+export async function sumActiveUsdAllocations(): Promise<bigint> {
+  const states = await listAgentStates();
+  let total = 0n;
+  for (const state of states) {
+    if (state.status === "running" || state.status === "pending" || state.status === "paused") {
+      if (state.budget.groupBudgets?.USD) {
+        total += BigInt(state.budget.groupBudgets.USD);
+      }
+    }
+  }
+  return total;
 }
 
 /**

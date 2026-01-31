@@ -126,18 +126,45 @@ When done:
 
 ## Budget Tracking
 
-### MON Budget (On-chain + Off-chain)
+Budget enforcement uses two layers: on-chain (hard) and off-chain (soft).
 
-- `budgetMon` sets the total MON allocation
-- On-chain enforced via `valueLte` caveat (per-tx limit × maxTrades)
-- Off-chain tracked via `monSpent` and `tokenFlows`
+### Root Delegation = User's Consent Boundary
 
-### USD Budget (Off-chain, Ledger-based)
+The root delegation captures what the user authorized via Touch ID. It is the ceiling for ALL sub-agents.
 
-- `budgetUsd` sets the USD group budget (covers USDC + LVUSD, optional)
-- Tracked via `groupBudgets.USD` using canonical 6-decimal precision
-- Both USDC (6 decimals) and LVUSD (18 decimals) normalized before comparison
-- Amounts normalized to canonical decimals before comparison
+| Parameter | Root Delegation | Sub-Agent |
+|-----------|----------------|-----------|
+| `budgetMon` | Total MON authorized (ceiling) | This agent's MON allocation |
+| `budgetUsd` | Total USD authorized (ceiling) | This agent's USD budget |
+| `maxValuePerTx` | User-set per-tx MON cap | Derived: `budgetMon / maxCalls` |
+| `maxCalls` | Total calls for ALL agents | This agent's call limit |
+
+Sub-agent creation validates allocations against root:
+- `sum(all active sub-agents monAllocated)` must be ≤ root `budgetMon`
+- `sum(all active sub-agents usdAllocated)` must be ≤ root `budgetUsd`
+- Sub-agent `valueLtePerTx` must be ≤ root `maxValuePerTx`
+
+### On-Chain Enforcement (Hard Limits)
+
+These caveats are embedded in the delegation and enforced by smart contracts:
+
+| Enforcer | Root | Sub-delegation |
+|----------|------|----------------|
+| `TimestampEnforcer` | `expiryDays` | `expiryDays` |
+| `LimitedCallsEnforcer` | `maxCalls` (all agents) | `maxCalls` (this agent) |
+| `ValueLteEnforcer` | `maxValuePerTx` (user-specified) | `budgetMon / maxCalls` (derived) |
+| `LogicalOrWrapperEnforcer` | All protocols | Agent-specific protocols |
+
+`ValueLteEnforcer` checks `msg.value <= limit` per `redeemDelegations()` call. It only affects native MON sends (`msg.value`), not ERC-20 transfers. Setting it to 0 blocks all native MON transactions while allowing USD-only strategies.
+
+### Off-Chain Enforcement (Soft Limits)
+
+Tracked in agent state and checked before each trade:
+
+- **MON budget**: `monSpent` vs `monAllocated` — total native MON spent by this agent
+- **USD budget**: `groupBudgets.USD` — net outflow across USDC + LVUSD
+- **Token allowlist**: `allowedGroups` — restricts which token groups the agent can spend
+- **Token flows**: Per-token ledger of inflows and outflows
 
 ### Token Flow Ledger
 
@@ -156,7 +183,7 @@ tokenFlows: {
 
 Net outflow = sum(out - in) across all tokens in group, normalized to canonical decimals.
 
-### Budget Enforcement
+### Budget Enforcement Flow
 
 - Pre-trade: `checkGroupBudget()` validates the outflow won't exceed group budget
 - Pre-trade: `isTokenAllowed()` validates the token is in the agent's allowed groups
@@ -191,7 +218,7 @@ Net outflow = sum(out - in) across all tokens in group, normalized to canonical 
 1. **Sub-agents cannot fund themselves** - Parent (session key) must call `fund_sub_agent`
 2. **Budget is soft-enforced** - Agent tracks spending, contract enforces per-tx limits
 3. **Delegation has expiry** - Sub-agent stops working when delegation expires
-4. **Max trades enforced** - `limitedCalls` caveat limits total operations
+4. **Max calls enforced** - `limitedCalls` caveat limits total delegation calls (trades + approvals)
 5. **Decimal normalization** - USD group budget uses 6-decimal canonical; LVUSD (18 dec) is normalized before comparison
 
 ## When to Use Which Mode
@@ -273,15 +300,17 @@ Extract configuration from user's request:
 
 Note: `expiryDays` minimum is 1, maximum is 30. The parameter is in days, not hours.
 
-**C. Scope Keywords → maxTrades**
+**C. Scope Keywords → maxCalls**
 
-| Keywords | Max Trades |
-|----------|------------|
-| "single trade", "one position", "if X happens" | 5 |
-| "monitor and trade", "when opportunity" | 10 |
-| "scalp", "actively trade" | 20-30 |
-| "aggressive", "ape everything" | 50+ |
-| No mention | 10 (default) |
+Each delegation call = 1 `limitedCalls` count. A trade that needs an ERC20 approval first costs 2 calls (approve + execute). First trade per new token always needs an approval call.
+
+| Keywords | Max Calls |
+|----------|-----------|
+| "single trade", "one position", "if X happens" | 10 |
+| "monitor and trade", "when opportunity" | 20 |
+| "scalp", "actively trade" | 40-60 |
+| "aggressive", "ape everything" | 100+ |
+| No mention | 20 (default) |
 
 **D. Gas Funding → Default 1 MON**
 
@@ -296,21 +325,21 @@ get_all_balances → User has X MON, Y USDC, Z LVUSD, etc.
 
 ### Step 3: Ask User for Budget
 
-Use `AskUserQuestion` to get budget (user must specify):
+Use `AskUserQuestion` to get budget (user must specify). These become the root delegation's consent boundary.
 
 ```
-Header: "Budget"
+Header: "MON Budget"
 Question: "How much MON should this agent trade with?"
 Options:
+  - 0 MON (USD-only strategy)
   - 5 MON
   - 10 MON
-  - 25 MON
   - Custom amount
 Description: |
   Your balance: X MON
 
-  This is the max trading capital for the agent.
-  Unused budget stays in your wallet.
+  This is the max MON trading capital. 0 = block all native MON trades
+  (for USD-only strategies like USDC/LVUSD collateral).
 ```
 
 If the user's task involves USD-denominated collateral (e.g., LeverUp with LVUSD/USDC), also ask for USDC budget:
@@ -361,7 +390,7 @@ Description: |
   Agent: [type] ([one-line description])
   Budget: [X] MON + [Y] USDC (if applicable)
   Duration: [Z] days
-  Max trades: [N]
+  Max calls: [N] (includes approval calls)
   Gas: 1 MON
 
   Why: [brief reasoning for config choices]
@@ -377,7 +406,7 @@ Question: "What would you like to change?"
 Options:
   - Change budget
   - Change duration
-  - Change trade limit
+  - Change call limit
   - Change agent type
 ```
 
@@ -389,7 +418,13 @@ Before creating the sub-agent:
 
 1. **Root delegation:** Call `check_delegation_status()` (no agentId)
    - If `valid: true` and enough `remaining` calls → proceed
-   - If `valid: false`, expired, or insufficient calls → call `create_root_delegation` (requires Touch ID)
+   - If `valid: false`, expired, or insufficient calls → call `create_root_delegation` with:
+     - `budgetMon`: Total MON the user authorized
+     - `budgetUsd`: Total USD the user authorized (0 if MON-only)
+     - `maxValuePerTx`: Per-tx MON cap (derive from budget or ask user)
+     - `maxCalls`: Sum of all agents' calls + headroom for approvals
+     - `expiryDays`: Based on user's time intent
+     - Requires Touch ID (once for all agents)
 2. **Session key balance:** Need 1 MON (gas) + ~0.05 MON (delegation tx)
    - Call `check_session_key_balance` to verify
 3. **x402 USDC balance (if x402 mode):** Market intelligence tools consume USDC per call
@@ -423,7 +458,7 @@ create_sub_agent(
   budgetMon: [user specified],
   budgetUsd: [user specified, optional],
   allowedGroups: [user specified, optional — e.g. ["MON"] or ["MON", "USD"]],
-  maxTrades: [inferred],
+  maxCalls: [inferred],
   expiryDays: [calculated],
   fundAmount: 1,
   loopType: [inferred from intent — "none" for one-shot],
@@ -457,7 +492,7 @@ Task({
     1. ALWAYS pass agentId: "${agentId}" to ALL trading tools
     2. NEVER trigger Touch ID - if prompted, you forgot agentId
     3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
-    4. Stop when budget depleted or max trades reached
+    4. Stop when budget depleted or max calls reached
     5. Market intelligence tools cost USDC via x402 (sorted by cost):
        - market_get_critical_news: $0.02
        - market_search_news: $0.015
@@ -477,7 +512,7 @@ Task({
     BEFORE TERMINATING - MANDATORY:
     You MUST call report_agent_status before finishing:
     - status: "completed" → Task goal was ACHIEVED
-    - status: "failed" → Goal NOT achieved (budget depleted, max trades, errors)
+    - status: "failed" → Goal NOT achieved (budget depleted, max calls, errors)
     - status: "paused" → Low gas, need funding to continue
     Include a reason summarizing what happened and key results.
 
@@ -491,7 +526,7 @@ Task({
     TASK: ${userTask}
 
     BUDGET: ${budgetMon} MON + ${budgetUsd} USD
-    MAX TRADES: ${maxTrades}
+    MAX CALLS: ${maxCalls}
     EXPIRES: ${expiresAt}
   `,
   run_in_background: true
@@ -591,34 +626,41 @@ Description: |
   Agent 1: Kairos (LeverUp perps)
     Budget: 30 MON + 15 USDC
     Allowed: MON + USD groups
-    Max trades: 20, Duration: 1 day
+    Max calls: 30 (includes approval calls), Duration: 1 day
     Loop: continuous
 
   Agent 2: Thymos (nad.fun memecoins)
     Budget: 20 MON
     Allowed: MON group only
-    Max trades: 30, Duration: 1 day
+    Max calls: 50 (includes approval calls), Duration: 1 day
     Loop: continuous
 
-  Root delegation needs: 50 maxCalls (20 + 30)
+  Root delegation needs:
+    budgetMon: 50, budgetUsd: 15
+    maxCalls: 100 (30 + 50 + headroom for approvals)
+    maxValuePerTx: 5 MON
   Gas: 1 MON each (from session key)
 ```
 
 ### Step 5: Pre-flight — Root Delegation Sizing
 
-**Key:** Root delegation `maxCalls` must cover ALL agents combined.
+**Key:** Root delegation is the user's consent boundary. `maxCalls` must cover ALL agents combined. `budgetMon` and `budgetUsd` are the ceilings for all sub-agent allocations.
 
 ```
 check_delegation_status()
-→ If valid and remaining >= 50 → proceed
-→ If remaining < 50 or expired →
+→ If valid and remaining >= 100 → proceed
+→ If remaining < 100 or expired →
     create_root_delegation(
       budgetMon: 50,
-      expiryDays: 7,
-      maxTrades: 60  ← headroom above 50 for gas ops
+      budgetUsd: 15,
+      maxValuePerTx: 5,
+      maxCalls: 100,  ← ~2x actual trades for approval calls
+      expiryDays: 1
     )
     → Requires Touch ID (once for both agents)
 ```
+
+**Headroom explanation:** Gas funding (`fund_sub_agent`) is a plain EOA transfer that does NOT consume delegation calls. Headroom accounts for ERC20 approval calls — each new token approval costs 1 extra call.
 
 ### Step 6: Sequential Spawn
 
@@ -631,7 +673,7 @@ create_sub_agent(
   budgetMon: 30,
   budgetUsd: 15,
   allowedGroups: ["MON", "USD"],
-  maxTrades: 20,
+  maxCalls: 30,
   expiryDays: 1,
   fundAmount: 1,
   loopType: "continuous",
@@ -649,7 +691,7 @@ create_sub_agent(
   agentType: "thymos",
   budgetMon: 20,
   allowedGroups: ["MON"],
-  maxTrades: 30,
+  maxCalls: 50,
   expiryDays: 1,
   fundAmount: 1,
   loopType: "continuous",
@@ -666,10 +708,10 @@ Spawn Thymos via Task tool.
 ```
 Both agents are running:
 
-  Kairos (perps): 30 MON + 15 USDC, 20 trades, expires in 1 day
-  Thymos (memecoins): 20 MON, 30 trades, expires in 1 day
+  Kairos (perps): 30 MON + 15 USDC, 30 calls, expires in 1 day
+  Thymos (memecoins): 20 MON, 50 calls, expires in 1 day
 
-  Root delegation: 50/60 calls allocated
+  Root delegation: 80/100 calls allocated
 
   Use list_sub_agents to check status.
   Use revoke_sub_agent to stop an individual agent.
@@ -678,7 +720,7 @@ Both agents are running:
 
 ### Multi-Agent Rules
 
-1. **One root delegation, many sub-agents** — Size `maxCalls` for the sum of all agents plus headroom
+1. **One root delegation, many sub-agents** — Size root `maxCalls` for the sum of all agents plus headroom for approval calls
 2. **Sequential creation** — Create and spawn one agent at a time; abort remaining if one fails
 3. **Independent operation** — Agents cannot communicate with each other (no TeammateTool yet)
 4. **Independent budgets** — Each agent has its own budget, allowlist, and trade limit
@@ -831,7 +873,7 @@ report_agent_status(
 - `running` + (no reason needed, first action after spawn)
 - `completed` + "Target reached - opened BTC long at $95,200"
 - `failed` + "Delegation expired before target was hit"
-- `failed` + "Max trades reached (10/10) - target not achieved"
+- `failed` + "Max calls reached (10/10) - target not achieved"
 - `failed` + "Budget depleted"
 - `paused` + "Low gas - 0.05 MON remaining"
 
@@ -845,7 +887,7 @@ When any tool loads an agent's state, it automatically checks if the delegation 
 |------------------|-------------|--------------|------------|
 | Task achieved | Sub-agent | `completed` | Main Claude |
 | Delegation expired | System (lazy) | `failed` | Main Claude |
-| Max trades reached | Sub-agent | `failed` | Main Claude |
+| Max calls reached | Sub-agent | `failed` | Main Claude |
 | Budget depleted | Sub-agent | `failed` | Main Claude |
 | Low gas (recoverable) | Sub-agent | `paused` | Fund → Resume |
 | User kills process | N/A | unchanged | Main Claude |
@@ -900,15 +942,15 @@ When a sub-agent pauses due to low gas:
 **Claude analyzes:**
 - "long" → kairos (perps + swap + wrap)
 - "AFK for a few hours" → 1 day expiry
-- "if it breaks $95k" → single position → 5 max trades
+- "if it breaks $95k" → single position → 10 max calls (5 trades + approvals)
 
 **Claude:**
 1. `get_all_balances` → User has 50 MON, 10 LVUSD
 2. `AskUserQuestion` → "How much MON?" → User: "10 MON"
 3. `AskUserQuestion` → "USD budget for collateral?" → User: "10 USDC"
-4. `AskUserQuestion` → "Create kairos agent: 10 MON + 10 USDC budget, 1 day, 5 trades?" → User: "Approve"
+4. `AskUserQuestion` → "Create kairos agent: 10 MON + 10 USDC budget, 1 day, 10 calls?" → User: "Approve"
 5. `check_delegation_status()` → valid, 80 calls remaining → proceed
-6. `create_sub_agent(kairos, 10 MON, 10 USDC, 5 trades, 1 day)` → agentId: "xyz-123", status: "pending"
+6. `create_sub_agent(kairos, 10 MON, 10 USDC, 10 calls, 1 day)` → agentId: "xyz-123", status: "pending"
 7. `Task(prompt: "Monitor BTC...")` → taskAgentId: "a32dec1"
 8. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1)` → stores for resume
 9. Report: "Kairos agent monitoring BTC for breakout above $95k."

@@ -24,18 +24,42 @@ const CreateRootDelegationSchema = z.object({
     .describe("How many days until delegation expires. Default: 7"),
   budgetMon: z
     .number()
-    .min(1)
+    .min(0)
     .max(1000)
     .default(50)
     .describe(
-      "Total MON budget cap (approximate). This is valueLte × maxTrades. Default: 50 MON"
+      "Total MON budget authorized for all agents. " +
+        "Sub-agent allocations must fit within this ceiling. " +
+        "0 = no native MON spending allowed. Default: 50"
     ),
-  maxTrades: z
+  budgetUsd: z
     .number()
-    .min(10)
+    .min(0)
+    .max(10000)
+    .default(0)
+    .describe(
+      "Total USD-group budget (USDC + LVUSD) authorized for all agents. " +
+        "0 = no USD spending limit. Default: 0"
+    ),
+  maxValuePerTx: z
+    .number()
+    .min(0)
+    .max(100)
+    .default(10)
+    .describe(
+      "Maximum native MON per single transaction. " +
+        "On-chain enforced via ValueLteEnforcer. " +
+        "0 = block all native MON transactions (for USD-only strategies). Default: 10"
+    ),
+  maxCalls: z
+    .number()
+    .min(1)
     .max(500)
     .default(100)
-    .describe("Maximum number of trades allowed. Default: 100"),
+    .describe(
+      "Maximum delegation calls (trades + approvals combined). " +
+        "Each trade may need 1-2 calls (approve + execute). Default: 100"
+    ),
   force: z
     .boolean()
     .default(false)
@@ -49,11 +73,10 @@ interface CreateRootDelegationResult {
     delegationHash: string;
     sessionKey: string;
     delegator: string;
-    budget: {
-      approximate: string;
-      perTransaction: string;
-    };
-    maxTrades: number;
+    budgetMon: string;
+    budgetUsd: string;
+    maxValuePerTx: string;
+    maxCalls: number;
     expiresAt: string;
     expiresIn: string;
     allowedTargets: string[];
@@ -61,7 +84,9 @@ interface CreateRootDelegationResult {
   existingDelegation?: {
     expiresAt: string;
     expiresIn: string;
-    approximateBudget: string;
+    budgetMon: string;
+    budgetUsd: string;
+    maxCalls: number;
   };
   error?: string;
 }
@@ -72,7 +97,7 @@ export function registerCreateRootDelegation(server: McpServer): void {
     "Create a persistent root delegation for autonomous trading mode. " +
       "This requires Touch ID ONCE to authorize the Main Agent (Claude's session key) " +
       "to execute trades on your behalf. After this, sub-agents can be created without " +
-      "requiring additional Touch ID. The delegation is time-bound and trade-count limited. " +
+      "requiring additional Touch ID. The delegation is time-bound and call-count limited. " +
       "Use this before creating sub-agents with create_sub_agent.",
     CreateRootDelegationSchema.shape,
     async (
@@ -123,7 +148,9 @@ async function createRootDelegationHandler(
               ? new Date(status.expiresAt).toISOString()
               : "unknown",
             expiresIn: status.expiresIn || "unknown",
-            approximateBudget: status.approximateBudget || "unknown",
+            budgetMon: (status.budgetMon ?? "unknown") + " MON",
+            budgetUsd: (status.budgetUsd ?? "0") + " USD",
+            maxCalls: status.maxCalls ?? 0,
           },
           error:
             "Use force: true to replace the existing delegation, " +
@@ -134,17 +161,15 @@ async function createRootDelegationHandler(
 
     const chainId = config.network.chainId;
 
-    // Calculate valueLtePerTx from budget
-    // budgetMon = valueLtePerTx × maxTrades
-    // So: valueLtePerTx = budgetMon / maxTrades
-    const totalBudgetWei = parseEther(params.budgetMon.toString());
-    const valueLtePerTx = totalBudgetWei / BigInt(params.maxTrades);
+    // ValueLteEnforcer per-tx limit: user-specified maxValuePerTx
+    // This caps msg.value (native MON) per redeemDelegations() call on-chain
+    const valueLtePerTx = parseEther(params.maxValuePerTx.toString());
 
     // Validate parameters
     const validationResult = validateRootDelegationParams({
       expiryDays: params.expiryDays,
       valueLtePerTx,
-      maxCalls: params.maxTrades,
+      maxCalls: params.maxCalls,
     });
 
     if (!validationResult.valid) {
@@ -162,10 +187,18 @@ async function createRootDelegationHandler(
       sessionKey: sessionKey.address as Address,
       expiryDays: params.expiryDays,
       valueLtePerTx,
-      maxCalls: params.maxTrades,
+      maxCalls: params.maxCalls,
       chainId,
       keyId: config.wallet.keyId,
-      touchIdMessage: `Enable autonomous trading: ${params.budgetMon} MON budget, ${params.maxTrades} trades, ${params.expiryDays} days`,
+      touchIdMessage:
+        `Authorize autonomous trading: ` +
+        `${params.budgetMon} MON + ${params.budgetUsd} USD, ` +
+        `max ${params.maxValuePerTx} MON/tx, ` +
+        `${params.maxCalls} calls, ${params.expiryDays} days`,
+      // Off-chain budget metadata (user's consent boundary)
+      budgetMon: params.budgetMon.toString(),
+      budgetUsd: params.budgetUsd.toString(),
+      maxValuePerTx: params.maxValuePerTx.toString(),
     });
 
     // Calculate human-readable expiry
@@ -179,11 +212,10 @@ async function createRootDelegationHandler(
         delegationHash: storedDelegation.delegationHash,
         sessionKey: storedDelegation.sessionKey,
         delegator: storedDelegation.delegator,
-        budget: {
-          approximate: formatEther(BigInt(storedDelegation.approximateBudget)) + " MON",
-          perTransaction: formatEther(BigInt(storedDelegation.valueLtePerTx)) + " MON/tx",
-        },
-        maxTrades: storedDelegation.maxCalls,
+        budgetMon: params.budgetMon + " MON",
+        budgetUsd: params.budgetUsd + " USD",
+        maxValuePerTx: params.maxValuePerTx + " MON/tx",
+        maxCalls: storedDelegation.maxCalls,
         expiresAt: expiresAt.toISOString(),
         expiresIn,
         allowedTargets: storedDelegation.allowedTargets,

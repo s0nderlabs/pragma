@@ -63,7 +63,9 @@ interface DelegationStatus {
   callCount?: CallCount;
   // Root delegation specific
   maxCalls?: number;
-  approximateBudget?: string;
+  budgetMon?: string;
+  budgetUsd?: string;
+  maxValuePerTx?: string;
   // Sub-agent specific
   agentId?: string;
   agentType?: string;
@@ -246,7 +248,9 @@ async function checkRootDelegation(
       expiresIn: status.expiresIn,
       callCount: callCount ?? undefined,
       maxCalls: status.maxCalls,
-      approximateBudget: status.approximateBudget,
+      budgetMon: status.budgetMon,
+      budgetUsd: status.budgetUsd,
+      maxValuePerTx: status.maxValuePerTx,
     },
   };
 }

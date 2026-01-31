@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "
 import { homedir } from "node:os";
 import * as path from "node:path";
 import type { Address, Hex } from "viem";
-import { parseEther, formatEther } from "viem";
+import { parseEther, formatEther, encodeAbiParameters } from "viem";
 import {
   createDelegation,
   type Delegation,
@@ -30,6 +30,7 @@ import {
   NADFUN_SELECTORS,
   WMON_SELECTORS,
   DEX_SELECTORS,
+  ERC20_SELECTORS,
 } from "./subagent.js";
 import { buildLogicalOrCaveat } from "./logical-or.js";
 
@@ -90,12 +91,18 @@ export interface StoredRootDelegation {
   createdAt: number;
   /** Expiry timestamp (ms) */
   expiresAt: number;
-  /** Max MON value per transaction (wei as string) */
+  /** Max MON value per transaction (wei as string) — on-chain enforced via ValueLteEnforcer */
   valueLtePerTx: string;
   /** Max calls allowed */
   maxCalls: number;
-  /** Approximate total budget (wei as string) */
+  /** @deprecated Use budgetMon/budgetUsd instead. Kept for backward compat with old stored files */
   approximateBudget: string;
+  /** Total MON budget authorized across all agents (human-readable, e.g. "50") */
+  budgetMon?: string;
+  /** Total USD-group budget authorized across all agents (human-readable, e.g. "15") */
+  budgetUsd?: string;
+  /** Max native MON per single transaction (human-readable, e.g. "10") */
+  maxValuePerTx?: string;
 }
 
 // ============================================================================
@@ -205,6 +212,8 @@ export function getAllTradingSelectors(): Hex[] {
     ...Object.values(WMON_SELECTORS),
     // DEX aggregator (0x Exchange Proxy)
     ...Object.values(DEX_SELECTORS),
+    // ERC20 operations (transfer)
+    ...Object.values(ERC20_SELECTORS),
   ];
 }
 
@@ -313,14 +322,15 @@ export function createRootDelegation(
     salt: ZERO_SALT,
   });
 
-  // CRITICAL: Replace scope-based enforcers with LogicalOrWrapperEnforcer
+  // CRITICAL: Replace scope-based enforcers with our custom set
   // DTK generates AllowedTargets + AllowedMethods from scope, but we need
   // OR logic instead of AND logic for approve() on arbitrary tokens.
+  // DTK also adds ValueLteEnforcer with 0 value — we filter it and re-add with correct value.
   //
   // Filter out:
   // - AllowedTargetsEnforcer (blocks arbitrary token addresses)
   // - AllowedMethodsEnforcer (redundant, LogicalOr handles this)
-  // - ValueLteEnforcer (DTK adds with 0 value which can cause issues)
+  // - ValueLteEnforcer (DTK adds with 0 value — we re-add with user-specified limit)
   const scopeEnforcers = [
     ALLOWED_TARGETS_ENFORCER.toLowerCase(),
     ALLOWED_METHODS_ENFORCER.toLowerCase(),
@@ -334,6 +344,14 @@ export function createRootDelegation(
   // Add LogicalOrWrapperEnforcer caveat at the beginning
   const logicalOrCaveat = buildLogicalOrCaveat(allowedTargets, allowedSelectors);
   delegation.caveats.unshift(logicalOrCaveat);
+
+  // Re-add ValueLteEnforcer with the user-specified per-tx limit
+  // This caps msg.value (native MON) per redeemDelegations() call
+  delegation.caveats.push({
+    enforcer: VALUE_LTE_ENFORCER,
+    terms: encodeAbiParameters([{ type: "uint256" }], [valueLtePerTx]),
+    args: "0x" as Hex,
+  });
 
   // Build typed data for signing (with modified caveats)
   const typedData = buildDelegationTypedData(delegation, chainId);
@@ -356,7 +374,12 @@ export function createRootDelegation(
  * @returns The stored root delegation
  */
 export async function signAndStoreRootDelegation(
-  params: RootDelegationParams
+  params: RootDelegationParams & {
+    /** Human-readable budget metadata for off-chain tracking */
+    budgetMon?: string;
+    budgetUsd?: string;
+    maxValuePerTx?: string;
+  }
 ): Promise<StoredRootDelegation> {
   const {
     delegator,
@@ -367,6 +390,9 @@ export async function signAndStoreRootDelegation(
     chainId,
     keyId,
     touchIdMessage,
+    budgetMon,
+    budgetUsd,
+    maxValuePerTx,
   } = params;
 
   // Create unsigned delegation
@@ -414,6 +440,10 @@ export async function signAndStoreRootDelegation(
     valueLtePerTx: valueLtePerTx.toString(),
     maxCalls,
     approximateBudget: result.approximateBudget.toString(),
+    // Off-chain budget metadata (user's consent boundary)
+    budgetMon: budgetMon ?? formatEther(valueLtePerTx * BigInt(maxCalls)),
+    budgetUsd: budgetUsd ?? "0",
+    maxValuePerTx: maxValuePerTx ?? formatEther(valueLtePerTx),
   };
 
   // Store to file
@@ -463,7 +493,9 @@ export function getRootDelegationStatus(): {
   valid: boolean;
   expiresAt?: number;
   expiresIn?: string;
-  approximateBudget?: string;
+  budgetMon?: string;
+  budgetUsd?: string;
+  maxValuePerTx?: string;
   maxCalls?: number;
   sessionKey?: Address;
   delegator?: Address;
@@ -482,7 +514,9 @@ export function getRootDelegationStatus(): {
     valid,
     expiresAt: delegation.expiresAt,
     expiresIn,
-    approximateBudget: formatEther(BigInt(delegation.approximateBudget)) + " MON",
+    budgetMon: delegation.budgetMon ?? formatEther(BigInt(delegation.approximateBudget)),
+    budgetUsd: delegation.budgetUsd ?? "0",
+    maxValuePerTx: delegation.maxValuePerTx ?? formatEther(BigInt(delegation.valueLtePerTx)),
     maxCalls: delegation.maxCalls,
     sessionKey: delegation.sessionKey,
     delegator: delegation.delegator,
@@ -559,19 +593,18 @@ export function validateRootDelegationParams(params: {
     errors.push("expiryDays must be between 1 and 30");
   }
 
-  if (params.maxCalls < 10 || params.maxCalls > 500) {
-    errors.push("maxCalls must be between 10 and 500");
+  if (params.maxCalls < 1 || params.maxCalls > 500) {
+    errors.push("maxCalls must be between 1 and 500");
   }
 
-  if (params.valueLtePerTx <= 0n) {
-    errors.push("valueLtePerTx must be positive");
+  if (params.valueLtePerTx < 0n) {
+    errors.push("valueLtePerTx cannot be negative");
   }
 
-  // Check reasonable budget limits (safety)
-  const approximateBudget = params.valueLtePerTx * BigInt(params.maxCalls);
-  const maxBudget = parseEther("1000"); // 1000 MON max
-  if (approximateBudget > maxBudget) {
-    errors.push("Approximate budget exceeds 1000 MON safety limit");
+  // Check per-tx value safety limit
+  const maxPerTx = parseEther("100"); // 100 MON max per tx
+  if (params.valueLtePerTx > maxPerTx) {
+    errors.push("valueLtePerTx exceeds 100 MON per-tx safety limit");
   }
 
   return {
