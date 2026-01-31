@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-01-31
+
+### Added
+- **LeverUp close trade inflow tracking** - Autonomous agents now track collateral returned from closing positions. Uses oracle settlement polling (`pollForSettlementInflows`) since LeverUp settles asynchronously via `BatchRequestPriceCallback` (~4 blocks after close tx). Polls for ERC20 Transfer events from LeverUp diamond to user's smart account (8 attempts, 2s interval)
+- **LeverUp cancel limit order inflow tracking** - Tracks collateral returned from canceling limit orders via transaction receipt parsing (`parseErc20Inflows`). Cancel returns collateral directly in the same transaction
+- **Receipt in `AutonomousExecutionResult`** - Optional `receipt` field enables post-execution analysis for any autonomous operation
+
+### Fixed
+- **Agent budget showing pure losses for round-trip trades** - Close trade and cancel limit order now record inflows. Budget utilization reflects actual net position (e.g., 1.4% instead of 89% for a round-trip with small loss)
+- **Balance validation for LeverUp opens** - Both `leverup_open_trade` and `leverup_open_limit_order` now validate `balance >= margin + fee` before submitting, preventing confusing "ERC20: transfer amount exceeds balance" reverts
+
 ## [0.8.6] - 2026-01-30
 
 ### Fixed

@@ -8,9 +8,12 @@ import {
   parseUnits,
   encodeFunctionData,
   erc20Abi,
+  parseEventLogs,
+  parseAbiItem,
   formatUnits,
   type Address,
   type Hex,
+  type TransactionReceipt,
 } from "viem";
 import {
   redeemDelegations,
@@ -89,6 +92,83 @@ const COLLATERAL_TOKEN_ADDRESSES: Record<CollateralToken, Address> = {
   LVMON: LVMON_ADDRESS,
 };
 
+/**
+ * Parse ERC20 Transfer events from a transaction receipt to find inflows to a specific address.
+ * Used to track settlement returns from LeverUp close trade and cancel limit order.
+ */
+function parseErc20Inflows(
+  receipt: TransactionReceipt,
+  userAddress: Address
+): Array<{ token: Address; amount: bigint }> {
+  const transferLogs = parseEventLogs({
+    abi: erc20Abi,
+    logs: receipt.logs,
+    eventName: "Transfer",
+  });
+
+  return transferLogs
+    .filter(log => log.args.to?.toLowerCase() === userAddress.toLowerCase())
+    .map(log => ({
+      token: log.address as Address,
+      amount: log.args.value!,
+    }));
+}
+
+/**
+ * Poll for ERC20 Transfer events from LeverUp diamond to user's smart account.
+ * LeverUp uses two-step execution: our close tx submits the request, and an oracle
+ * callback tx settles and transfers tokens back. We poll for that settlement Transfer.
+ */
+async function pollForSettlementInflows(
+  fromBlock: bigint,
+  userAddress: Address,
+): Promise<Array<{ token: Address; amount: bigint }>> {
+  const config = await loadConfig();
+  if (!config) return [];
+
+  const rpcUrl = await getRpcUrl(config);
+  const chainId = config.network?.chainId ?? 143;
+  const chain = buildViemChain(chainId, rpcUrl);
+  const publicClient = createPublicClient({
+    chain,
+    transport: createSyncHttpTransport(rpcUrl, config),
+  });
+
+  const transferEvent = parseAbiItem(
+    "event Transfer(address indexed from, address indexed to, uint256 value)"
+  );
+
+  const maxAttempts = 8; // ~16 seconds total
+  const pollInterval = 2000; // 2 seconds between polls
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
+
+    try {
+      const logs = await publicClient.getLogs({
+        event: transferEvent,
+        args: {
+          from: WHITELISTED_SPENDERS.leverUpDiamond as Address,
+          to: userAddress,
+        },
+        fromBlock: fromBlock + 1n,
+        toBlock: "latest",
+      });
+
+      if (logs.length > 0) {
+        return logs.map(log => ({
+          token: log.address as Address,
+          amount: log.args.value!,
+        }));
+      }
+    } catch {
+      // Transient RPC error, retry on next attempt
+    }
+  }
+
+  return []; // Timeout — settlement not found within polling window
+}
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -110,6 +190,7 @@ export interface AutonomousExecutionResult {
   txHash?: Hex;
   explorerUrl?: string;
   error?: string;
+  receipt?: TransactionReceipt;
 }
 
 /**
@@ -343,6 +424,7 @@ export async function executeWithDelegationChain(
       success: true,
       txHash,
       explorerUrl: `${chainConfig.blockExplorer}/tx/${txHash}`,
+      receipt,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
@@ -812,6 +894,27 @@ export async function executeAutonomousLeverUpClose(
     };
   }
 
+  // Poll for settlement inflows from oracle callback tx
+  // LeverUp settles asynchronously: our close tx submits the request,
+  // then an oracle BatchRequestPriceCallback tx transfers tokens back (~4 blocks later)
+  if (result.receipt) {
+    try {
+      const config = await loadConfig();
+      const userAddress = config?.wallet?.smartAccountAddress as Address;
+      if (userAddress) {
+        const inflows = await pollForSettlementInflows(
+          result.receipt.blockNumber,
+          userAddress,
+        );
+        if (inflows.length > 0) {
+          await updateTokenFlows(agentId, { outflows: [], inflows });
+        }
+      }
+    } catch {
+      // Non-critical: close succeeded, inflow tracking is best-effort
+    }
+  }
+
   return {
     success: true,
     message: `Successfully closed position ${tradeHash.slice(0, 10)}... (autonomous)`,
@@ -934,6 +1037,22 @@ export async function executeAutonomousLeverUpCancelLimitOrder(
       message: "Autonomous cancel failed",
       error: result.error,
     };
+  }
+
+  // Parse receipt for returned collateral inflows
+  if (result.receipt) {
+    try {
+      const config = await loadConfig();
+      const userAddress = config?.wallet?.smartAccountAddress as Address;
+      if (userAddress) {
+        const inflows = parseErc20Inflows(result.receipt, userAddress);
+        if (inflows.length > 0) {
+          await updateTokenFlows(agentId, { outflows: [], inflows });
+        }
+      }
+    } catch {
+      // Non-critical: cancel succeeded, inflow tracking is best-effort
+    }
   }
 
   return {

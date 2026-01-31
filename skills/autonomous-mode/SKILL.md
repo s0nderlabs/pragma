@@ -198,6 +198,45 @@ Net outflow = sum(out - in) across all tokens in group, normalized to canonical 
 
 When user requests autonomous trading, analyze their intent and propose a tailored configuration.
 
+### Step 0: Check Existing Agents
+
+**ALWAYS run this before creating a new agent.**
+
+```
+list_sub_agents(status: "all")
+```
+
+If any agents have status `"running"` or `"paused"`:
+- These are likely **orphaned from a previous session** (terminal closed, crash, etc.)
+- Present to user:
+
+```
+Header: "Existing Agent"
+Question: "You have an existing [type] agent ([agentId]). It was [mission summary]. What would you like to do?"
+Options:
+  - Resume agent (Recommended)
+  - Clean up and create new
+  - Keep it and create new alongside
+Description: |
+  Status: [running/paused]
+  Budget: [X] MON remaining
+  Trades: [N] executed / [M] max
+  Last active: [timestamp]
+```
+
+**If user chooses Resume:**
+1. `get_sub_agent_state(subAgentId)` → get taskAgentId
+2. `Task({ resume: taskAgentId })` → respawn agent with full context
+
+**If user chooses Clean up:**
+1. `revoke_sub_agent(subAgentId, sweepBalance: false)`
+2. Continue to Step 1
+
+**If user chooses Keep alongside:**
+1. Continue to Step 1 (new agent created in parallel)
+
+If no running/paused agents exist, or only `completed`/`failed`/`pending` agents, proceed to Step 1.
+
 ### Step 1: Analyze Intent
 
 Extract configuration from user's request:
