@@ -119,6 +119,12 @@ export interface SubAgentState {
     // Budget is enforced on net outflow across all tokens in the group
     groupBudgets?: Record<string, string>;
 
+    // Token group allowlist (e.g. ["MON", "USD"])
+    // Restricts which token groups the agent can spend from user's holdings
+    // Tokens acquired during trading (prior inflows) are always sellable
+    // Omit or empty array for unrestricted access (backward compatible)
+    allowedGroups?: string[];
+
     // @deprecated - kept for backwards compatibility, use tokenSpent instead
     usdcAllocated?: string;
     usdcSpent?: string;
@@ -196,6 +202,9 @@ export interface CreateAgentStateParams {
     // Optional group-level budgets (e.g. { USD: 10000000n } for 10 USDC)
     // Budget is enforced on net outflow across all tokens in the group
     groupBudgets?: Record<string, bigint>;
+    // Optional token group allowlist (e.g. ["MON", "USD"])
+    // Restricts which token groups the agent can spend
+    allowedGroups?: string[];
   };
   maxTrades: number;
   expiresAt: number;
@@ -262,6 +271,7 @@ export async function createAgentState(params: CreateAgentStateParams): Promise<
             Object.entries(params.budget.groupBudgets).map(([k, v]) => [k, v.toString()])
           )
         : undefined,
+      allowedGroups: params.budget.allowedGroups,
     },
     trades: {
       executed: 0,
@@ -829,6 +839,52 @@ export function getGroupNetOutflow(
 }
 
 /**
+ * Find which token group a token address belongs to.
+ * Returns the group name (e.g. "MON", "USD") or null if not in any group.
+ */
+export function findGroupForToken(tokenAddress: Address): string | null {
+  const normalized = tokenAddress.toLowerCase();
+  for (const [name, group] of Object.entries(TOKEN_GROUPS)) {
+    if (group.tokens.some((t) => t.toLowerCase() === normalized)) return name;
+  }
+  return null;
+}
+
+/**
+ * Check if a token is allowed by the agent's allowedGroups allowlist.
+ *
+ * Rules:
+ * 1. No allowedGroups or empty array → unrestricted (backward compatible)
+ * 2. Token in an allowed group → allowed
+ * 3. Token has prior inflows (agent acquired it during trading) → allowed
+ * 4. Otherwise → blocked
+ */
+export function isTokenAllowed(
+  state: SubAgentState,
+  tokenAddress: Address
+): { allowed: boolean; reason?: string } {
+  if (!state.budget.allowedGroups || state.budget.allowedGroups.length === 0) {
+    return { allowed: true };
+  }
+
+  const groupName = findGroupForToken(tokenAddress);
+  if (groupName && state.budget.allowedGroups.includes(groupName)) {
+    return { allowed: true };
+  }
+
+  // Check if agent acquired this token during trading (has inflows)
+  const flows = state.budget.tokenFlows?.[tokenAddress.toLowerCase()];
+  if (flows && BigInt(flows.in) > 0n) {
+    return { allowed: true };
+  }
+
+  return {
+    allowed: false,
+    reason: `Token not in allowed groups [${state.budget.allowedGroups.join(", ")}] and has no prior inflows`,
+  };
+}
+
+/**
  * Pre-trade budget validation using token groups.
  * Checks if spending `amount` of `tokenAddress` would exceed the group budget.
  *
@@ -840,16 +896,7 @@ export function checkGroupBudget(
   tokenAddress: Address,
   amount: bigint
 ): { allowed: boolean; reason?: string } {
-  const normalizedAddr = tokenAddress.toLowerCase();
-
-  // Find which group this token belongs to
-  let groupName: string | null = null;
-  for (const [name, group] of Object.entries(TOKEN_GROUPS)) {
-    if (group.tokens.some((t) => t.toLowerCase() === normalizedAddr)) {
-      groupName = name;
-      break;
-    }
-  }
+  const groupName = findGroupForToken(tokenAddress);
 
   // Token not in any group → always allowed
   if (!groupName) {
@@ -881,7 +928,7 @@ export function checkGroupBudget(
   }
 
   // Normalize the incoming amount to canonical decimals
-  const normalizedAmount = normalizeToCanonical(amount, normalizedAddr, canonicalDecimals);
+  const normalizedAmount = normalizeToCanonical(amount, tokenAddress, canonicalDecimals);
 
   // Check: currentNetOutflow + normalizedAmount <= budget
   // getGroupNetOutflow already returns normalized values
@@ -925,20 +972,11 @@ export async function getAllTokenFlows(
     const outVal = BigInt(entry.out);
     const inVal = BigInt(entry.in);
 
-    // Find group for this token
-    let group: string | null = null;
-    for (const [name, groupDef] of Object.entries(TOKEN_GROUPS)) {
-      if (groupDef.tokens.some((t) => t.toLowerCase() === addr.toLowerCase())) {
-        group = name;
-        break;
-      }
-    }
-
     result[addr] = {
       out: outVal,
       in: inVal,
       net: inVal - outVal, // positive = net gain, negative = net cost
-      group,
+      group: findGroupForToken(addr as Address),
     };
   }
 

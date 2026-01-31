@@ -28,6 +28,7 @@ import {
   updateTokenSpent,
   updateTokenFlows,
   checkGroupBudget,
+  isTokenAllowed,
   updateAgentState,
   addError,
   NATIVE_TOKEN_ADDRESS,
@@ -268,26 +269,40 @@ export async function executeWithDelegationChain(
     return { success: false, error: "Missing delegation chain in storage" };
   }
 
-  // 3. Validate budget for native MON (skip for approvals)
-  if (execution.value > 0n && !options?.skipBudgetTracking) {
-    const monAllocated = BigInt(state.budget.monAllocated);
-    const monSpent = BigInt(state.budget.monSpent);
-    if (monSpent + execution.value > monAllocated) {
-      return {
-        success: false,
-        error: `Insufficient MON budget. Allocated: ${monAllocated}, Spent: ${monSpent}, Required: ${execution.value}`,
-      };
-    }
-  }
+  // 3. Pre-trade validation: budget + allowlist (skip for approvals)
+  if (!options?.skipBudgetTracking) {
+    // 3a. Validate native MON budget and allowlist
+    if (execution.value > 0n) {
+      const monAllocated = BigInt(state.budget.monAllocated);
+      const monSpent = BigInt(state.budget.monSpent);
+      if (monSpent + execution.value > monAllocated) {
+        return {
+          success: false,
+          error: `Insufficient MON budget. Allocated: ${monAllocated}, Spent: ${monSpent}, Required: ${execution.value}`,
+        };
+      }
 
-  // 3b. Validate group budgets for ERC-20 token outflows
-  if (options?.tokenFlows && !options?.skipBudgetTracking) {
-    for (const { token, amount } of options.tokenFlows.outflows) {
-      // Skip native MON — already checked above via execution.value
-      if (token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) continue;
-      const check = checkGroupBudget(state, token, amount);
-      if (!check.allowed) {
-        return { success: false, error: `Budget exceeded: ${check.reason}` };
+      const nativeCheck = isTokenAllowed(state, NATIVE_TOKEN_ADDRESS);
+      if (!nativeCheck.allowed) {
+        return { success: false, error: `Native MON not allowed: ${nativeCheck.reason}` };
+      }
+    }
+
+    // 3b. Validate ERC-20 outflows: group budgets + allowlist
+    if (options?.tokenFlows) {
+      for (const { token, amount } of options.tokenFlows.outflows) {
+        // Skip native MON — already checked above via execution.value
+        if (token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()) continue;
+
+        const budgetCheck = checkGroupBudget(state, token, amount);
+        if (!budgetCheck.allowed) {
+          return { success: false, error: `Budget exceeded: ${budgetCheck.reason}` };
+        }
+
+        const allowCheck = isTokenAllowed(state, token);
+        if (!allowCheck.allowed) {
+          return { success: false, error: `Token not allowed: ${allowCheck.reason}` };
+        }
       }
     }
   }

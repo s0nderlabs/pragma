@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] - 2026-01-31
+
+### Added
+- **`revoke_root_delegation` tool** - Revoke all autonomous permissions in one call. Cascades cleanup to all sub-agents, archives states, releases wallets, and stops caffeinate. Requires `confirm: true` safety check
+- **Token group allowlist** - Optional `allowedGroups` parameter on `create_sub_agent` restricts which token groups (MON, USD) an agent can spend from user's holdings. Tokens acquired during trading are always sellable. Enforced in `executeWithDelegationChain` before execution
+- **Agent YAML frontmatter** - Added `name` and `description` fields to Kairos, Thymos, and Pragma agent definitions for Claude Code plugin agent discovery
+
+### Fixed
+- **Caffeinate orphan processes** - Added `-w` flag so caffeinate auto-exits when MCP server dies, preventing zombie processes on user's machine
+
 ## [0.8.8] - 2026-01-31
 
 ### Added

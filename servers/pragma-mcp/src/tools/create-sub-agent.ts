@@ -64,6 +64,15 @@ const CreateSubAgentSchema = z.object({
     .min(0)
     .optional()
     .describe("USD group budget covering USDC + LVUSD (soft limit, agent self-tracks). Default: 0"),
+  allowedGroups: z
+    .array(z.enum(["MON", "USD"]))
+    .optional()
+    .describe(
+      "Token groups this agent is allowed to spend. " +
+        "MON group: native MON, WMON, LVMON. USD group: USDC, LVUSD. " +
+        "Tokens acquired during trading are always sellable. " +
+        "Omit for unrestricted access."
+    ),
   expiryDays: z
     .number()
     .min(1)
@@ -141,6 +150,7 @@ interface CreateSubAgentResult {
       mon: string;
       usd: string;
       perTransaction: string;
+      allowedGroups: string[] | string;
     };
     maxTrades: number;
     expiresAt: string;
@@ -368,6 +378,7 @@ async function createSubAgentHandler(
           monAllocated: totalBudgetWei,
           tokenLimits,
           groupBudgets,
+          allowedGroups: params.allowedGroups,
         },
         maxTrades: params.maxTrades,
         expiresAt: delegationResult.expiresAt * 1000, // Convert to milliseconds
@@ -510,6 +521,7 @@ async function createSubAgentHandler(
             mon: params.budgetMon + " MON",
             usd: (params.budgetUsd || 0) + " USD",
             perTransaction: formatEther(valueLtePerTx) + " MON/tx",
+            allowedGroups: params.allowedGroups || "unrestricted",
           },
           maxTrades: params.maxTrades,
           expiresAt: expiresAt.toISOString(),

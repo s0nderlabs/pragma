@@ -1,3 +1,8 @@
+---
+name: pragma
+description: General-purpose autonomous executor for any task. Use for multi-protocol operations, conditional execution, custom strategies, or tasks not specific to perps or memecoins.
+---
+
 # Pragma Agent
 
 > "Action, deed" (πρᾶγμα) — General-purpose autonomous executor

@@ -10,6 +10,7 @@ allowed-tools:
   - mcp__pragma__get_sub_agent_state
   - mcp__pragma__report_agent_status
   - mcp__pragma__check_delegation_status
+  - mcp__pragma__revoke_root_delegation
   - mcp__pragma__get_all_balances
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
@@ -158,8 +159,18 @@ Net outflow = sum(out - in) across all tokens in group, normalized to canonical 
 ### Budget Enforcement
 
 - Pre-trade: `checkGroupBudget()` validates the outflow won't exceed group budget
+- Pre-trade: `isTokenAllowed()` validates the token is in the agent's allowed groups
 - Post-trade: `updateTokenFlows()` records actual flows in the ledger
 - Legacy `tokenSpent` and `monSpent` still updated for backwards compatibility
+
+### Token Allowlist (Optional)
+
+- `allowedGroups` restricts which token groups the agent can spend
+- Tokens acquired during trading (prior inflows) are always sellable
+- Example: `["MON"]` allows MON/WMON/LVMON spending only
+- Example: `["USD"]` allows USDC/LVUSD spending only
+- Example: `["MON", "USD"]` allows both groups
+- Omit for unrestricted access (backward compatible)
 
 ## Sub-Agent Funding
 
@@ -318,6 +329,21 @@ Description: |
   This covers both USDC and LVUSD (they share the USD budget).
 ```
 
+If the user's task targets specific protocols, also ask about token restrictions:
+
+```
+Header: "Allowed Tokens"
+Question: "Which tokens can this agent spend?"
+Options:
+  - MON group only (MON, WMON, LVMON)
+  - USD group only (USDC, LVUSD)
+  - Both MON + USD groups
+  - Unrestricted (Recommended)
+Description: |
+  Restricts which of your existing holdings the agent can touch.
+  Tokens the agent buys during trading can always be sold back.
+```
+
 ### Step 4: Present Tailored Configuration
 
 Show the complete config for validation:
@@ -396,6 +422,7 @@ create_sub_agent(
   agentType: [inferred],
   budgetMon: [user specified],
   budgetUsd: [user specified, optional],
+  allowedGroups: [user specified, optional — e.g. ["MON"] or ["MON", "USD"]],
   maxTrades: [inferred],
   expiryDays: [calculated],
   fundAmount: 1,
@@ -565,6 +592,16 @@ revoke_sub_agent(subAgentId, sweepBalance?)
 - sweepBalance: false (default) keeps gas in wallet for reuse
              true sweeps gas back to session key
 - Returns wallet to pool for reuse
+```
+
+### Revoking Root Delegation
+```
+revoke_root_delegation(confirm: true)
+- Revokes root delegation entirely
+- Archives ALL sub-agent states
+- Releases ALL wallets to pool
+- Stops caffeinate
+- After this, no autonomous trading until new root delegation created
 ```
 
 ---

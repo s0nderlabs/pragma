@@ -62,6 +62,8 @@ export {
   getAllTokenFlows,
   checkGroupBudget,
   getGroupNetOutflow,
+  findGroupForToken,
+  isTokenAllowed,
   listAgentStates,
   deleteAgentState,
   agentExists,
