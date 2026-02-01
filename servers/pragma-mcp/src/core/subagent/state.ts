@@ -45,6 +45,60 @@ export interface TokenFlowUpdate {
 }
 
 /**
+ * Tracked LeverUp position for budget reconciliation.
+ * Stored in ~/.pragma/agents/<id>/tracked-positions.json
+ *
+ * When a position is opened, it's added here. When leverup_list_positions
+ * is called with agentId, positions missing from the API response are detected
+ * as keeper-triggered closes (TP/SL/liquidation) and their inflows are reconciled.
+ */
+export interface TrackedPosition {
+  tradeHash?: string; // null until reconciled from getUserPositions
+  pair: string;
+  side: "LONG" | "SHORT";
+  margin: string; // bigint as string (raw token amount)
+  collateralToken: string; // token address
+  leverage: number;
+  entryPrice: string;
+  stopLoss: string;
+  takeProfit: string;
+  openedAt: number;
+  status: "open" | "pending_settlement";
+  detectedGoneAt?: number; // block number when first detected missing
+}
+
+/**
+ * Journal entry for agent activity logging.
+ * Stored in ~/.pragma/agents/<id>/journal.jsonl
+ *
+ * Two sources: auto-generated on trade events (code) and
+ * agent-initiated via report_agent_status reason field.
+ */
+export interface JournalEntry {
+  ts: number;
+  type:
+    | "trade_open"
+    | "trade_close"
+    | "trade_buy"
+    | "trade_sell"
+    | "swap"
+    | "reasoning"
+    | "status"
+    | "error"
+    | "limit_order"
+    | "cancel_order";
+  pair?: string;
+  side?: string;
+  margin?: string;
+  leverage?: string;
+  pnl?: string;
+  text?: string;
+  txHash?: string;
+  tradeHash?: string;
+  protocol?: string;
+}
+
+/**
  * Token decimal metadata for normalization within groups.
  * Key is lowercase token address, value is native decimals.
  */
@@ -917,6 +971,31 @@ export function isTokenAllowed(
 }
 
 /**
+ * Resolve the budget for a token group.
+ * Returns the budget in canonical decimals, or null if no budget is set.
+ */
+function resolveGroupBudget(state: SubAgentState, groupName: string): bigint | null {
+  // Explicit group budget takes priority
+  if (state.budget.groupBudgets?.[groupName]) {
+    return BigInt(state.budget.groupBudgets[groupName]);
+  }
+
+  // Fallback: MON group uses monAllocated (18 dec = canonical)
+  if (groupName === "MON") {
+    return BigInt(state.budget.monAllocated);
+  }
+
+  // Fallback: USD group uses tokenLimits for USDC if set (6 dec = canonical)
+  if (groupName === "USD") {
+    const usdcAddr = TOKEN_GROUPS.USD.tokens[0].toLowerCase();
+    const usdcLimit = state.budget.tokenLimits?.[usdcAddr];
+    if (usdcLimit) return BigInt(usdcLimit);
+  }
+
+  return null;
+}
+
+/**
  * Pre-trade budget validation using token groups.
  * Checks if spending `amount` of `tokenAddress` would exceed the group budget.
  *
@@ -937,40 +1016,25 @@ export function checkGroupBudget(
 
   const { canonicalDecimals } = TOKEN_GROUPS[groupName];
 
-  // Get group budget (already in canonical decimals)
-  let budget: bigint | null = null;
-
-  if (state.budget.groupBudgets?.[groupName]) {
-    budget = BigInt(state.budget.groupBudgets[groupName]);
-  } else if (groupName === "MON") {
-    // Fallback: MON group uses monAllocated (18 dec = canonical)
-    budget = BigInt(state.budget.monAllocated);
-  } else if (groupName === "USD") {
-    // Fallback: USD group uses tokenLimits for USDC if set (6 dec = canonical)
-    const usdcAddr = TOKEN_GROUPS.USD.tokens[0].toLowerCase(); // USDC is first in group
-    const usdcLimit = state.budget.tokenLimits?.[usdcAddr];
-    if (usdcLimit) {
-      budget = BigInt(usdcLimit);
-    }
-  }
-
-  // No budget set for this group → allowed
-  if (budget === null) {
-    return { allowed: true };
-  }
+  // Resolve group budget (already in canonical decimals)
+  const budget = resolveGroupBudget(state, groupName);
+  if (budget === null) return { allowed: true };
 
   // Normalize the incoming amount to canonical decimals
   const normalizedAmount = normalizeToCanonical(amount, tokenAddress, canonicalDecimals);
 
-  // Check: currentNetOutflow + normalizedAmount <= budget
-  // getGroupNetOutflow already returns normalized values
+  // Static max drawdown model:
+  // - Only count losses (positive net outflow) as budget consumed
+  // - Profits (negative net outflow) don't increase budget beyond original
+  // - Budget = max the agent can lose from initial allocation
   const currentNet = getGroupNetOutflow(state, groupName);
-  const projectedNet = currentNet + normalizedAmount;
+  const budgetConsumed = currentNet > 0n ? currentNet : 0n;
+  const remaining = budget - budgetConsumed;
 
-  if (projectedNet > budget) {
+  if (normalizedAmount > remaining) {
     return {
       allowed: false,
-      reason: `${groupName} group budget exceeded: net outflow would be ${projectedNet} (budget: ${budget}) [canonical ${canonicalDecimals} decimals]`,
+      reason: `${groupName} group budget exceeded: need ${normalizedAmount} but only ${remaining} remaining (consumed: ${budgetConsumed}, budget: ${budget}) [canonical ${canonicalDecimals} decimals]`,
     };
   }
 
@@ -1013,4 +1077,131 @@ export async function getAllTokenFlows(
   }
 
   return result;
+}
+
+// ============================================================================
+// Tracked Position Management
+// ============================================================================
+
+function getTrackedPositionsPath(agentId: string): string {
+  return path.join(getAgentDir(agentId), "tracked-positions.json");
+}
+
+/**
+ * Load tracked positions for an agent.
+ * Returns empty array if file doesn't exist.
+ */
+export function getTrackedPositions(agentId: string): TrackedPosition[] {
+  const filePath = getTrackedPositionsPath(agentId);
+  if (!existsSync(filePath)) return [];
+  try {
+    return JSON.parse(readFileSync(filePath, "utf-8")) as TrackedPosition[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Save tracked positions (full overwrite).
+ */
+export function saveTrackedPositions(agentId: string, positions: TrackedPosition[]): void {
+  const filePath = getTrackedPositionsPath(agentId);
+  const agentDir = getAgentDir(agentId);
+  if (!existsSync(agentDir)) {
+    mkdirSync(agentDir, { recursive: true });
+  }
+  writeFileSync(filePath, JSON.stringify(positions, null, 2));
+}
+
+/**
+ * Add a tracked position.
+ */
+export function addTrackedPosition(agentId: string, position: TrackedPosition): void {
+  const positions = getTrackedPositions(agentId);
+  positions.push(position);
+  saveTrackedPositions(agentId, positions);
+}
+
+/**
+ * Remove a tracked position by tradeHash.
+ */
+export function removeTrackedPosition(agentId: string, tradeHash: string): void {
+  const positions = getTrackedPositions(agentId);
+  const filtered = positions.filter((p) => p.tradeHash !== tradeHash);
+  saveTrackedPositions(agentId, filtered);
+}
+
+/**
+ * Update a tracked position's status and optional detectedGoneAt.
+ */
+export function updateTrackedPositionStatus(
+  agentId: string,
+  tradeHash: string,
+  status: TrackedPosition["status"],
+  detectedGoneAt?: number
+): void {
+  const positions = getTrackedPositions(agentId);
+  const pos = positions.find((p) => p.tradeHash === tradeHash);
+  if (pos) {
+    pos.status = status;
+    if (detectedGoneAt !== undefined) {
+      pos.detectedGoneAt = detectedGoneAt;
+    }
+    saveTrackedPositions(agentId, positions);
+  }
+}
+
+/**
+ * Link an unresolved tracked position (no tradeHash) to a discovered tradeHash.
+ */
+export function linkTrackedPosition(agentId: string, index: number, tradeHash: string): void {
+  const positions = getTrackedPositions(agentId);
+  if (index >= 0 && index < positions.length) {
+    positions[index].tradeHash = tradeHash;
+    saveTrackedPositions(agentId, positions);
+  }
+}
+
+// ============================================================================
+// Journal (Persistent Agent Activity Log)
+// ============================================================================
+
+function getJournalPath(agentId: string): string {
+  return path.join(getAgentDir(agentId), "journal.jsonl");
+}
+
+/**
+ * Append an entry to the agent's journal.
+ * Uses JSONL format (one JSON object per line).
+ */
+export function appendJournal(agentId: string, entry: JournalEntry): void {
+  const journalPath = getJournalPath(agentId);
+  const agentDir = getAgentDir(agentId);
+  if (!existsSync(agentDir)) {
+    mkdirSync(agentDir, { recursive: true });
+  }
+  appendFileSync(journalPath, JSON.stringify(entry) + "\n");
+}
+
+/**
+ * Load journal entries with optional pagination.
+ * Returns { entries, total } where total is the count of all entries.
+ */
+export function loadJournal(
+  agentId: string,
+  offset = 0,
+  limit = 50
+): { entries: JournalEntry[]; total: number } {
+  const journalPath = getJournalPath(agentId);
+  if (!existsSync(journalPath)) return { entries: [], total: 0 };
+
+  try {
+    const lines = readFileSync(journalPath, "utf-8").trim().split("\n").filter(Boolean);
+    const entries = lines
+      .slice(offset, offset + limit)
+      .map((line) => JSON.parse(line) as JournalEntry);
+    return { entries, total: lines.length };
+  } catch {
+    return { entries: [], total: 0 };
+  }
 }

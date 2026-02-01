@@ -16,6 +16,7 @@ import {
   getAllTokenSpending,
   getAllTokenFlows,
   getGroupNetOutflow,
+  getTrackedPositions,
   NATIVE_TOKEN_ADDRESS,
   USDC_ADDRESS,
   TOKEN_GROUPS,
@@ -80,12 +81,14 @@ interface GetSubAgentStateResult {
         net: string; // positive = profit, negative = cost
         group: string | null;
       }>;
-      // Group-level budget enforcement
+      // Group-level budget enforcement (static max drawdown model)
       groupBudgets?: Array<{
         group: string;
         budget: string;
-        netOutflow: string;
+        budgetConsumed: string;
         remaining: string;
+        pnl: string; // positive = profit, negative = loss
+        trackedPositions: number;
         utilization: string; // percentage
       }>;
     };
@@ -257,47 +260,67 @@ async function getSubAgentStateHandler(
           })
       : undefined;
 
-    // Compute group budget status
+    // Load tracked positions count
+    let trackedPositionCount = 0;
+    try {
+      trackedPositionCount = getTrackedPositions(params.subAgentId).length;
+    } catch { /* non-critical */ }
+
+    // Compute group budget status (static max drawdown model)
+    // budgetConsumed = max(0, netOutflow) -- only count net losses
+    // remaining = budget - budgetConsumed -- capped at original budget
+    // pnl = -netOutflow -- positive means profit
+    // Capture state for closure (TypeScript can't narrow `let` in nested functions)
+    const currentState = state;
+
+    function formatGroupBudget(
+      groupName: string,
+      budget: bigint,
+      decimals: number,
+      unit: string,
+    ): typeof groupBudgetsList[number] {
+      const netOutflow = getGroupNetOutflow(currentState, groupName);
+      const consumed = netOutflow > 0n ? netOutflow : 0n;
+      const remaining = budget - consumed;
+      const pnl = -netOutflow;
+      const utilPct = budget > 0n
+        ? Number((consumed * 10000n) / budget) / 100
+        : 0;
+      const fmt = (v: bigint): string => `${formatUnits(v, decimals)} ${unit}`;
+      const fmtSigned = (v: bigint): string =>
+        `${v >= 0n ? "+" : "-"}${fmt(v >= 0n ? v : -v)}`;
+
+      return {
+        group: groupName,
+        budget: fmt(budget),
+        budgetConsumed: fmt(consumed),
+        remaining: fmt(remaining),
+        pnl: fmtSigned(pnl),
+        trackedPositions: trackedPositionCount,
+        utilization: `${utilPct.toFixed(1)}%`,
+      };
+    }
+
     const groupBudgetsList: Array<{
       group: string;
       budget: string;
-      netOutflow: string;
+      budgetConsumed: string;
       remaining: string;
+      pnl: string;
+      trackedPositions: number;
       utilization: string;
     }> = [];
 
     // Always include MON group
-    const monGroupNetOutflow = getGroupNetOutflow(state, "MON");
     const monGroupBudget = state.budget.groupBudgets?.MON
       ? BigInt(state.budget.groupBudgets.MON)
       : monAllocated;
-    const monGroupRemaining = monGroupBudget - monGroupNetOutflow;
-    const monGroupUtilPct = monGroupBudget > 0n
-      ? Number((monGroupNetOutflow * 10000n) / monGroupBudget) / 100
-      : 0;
-    groupBudgetsList.push({
-      group: "MON",
-      budget: formatEther(monGroupBudget) + " MON",
-      netOutflow: formatEther(monGroupNetOutflow) + " MON",
-      remaining: formatEther(monGroupRemaining) + " MON",
-      utilization: `${monGroupUtilPct.toFixed(1)}%`,
-    });
+    groupBudgetsList.push(formatGroupBudget("MON", monGroupBudget, 18, "MON"));
 
     // Include USD group if budget is set
     if (state.budget.groupBudgets?.USD) {
       const usdBudget = BigInt(state.budget.groupBudgets.USD);
-      const usdNetOutflow = getGroupNetOutflow(state, "USD");
-      const usdRemaining = usdBudget - usdNetOutflow;
-      const usdUtilPct = usdBudget > 0n
-        ? Number((usdNetOutflow * 10000n) / usdBudget) / 100
-        : 0;
-      groupBudgetsList.push({
-        group: "USD",
-        budget: formatUnits(usdBudget, 6) + " USD",
-        netOutflow: formatUnits(usdNetOutflow, 6) + " USD",
-        remaining: formatUnits(usdRemaining, 6) + " USD",
-        utilization: `${usdUtilPct.toFixed(1)}%`,
-      });
+      groupBudgetsList.push(formatGroupBudget("USD", usdBudget, 6, "USD"));
     }
 
     // Load loop config

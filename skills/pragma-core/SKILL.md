@@ -58,6 +58,11 @@ allowed-tools:
   - mcp__pragma__revoke_sub_agent
   - mcp__pragma__fund_sub_agent
   - mcp__pragma__get_sub_agent_state
+  - mcp__pragma__report_agent_status
+  - mcp__pragma__check_delegation_status
+  - mcp__pragma__revoke_root_delegation
+  - mcp__pragma__get_agent_log
+  - mcp__pragma__list_wallet_pool
   - AskUserQuestion
   - Read
   - Task
@@ -268,6 +273,11 @@ Before executing multiple operations, calculate total gas needed:
 | Market    | `market_get_critical_news`  | Critical market news (5-layer red detection)                   |
 | Market    | `market_search_news`        | Search news by keyword (last 7 days)                           |
 | Market    | `market_get_cb_speeches`    | Central bank speeches and policy announcements                 |
+| Agent     | `report_agent_status`       | Sub-agent status updates (running/paused/completed/failed)     |
+| Agent     | `check_delegation_status`   | Check root or sub-agent delegation validity                    |
+| Agent     | `revoke_root_delegation`    | Revoke root delegation and stop all agents                     |
+| Agent     | `get_agent_log`             | Paginated journal log (trades, reasoning, status)              |
+| Agent     | `list_wallet_pool`          | List wallet pool wallets and assignments                       |
 
 ### Context-Optimized Operations (IMPORTANT)
 

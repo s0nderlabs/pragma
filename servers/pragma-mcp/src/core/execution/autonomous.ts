@@ -10,7 +10,6 @@ import {
   erc20Abi,
   parseEventLogs,
   parseAbiItem,
-  formatUnits,
   type Address,
   type Hex,
   type TransactionReceipt,
@@ -34,6 +33,9 @@ import {
   NATIVE_TOKEN_ADDRESS,
   type TradeRecord,
   type TokenFlowUpdate,
+  addTrackedPosition,
+  removeTrackedPosition,
+  appendJournal,
 } from "../subagent/state.js";
 import { getFullWallet, getSubAgentAccount } from "../subagent/index.js";
 import { loadConfig, getRpcUrl } from "../../config/pragma-config.js";
@@ -65,6 +67,7 @@ import {
   isDegenModeLeverage,
   getMaxTpPercent,
   getCollateralDecimals,
+  getUserPositions,
 } from "../leverup/client.js";
 import {
   SUPPORTED_PAIRS,
@@ -84,6 +87,11 @@ import { resolveToken } from "../data/client.js";
 // ============================================================================
 // Constants
 // ============================================================================
+
+/** Absolute difference between two bigints */
+function absDiff(a: bigint, b: bigint): bigint {
+  return a > b ? a - b : b - a;
+}
 
 /** Maps collateral token type to its on-chain address for token flow tracking */
 const COLLATERAL_TOKEN_ADDRESSES: Record<CollateralToken, Address> = {
@@ -115,29 +123,64 @@ function parseErc20Inflows(
     }));
 }
 
+/** ERC20 Transfer event signature used for settlement inflow detection */
+const TRANSFER_EVENT = parseAbiItem(
+  "event Transfer(address indexed from, address indexed to, uint256 value)"
+);
+
+/**
+ * Create a public client from the current pragma config.
+ * Returns null if config is missing.
+ */
+async function createConfiguredPublicClient(): Promise<ReturnType<typeof createPublicClient> | null> {
+  const config = await loadConfig();
+  if (!config) return null;
+
+  const rpcUrl = await getRpcUrl(config);
+  const chainId = config.network?.chainId ?? 143;
+  const chain = buildViemChain(chainId, rpcUrl);
+  return createPublicClient({
+    chain,
+    transport: createSyncHttpTransport(rpcUrl, config),
+  });
+}
+
+/**
+ * Query Transfer event logs from LeverUp diamond to a user address.
+ */
+async function getSettlementLogs(
+  publicClient: ReturnType<typeof createPublicClient>,
+  userAddress: Address,
+  fromBlock: bigint,
+  toBlock: bigint | "latest",
+): Promise<Array<{ token: Address; amount: bigint }>> {
+  const logs = await publicClient.getLogs({
+    event: TRANSFER_EVENT,
+    args: {
+      from: WHITELISTED_SPENDERS.leverUpDiamond as Address,
+      to: userAddress,
+    },
+    fromBlock,
+    toBlock,
+  });
+
+  return logs.map(log => ({
+    token: log.address as Address,
+    amount: log.args.value!,
+  }));
+}
+
 /**
  * Poll for ERC20 Transfer events from LeverUp diamond to user's smart account.
  * LeverUp uses two-step execution: our close tx submits the request, and an oracle
  * callback tx settles and transfers tokens back. We poll for that settlement Transfer.
  */
-async function pollForSettlementInflows(
+export async function pollForSettlementInflows(
   fromBlock: bigint,
   userAddress: Address,
 ): Promise<Array<{ token: Address; amount: bigint }>> {
-  const config = await loadConfig();
-  if (!config) return [];
-
-  const rpcUrl = await getRpcUrl(config);
-  const chainId = config.network?.chainId ?? 143;
-  const chain = buildViemChain(chainId, rpcUrl);
-  const publicClient = createPublicClient({
-    chain,
-    transport: createSyncHttpTransport(rpcUrl, config),
-  });
-
-  const transferEvent = parseAbiItem(
-    "event Transfer(address indexed from, address indexed to, uint256 value)"
-  );
+  const publicClient = await createConfiguredPublicClient();
+  if (!publicClient) return [];
 
   const maxAttempts = 8; // ~16 seconds total
   const pollInterval = 2000; // 2 seconds between polls
@@ -146,28 +189,34 @@ async function pollForSettlementInflows(
     await new Promise(resolve => setTimeout(resolve, pollInterval));
 
     try {
-      const logs = await publicClient.getLogs({
-        event: transferEvent,
-        args: {
-          from: WHITELISTED_SPENDERS.leverUpDiamond as Address,
-          to: userAddress,
-        },
-        fromBlock: fromBlock + 1n,
-        toBlock: "latest",
-      });
-
-      if (logs.length > 0) {
-        return logs.map(log => ({
-          token: log.address as Address,
-          amount: log.args.value!,
-        }));
-      }
+      const inflows = await getSettlementLogs(publicClient, userAddress, fromBlock + 1n, "latest");
+      if (inflows.length > 0) return inflows;
     } catch {
       // Transient RPC error, retry on next attempt
     }
   }
 
-  return []; // Timeout — settlement not found within polling window
+  return []; // Timeout -- settlement not found within polling window
+}
+
+/**
+ * Query for settlement inflows in a specific block range (non-blocking).
+ * Unlike pollForSettlementInflows, this does a single getLogs call without retrying.
+ * Used by leverup_list_positions reconciliation for positions that closed in the past.
+ */
+export async function querySettlementInflows(
+  fromBlock: bigint,
+  toBlock: bigint,
+  userAddress: Address
+): Promise<Array<{ token: Address; amount: bigint }>> {
+  const publicClient = await createConfiguredPublicClient();
+  if (!publicClient) return [];
+
+  try {
+    return await getSettlementLogs(publicClient, userAddress, fromBlock, toBlock);
+  } catch {
+    return [];
+  }
 }
 
 // ============================================================================
@@ -731,6 +780,19 @@ export async function executeAutonomousNadFunBuy(
   // Clean up quote on success
   deleteNadFunQuote(quoteId);
 
+  // Journal: trade_buy
+  try {
+    await appendJournal(agentId, {
+      ts: Date.now(),
+      type: "trade_buy",
+      pair: `${quote.tokenSymbol}/MON`,
+      margin: quote.amountIn,
+      text: `Bought ${quote.expectedOutput} ${quote.tokenSymbol} for ${quote.amountIn} MON`,
+      txHash: result.txHash,
+      protocol: "nadfun",
+    });
+  } catch { /* non-critical */ }
+
   return {
     success: true,
     message: `Successfully bought ${quote.expectedOutput} ${quote.tokenSymbol} for ${quote.amountIn} MON (autonomous)`,
@@ -840,6 +902,19 @@ export async function executeAutonomousNadFunSell(
   // Clean up quote on success
   deleteNadFunQuote(quoteId);
 
+  // Journal: trade_sell
+  try {
+    await appendJournal(agentId, {
+      ts: Date.now(),
+      type: "trade_sell",
+      pair: `${quote.tokenSymbol}/MON`,
+      margin: quote.amountIn,
+      text: `Sold ${quote.amountIn} ${quote.tokenSymbol} for ${quote.expectedOutput} MON`,
+      txHash: result.txHash,
+      protocol: "nadfun",
+    });
+  } catch { /* non-critical */ }
+
   return {
     success: true,
     message: `Successfully sold ${quote.amountIn} ${quote.tokenSymbol} for ${quote.expectedOutput} MON (autonomous)`,
@@ -931,6 +1006,25 @@ export async function executeAutonomousLeverUpClose(
       // Non-critical: close succeeded, inflow tracking is best-effort
     }
   }
+
+  // Remove tracked position (non-critical)
+  try {
+    await removeTrackedPosition(agentId, tradeHash);
+  } catch {
+    // Best-effort cleanup
+  }
+
+  // Journal: trade_close
+  try {
+    await appendJournal(agentId, {
+      ts: Date.now(),
+      type: "trade_close",
+      tradeHash,
+      text: `Closed position ${tradeHash.slice(0, 10)}...`,
+      txHash: result.txHash,
+      protocol: "leverup",
+    });
+  } catch { /* non-critical */ }
 
   return {
     success: true,
@@ -1071,6 +1165,17 @@ export async function executeAutonomousLeverUpCancelLimitOrder(
       // Non-critical: cancel succeeded, inflow tracking is best-effort
     }
   }
+
+  // Journal: cancel_order
+  try {
+    await appendJournal(agentId, {
+      ts: Date.now(),
+      type: "cancel_order",
+      text: `Cancelled ${orderHashes.length} limit order(s)`,
+      txHash: result.txHash,
+      protocol: "leverup",
+    });
+  } catch { /* non-critical */ }
 
   return {
     success: true,
@@ -1675,6 +1780,19 @@ export async function executeAutonomousSwap(
       continue;
     }
 
+    // Journal: swap
+    try {
+      await appendJournal(agentId, {
+        ts: Date.now(),
+        type: "swap",
+        pair: `${quote.fromToken.symbol}/${quote.toToken.symbol}`,
+        margin: quote.amountIn,
+        text: `Swapped ${quote.amountIn} ${quote.fromToken.symbol} for ${quote.expectedOutput} ${quote.toToken.symbol}`,
+        txHash: result.txHash,
+        protocol: "dex",
+      });
+    } catch { /* non-critical */ }
+
     results.push({
       quoteId,
       success: true,
@@ -1922,6 +2040,51 @@ export async function executeAutonomousLeverUpOpen(
     };
   }
 
+  // Journal: trade_open
+  try {
+    await appendJournal(agentId, {
+      ts: Date.now(),
+      type: "trade_open",
+      pair: pairMetadata!.pair,
+      side: params.isLong ? "LONG" : "SHORT",
+      margin: params.marginAmount,
+      leverage: String(params.leverage),
+      text: `Opened ${params.leverage}x ${params.isLong ? "Long" : "Short"} ${params.symbol} with ${params.marginAmount} ${collateral}`,
+      txHash: result.txHash,
+      protocol: "leverup",
+    });
+  } catch { /* non-critical */ }
+
+  // Track opened position for reconciliation (non-critical)
+  try {
+    const smartAddr = config.wallet?.smartAccountAddress as Address;
+    const positions = await getUserPositions(smartAddr);
+    const pairStr = pairMetadata!.pair;
+
+    // Match the newly opened position by pair + side + margin proximity (5% tolerance for fees)
+    const matched = positions.find(p =>
+      p.position.pair === pairStr &&
+      p.position.isLong === params.isLong &&
+      absDiff(p.position.margin, marginWei) * 100n <= marginWei * 5n
+    );
+
+    addTrackedPosition(agentId, {
+      tradeHash: matched?.position.positionHash,
+      pair: pairStr,
+      side: params.isLong ? "LONG" : "SHORT",
+      margin: marginWei.toString(),
+      collateralToken: collateralAddress,
+      leverage: params.leverage,
+      entryPrice: quote.entryPrice,
+      stopLoss: params.stopLoss || "0",
+      takeProfit: params.takeProfit || "0",
+      openedAt: Date.now(),
+      status: "open",
+    });
+  } catch {
+    // Non-critical: position tracking must never break trading
+  }
+
   return {
     success: true,
     message: `Successfully opened ${params.leverage}x ${params.isLong ? 'Long' : 'Short'} ${params.symbol} (autonomous)`,
@@ -2156,6 +2319,21 @@ export async function executeAutonomousLeverUpLimitOrder(
       error: result.error,
     };
   }
+
+  // Journal: limit_order
+  try {
+    await appendJournal(agentId, {
+      ts: Date.now(),
+      type: "limit_order",
+      pair: pairMetadata!.pair,
+      side: params.isLong ? "LONG" : "SHORT",
+      margin: params.marginAmount,
+      leverage: String(params.leverage),
+      text: `Placed ${params.leverage}x ${params.isLong ? "Long" : "Short"} limit on ${params.symbol} @ $${params.triggerPrice}`,
+      txHash: result.txHash,
+      protocol: "leverup",
+    });
+  } catch { /* non-critical */ }
 
   return {
     success: true,

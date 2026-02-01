@@ -11,6 +11,9 @@ allowed-tools:
   - mcp__pragma__report_agent_status
   - mcp__pragma__check_delegation_status
   - mcp__pragma__revoke_root_delegation
+  - mcp__pragma__get_agent_log
+  - mcp__pragma__list_wallet_pool
+  - mcp__pragma__leverup_list_positions
   - mcp__pragma__get_all_balances
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
@@ -127,6 +130,28 @@ When done:
 ## Budget Tracking
 
 Budget enforcement uses two layers: on-chain (hard) and off-chain (soft).
+
+### Static Max Drawdown Model
+
+Budget = maximum net loss the agent can sustain (like prop trading max drawdown).
+
+- **budgetConsumed** = max(0, netOutflow) — only net losses count against budget
+- **remaining** = budget - budgetConsumed — capped at original allocation (profits don't increase it)
+- If agent profits (netOutflow < 0), full budget is still available
+- If agent loses, only the net loss counts (recovered losses free up budget)
+
+**Example:** Agent has 15 LVUSD budget. Opens 2 positions, loses $2, recovers $2. Budget consumed = 0, full 15 LVUSD still available.
+
+### Position Tracking & Reconciliation
+
+Positions opened via `executeAutonomousLeverUpOpen` are tracked in `tracked-positions.json`. When `leverup_list_positions` is called with `agentId`:
+
+1. Positions not in API = keeper-triggered close (TP/SL/liquidation)
+2. After 15-block delay, Transfer event logs are queried for settlement inflows
+3. Inflows are recorded in the agent's token flow ledger
+4. Journal entry logged for the keeper close
+
+This ensures budget accurately reflects net losses even for externally-closed positions.
 
 ### Root Delegation = User's Consent Boundary
 
@@ -773,6 +798,11 @@ list_sub_agents(status: "all" | "pending" | "running" | "paused" | "completed" |
 get_sub_agent_state(subAgentId, taskAgentId?)
 - Full details: wallet balance, delegation, budget breakdown, recent trades
 - Includes tokenFlows (per-token in/out/net) and groupBudgets (per-group utilization)
+- Budget display uses static max drawdown model:
+  - budgetConsumed = max(0, netOutflow) — only net losses count
+  - remaining = budget - budgetConsumed — capped at original budget
+  - pnl = -netOutflow — positive means profit
+  - trackedPositions count shown per group
 - Pass taskAgentId to store it for resume capability
 ```
 
@@ -783,6 +813,36 @@ report_agent_status(agentId, status, reason?)
 - Required statuses: running, paused, completed, failed
 - "running" = flip from pending when agent starts
 - "completed" = goal achieved, "failed" = goal not achieved
+- When reason is provided, it is persisted to the agent's journal:
+  - status "running" → logged as "reasoning" type
+  - other statuses → logged as "status" type
+```
+
+### Viewing Agent Journal
+```
+get_agent_log(agentId, offset?, limit?)
+- Returns paginated journal entries (newest first)
+- Includes: trade events, reasoning, status changes, errors
+- Default: 50 entries, max: 200 per request
+- Use offset for pagination through older entries
+```
+
+### Listing Positions with Reconciliation
+```
+leverup_list_positions(address?, agentId?)
+- When agentId is provided, reconciles tracked positions:
+  - Links new positions to tradeHash
+  - Detects keeper-triggered closes (TP/SL/liquidation)
+  - Records settlement inflows after 15-block delay
+  - Journals keeper close events automatically
+- Sub-agents should pass agentId when checking positions
+```
+
+### Listing Wallet Pool
+```
+list_wallet_pool()
+- Shows all wallets in the pool with assignment status
+- Useful for debugging wallet allocation issues
 ```
 
 ### Checking Delegation Status

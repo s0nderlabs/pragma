@@ -5,7 +5,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { loadConfig } from "../config/pragma-config.js";
-import { loadAgentState, updateAgentState, deactivateLoop } from "../core/subagent/index.js";
+import { loadAgentState, updateAgentState, deactivateLoop, appendJournal } from "../core/subagent/index.js";
 
 const ReportAgentStatusSchema = z.object({
   agentId: z.string().describe("The sub-agent ID (UUID) reporting its status"),
@@ -95,6 +95,19 @@ async function reportAgentStatusHandler(
 
     // Update the status
     await updateAgentState(params.agentId, { status: params.status });
+
+    // Persist reason to journal
+    if (params.reason) {
+      try {
+        appendJournal(params.agentId, {
+          ts: Date.now(),
+          type: params.status === "running" ? "reasoning" : "status",
+          text: `[${params.status}] ${params.reason}`,
+        });
+      } catch {
+        // Non-critical: journal must never break status reporting
+      }
+    }
 
     // Deactivate loop on terminal status (defense in depth -- hook also checks state.json)
     if (params.status === "completed" || params.status === "failed") {

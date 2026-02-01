@@ -40,6 +40,8 @@ export {
   type CreateAgentStateParams,
   type TokenFlowEntry,
   type TokenFlowUpdate,
+  type TrackedPosition,
+  type JournalEntry,
   NATIVE_TOKEN_ADDRESS,
   USDC_ADDRESS,
   TOKEN_GROUPS,
@@ -69,6 +71,14 @@ export {
   agentExists,
   sumActiveMonAllocations,
   sumActiveUsdAllocations,
+  getTrackedPositions,
+  saveTrackedPositions,
+  addTrackedPosition,
+  removeTrackedPosition,
+  updateTrackedPositionStatus,
+  linkTrackedPosition,
+  appendJournal,
+  loadJournal,
 } from "./state.js";
 
 // Loop enforcement

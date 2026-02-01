@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.14] - 2026-02-01
+
+### Added
+- **`get_agent_log` tool** - Read agent journal entries with pagination (offset/limit). Returns newest-first with metadata
+- **Persistent agent journal** (`journal.jsonl`) - JSONL activity log auto-appended on all autonomous trades: open, close, buy, sell, swap, limit order, cancel. Entry types: `trade_open`, `trade_close`, `trade_buy`, `trade_sell`, `swap`, `reasoning`, `status`, `limit_order`, `cancel_order`
+- **Position tracking** (`tracked-positions.json`) - Per-agent LeverUp position tracking with pair, side, margin, tradeHash, and status lifecycle (`open` → `pending_settlement` → `settled`)
+- **Two-phase position reconciliation** in `leverup_list_positions` - New `agentId` parameter triggers reconciliation: Phase 1 links unlinked positions by pair+side+margin match (5% tolerance), Phase 2 detects keeper-triggered closes (TP/SL/liquidation) and queries settlement inflows
+- **`querySettlementInflows()`** - Single non-blocking `getLogs` for reconciliation of past keeper-triggered closes (complements `pollForSettlementInflows` for agent-initiated closes)
+- **Journal persistence in `report_agent_status`** - When reason is provided, appended to journal (`running` → type `reasoning`, others → type `status`)
+
+### Changed
+- **Static max drawdown budget model** - `checkGroupBudget()` rewritten: `budgetConsumed = max(0, netOutflow)`. Only net losses count against budget; profits don't increase budget beyond original allocation
+- **`get_sub_agent_state` budget display** - Group budgets now show tracked position count and use max drawdown model
+
+### Fixed
+- **Position linking race condition** - `executeAutonomousLeverUpOpen` stored `tradeHash: undefined` because API hadn't indexed the position yet. Reconciliation Phase 1 now matches unlinked positions to API positions by pair+side+margin proximity, resolving the race
+
 ## [0.8.13] - 2026-01-31
 
 ### Added
