@@ -201,8 +201,9 @@ export async function pollForSettlementInflows(
 
 /**
  * Query for settlement inflows in a specific block range (non-blocking).
- * Unlike pollForSettlementInflows, this does a single getLogs call without retrying.
  * Used by leverup_list_positions reconciliation for positions that closed in the past.
+ * Retries up to 3 times with backoff to avoid false-negative (empty result on RPC error
+ * being treated as liquidation).
  */
 export async function querySettlementInflows(
   fromBlock: bigint,
@@ -212,11 +213,17 @@ export async function querySettlementInflows(
   const publicClient = await createConfiguredPublicClient();
   if (!publicClient) return [];
 
-  try {
-    return await getSettlementLogs(publicClient, userAddress, fromBlock, toBlock);
-  } catch {
-    return [];
+  const maxAttempts = 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await getSettlementLogs(publicClient, userAddress, fromBlock, toBlock);
+    } catch {
+      if (attempt < maxAttempts - 1) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // 1s, 2s backoff
+      }
+    }
   }
+  return []; // All retries exhausted
 }
 
 // ============================================================================

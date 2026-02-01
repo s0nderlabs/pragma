@@ -24,7 +24,7 @@ export function startCaffeinate(): void {
   }
 
   try {
-    const child = spawn("caffeinate", ["-i", "-w", `${process.pid}`], {
+    const child = spawn("caffeinate", ["-i", "-s", "-w", `${process.pid}`], {
       stdio: "ignore",
     });
 

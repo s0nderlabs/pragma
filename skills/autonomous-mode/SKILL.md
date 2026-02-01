@@ -742,8 +742,8 @@ Both agents are running:
   Root delegation: 80/100 calls allocated
 
   Use list_sub_agents to check status.
-  Use revoke_sub_agent to stop an individual agent.
-  Use revoke_root_delegation to stop everything.
+  To stop an agent: first TaskStop(taskId), then revoke_sub_agent(subAgentId).
+  To stop everything: TaskStop all agents, then revoke_root_delegation.
 ```
 
 ### Multi-Agent Rules
@@ -967,22 +967,30 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
    get_sub_agent_state(subAgentId)
    → Note the final status and reason
 
-3. Clean up resources:
+3. Kill the Task process (MUST do before revoke):
+   TaskStop(taskId)
+   → The taskId is from the original Task() call that spawned the agent
+   → If the agent already exited naturally, TaskStop is a no-op
+
+4. Clean up resources:
    revoke_sub_agent(subAgentId, sweepBalance: false)
    → Archives agent state
    → Releases wallet to pool
    → Keeps gas in wallet for reuse
 
-4. Report to user:
+5. Report to user:
    "Agent finished: [status] - [reason]"
 ```
+
+**IMPORTANT:** Always TaskStop before revoke. `revoke_sub_agent` only archives state files and releases the wallet — it does NOT kill the running Task process. Without TaskStop, the agent becomes a zombie (running but with revoked permissions).
 
 ### When User Kills Agent Process
 
 If the user manually kills a running Task:
 
 1. Main Claude receives kill notification
-2. Main Claude cleans up:
+2. Task is already dead — skip TaskStop
+3. Main Claude cleans up:
    ```
    revoke_sub_agent(subAgentId, sweepBalance: false)
    ```

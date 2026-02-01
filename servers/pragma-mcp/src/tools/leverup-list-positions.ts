@@ -58,6 +58,11 @@ interface LeverUpListPositionsResult {
 /** Number of blocks to wait after detecting a gone position before querying settlement */
 const SETTLEMENT_BLOCK_DELAY = 15;
 
+/** Lookback window for settlement inflow queries (~27 min at 800ms/block on Monad).
+ *  The keeper Transfer event happens BEFORE we detect the position is gone,
+ *  so we must scan backwards from the detection block to find it. */
+const SETTLEMENT_LOOKBACK = 2000n;
+
 export function registerLeverUpListPositions(server: McpServer): void {
   server.tool(
     "leverup_list_positions",
@@ -187,7 +192,6 @@ async function reconcileTrackedPositions(
   const apiTradeHashes = new Set(apiPositions.map(p => p.tradeHash));
   let linkedCount = 0;
   let settledCount = 0;
-  let pendingSettlementCount = 0;
 
   // Phase 1: Link unlinked tracked positions to API positions by pair+side+margin match
   for (let i = 0; i < tracked.length; i++) {
@@ -210,7 +214,6 @@ async function reconcileTrackedPositions(
   }
 
   // Phase 2: Detect keeper-triggered closes and settle inflows
-  // Get current block number for settlement delay check
   const rpcUrl = await getRpcUrl(config);
   const chainId = config.network?.chainId ?? 143;
   const chain = buildViemChain(chainId, rpcUrl);
@@ -219,57 +222,66 @@ async function reconcileTrackedPositions(
     transport: createSyncHttpTransport(rpcUrl, config),
   });
   const currentBlock = await publicClient.getBlockNumber();
+  const currentBlockNum = Number(currentBlock);
 
-  for (const tp of tracked) {
-    if (!tp.tradeHash) continue; // Still unlinked after phase 1
+  // Categorise gone positions: linked, not in API anymore, grouped by readiness
+  const gonePositions = tracked.filter(tp =>
+    tp.tradeHash && !apiTradeHashes.has(tp.tradeHash)
+  );
 
-    // Still alive in API -- nothing to do
-    if (apiTradeHashes.has(tp.tradeHash)) continue;
-
-    // Position is gone from API -- keeper close (TP/SL/liquidation)
+  // Mark newly-gone positions as pending_settlement
+  for (const tp of gonePositions) {
     if (tp.status === "open") {
-      updateTrackedPositionStatus(agentId, tp.tradeHash, "pending_settlement", Number(currentBlock));
-      pendingSettlementCount++;
-      continue;
+      updateTrackedPositionStatus(agentId, tp.tradeHash!, "pending_settlement", currentBlockNum);
+      tp.status = "pending_settlement";
+      tp.detectedGoneAt = currentBlockNum;
     }
+  }
 
-    if (tp.status !== "pending_settlement" || !tp.detectedGoneAt) continue;
+  // Split into ready (past delay) vs still waiting
+  const readyForSettlement = gonePositions.filter(tp =>
+    tp.status === "pending_settlement" &&
+    tp.detectedGoneAt != null &&
+    (currentBlockNum - tp.detectedGoneAt) >= SETTLEMENT_BLOCK_DELAY
+  );
 
-    const blocksSinceGone = Number(currentBlock) - tp.detectedGoneAt;
-    if (blocksSinceGone < SETTLEMENT_BLOCK_DELAY) {
-      pendingSettlementCount++;
-      continue;
-    }
+  // Batch-settle all positions past the delay threshold.
+  // One query prevents double-counting when multiple positions close in the same range.
+  if (readyForSettlement.length > 0) {
+    const earliestDetection = Math.min(...readyForSettlement.map(tp => tp.detectedGoneAt!));
+    const queryFrom = BigInt(earliestDetection) > SETTLEMENT_LOOKBACK
+      ? BigInt(earliestDetection) - SETTLEMENT_LOOKBACK
+      : 0n;
 
-    // Enough blocks passed -- query settlement inflows
-    const inflows = await querySettlementInflows(
-      BigInt(tp.detectedGoneAt),
-      currentBlock,
-      userAddress,
-    );
-
+    const inflows = await querySettlementInflows(queryFrom, currentBlock, userAddress);
     if (inflows.length > 0) {
       await updateTokenFlows(agentId, { outflows: [], inflows });
     }
 
-    // Journal the keeper close
-    const inflowSummary = inflows.length > 0
+    const totalInflowStr = inflows.length > 0
       ? inflows.map(i => formatUnits(i.amount, 18)).join(", ")
-      : "0 (liquidation)";
-    appendJournal(agentId, {
-      ts: Date.now(),
-      type: "trade_close",
-      tradeHash: tp.tradeHash,
-      pair: tp.pair,
-      side: tp.side,
-      pnl: inflowSummary,
-      text: `Keeper close detected: ${tp.pair} ${tp.side} -- inflows: ${inflowSummary}`,
-      protocol: "leverup",
-    });
+      : "0";
 
-    removeTrackedPosition(agentId, tp.tradeHash);
-    settledCount++;
+    for (const tp of readyForSettlement) {
+      const inflowNote = formatInflowNote(inflows.length > 0, readyForSettlement.length > 1, totalInflowStr, tp);
+
+      await appendJournal(agentId, {
+        ts: Date.now(),
+        type: "trade_close",
+        tradeHash: tp.tradeHash,
+        pair: tp.pair,
+        side: tp.side,
+        pnl: inflowNote,
+        text: `Keeper close: ${tp.pair} ${tp.side} — inflows: ${inflowNote}`,
+        protocol: "leverup",
+      });
+
+      removeTrackedPosition(agentId, tp.tradeHash!);
+      settledCount++;
+    }
   }
+
+  const pendingSettlementCount = gonePositions.length - readyForSettlement.length;
 
   return {
     trackedCount: tracked.length,
@@ -277,4 +289,22 @@ async function reconcileTrackedPositions(
     settledCount,
     pendingSettlementCount,
   };
+}
+
+/**
+ * Format an inflow note for journal entries based on settlement query results.
+ */
+function formatInflowNote(
+  hasInflows: boolean,
+  isBatch: boolean,
+  totalInflowStr: string,
+  tp: { stopLoss: string },
+): string {
+  if (hasInflows) {
+    return isBatch ? `batch total: ${totalInflowStr}` : totalInflowStr;
+  }
+  if (tp.stopLoss && tp.stopLoss !== "0") {
+    return "0 (SL was set — expected inflows, possible query miss)";
+  }
+  return "0 (liquidation or expired)";
 }

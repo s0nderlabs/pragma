@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.15] - 2026-02-01
+
+### Fixed
+- **False liquidation signal** - Settlement inflow query now scans 2000 blocks (~27 min) backwards from detection block, capturing Transfer events that happened before the agent noticed the position was gone
+- **Double-counted inflows** - Reconciliation refactored to batch-settle all pending positions with a single query and single ledger update, preventing double-counting when multiple positions close in the same block range
+- **Silent RPC failures treated as liquidation** - `querySettlementInflows` now retries 3x with backoff instead of returning empty array on transient RPC errors
+- **Zombie agent after revoke** - SKILL.md cleanup flow updated to require TaskStop before revoke_sub_agent, preventing agents from running with revoked permissions
+
+### Changed
+- **Journal close types** - Settlement journal entries now distinguish `settled` (inflows found), `no_inflow_suspicious` (SL was set but no inflows — possible query miss), and `no_inflow` (liquidation or expired)
+- **Caffeinate flags** - Added `-s` flag to also prevent system sleep on AC power (previously only prevented idle sleep with `-i`)
+
 ## [0.8.14] - 2026-02-01
 
 ### Added
