@@ -451,8 +451,55 @@ export async function executeWithDelegationChain(
   ] as SignedDelegation[];
 
   // 7. Execute via redeemDelegations
+  let txHash: Hex | undefined;
+
+  function buildExplorerUrl(hash: Hex): string {
+    return `${chainConfig.blockExplorer}/tx/${hash}`;
+  }
+
+  function buildTokenFlows(): TokenFlowUpdate {
+    const flows: TokenFlowUpdate = {
+      outflows: [...(options?.tokenFlows?.outflows || [])],
+      inflows: [...(options?.tokenFlows?.inflows || [])],
+    };
+
+    if (execution.value > 0n && !flows.outflows.some(f => f.token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase())) {
+      flows.outflows.push({ token: NATIVE_TOKEN_ADDRESS, amount: execution.value });
+    }
+
+    return flows;
+  }
+
+  async function updateAgentStateAfterSuccess(): Promise<void> {
+    if (!options?.skipTradeLogging) {
+      await appendTrade(agentId, {
+        timestamp: Date.now(),
+        action: tradeInfo.action,
+        protocol: tradeInfo.protocol,
+        details: tradeInfo.details,
+        txHash: txHash!,
+        success: true,
+      });
+    }
+
+    if (!options?.skipBudgetTracking) {
+      if (options?.tokenFlows) {
+        await updateTokenFlows(agentId, buildTokenFlows());
+      } else if (execution.value > 0n) {
+        await updateTokenSpent(agentId, NATIVE_TOKEN_ADDRESS, execution.value);
+      }
+    }
+  }
+
+  function isReceiptTimeout(error: unknown): boolean {
+    return error instanceof Error && (
+      error.name === "WaitForTransactionReceiptTimeoutError" ||
+      error.message.includes("Timed out while waiting for transaction")
+    );
+  }
+
   try {
-    const txHash = await redeemDelegations(
+    txHash = await redeemDelegations(
       subAgentWalletClient,
       publicClient,
       DELEGATION_FRAMEWORK.delegationManager,
@@ -478,52 +525,42 @@ export async function executeWithDelegationChain(
       return { success: false, txHash, error: "Transaction reverted on-chain" };
     }
 
-    // 8. Update state on success (skip for approvals)
-    if (!options?.skipTradeLogging) {
-      await appendTrade(agentId, {
-        timestamp: Date.now(),
-        action: tradeInfo.action,
-        protocol: tradeInfo.protocol,
-        details: tradeInfo.details,
-        txHash,
-        success: true,
-      });
-    }
-
-    // Track token flows (ledger recording) or legacy MON tracking
-    if (!options?.skipBudgetTracking) {
-      if (options?.tokenFlows) {
-        // Ledger-based: record all outflows and inflows
-        const flows: TokenFlowUpdate = {
-          outflows: [...options.tokenFlows.outflows],
-          inflows: [...options.tokenFlows.inflows],
-        };
-        // Include native MON value if not already in flows
-        if (
-          execution.value > 0n &&
-          !flows.outflows.some(
-            (f) => f.token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase()
-          )
-        ) {
-          flows.outflows.push({ token: NATIVE_TOKEN_ADDRESS, amount: execution.value });
-        }
-        await updateTokenFlows(agentId, flows);
-      } else if (execution.value > 0n) {
-        // Legacy: only track native MON
-        await updateTokenSpent(agentId, NATIVE_TOKEN_ADDRESS, execution.value);
-      }
-    }
+    await updateAgentStateAfterSuccess();
 
     return {
       success: true,
       txHash,
-      explorerUrl: `${chainConfig.blockExplorer}/tx/${txHash}`,
+      explorerUrl: buildExplorerUrl(txHash),
       receipt,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
+
+    if (isReceiptTimeout(error) && txHash) {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 10_000));
+        const recovered = await publicClient.getTransactionReceipt({ hash: txHash });
+
+        if (recovered?.status === "success") {
+          await updateAgentStateAfterSuccess();
+          return { success: true, txHash, explorerUrl: buildExplorerUrl(txHash), receipt: recovered };
+        }
+
+        if (recovered?.status === "reverted") {
+          await addError(agentId, "Transaction reverted (recovered from timeout)", true);
+          return { success: false, txHash, error: "Transaction reverted on-chain" };
+        }
+
+        await addError(agentId, `Timeout: tx ${txHash} submitted but unconfirmed`, true);
+        return { success: false, txHash, error: `Timeout: tx submitted (${txHash}) but unconfirmed` };
+      } catch {
+        await addError(agentId, `Timeout + recovery failed: ${msg}`, true);
+        return { success: false, txHash, error: `Timeout: recovery failed (${txHash})` };
+      }
+    }
+
     await addError(agentId, msg, true);
-    return { success: false, error: msg };
+    return { success: false, txHash, error: msg };
   }
 }
 

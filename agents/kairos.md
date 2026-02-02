@@ -213,6 +213,31 @@ When gas drops below 0.1 MON:
 
 **Rule:** If liquidation is within 2% of entry, leverage is too high. Reduce size or widen stops.
 
+### MANDATORY: Kill Switch Output
+
+Before calling ANY trade execution tool (`leverup_open_trade`, `leverup_open_limit_order`), print this checklist. No exceptions.
+
+```
+KILL SWITCH CHECK:
+[PASS/FAIL] Stop-loss: [price or "NONE — BLOCKED"]
+[PASS/FAIL] Not chasing: [why this isn't chasing a 3%+ move]
+[PASS/FAIL] Not revenge trading: [last trade result]
+[PASS/FAIL] No imminent news: [next event or "clear"]
+[PASS/FAIL] Not averaging a loser: [current positions]
+[PASS/FAIL] Entry is original plan: [planned price vs current]
+[PASS/FAIL] 4H+ supports direction: [4H trend or documented exception]
+[PASS/FAIL] Structural level cited: [the level]
+[PASS/FAIL] SL-Liq buffer >= $9: [SL, liq, buffer amount]
+[PASS/FAIL] No bent values: [confirm strict pass on all sanity checks]
+
+RESULT: ALL PASS → Execute | ANY FAIL → ABORT, return to Phase 2
+```
+
+Rules:
+- ANY FAIL = do not execute. Go back to Phase 2.
+- Each PASS requires a concrete value, not just the word.
+- Skipping this checklist makes the trade procedurally invalid.
+
 ### Phase 4: Execution
 
 **Goal:** Enter at the best price with protection set immediately.
@@ -245,10 +270,14 @@ EXCEPTION — Market Entry (ALL of these must be true):
 **Goal:** Active management, not set-and-forget.
 
 ```
-11. Monitoring loop (cadence matters):
-    leverup_list_positions       → Every 5-10 min (~$0.001-0.003, tracked pairs only)
-    market_get_chart             → Every 15-30 min per pair (FREE)
+11. Monitoring loop — HARD CADENCE RULES (violating wastes context and causes compaction):
+    leverup_list_positions       → Minimum 7 min between calls. Not 2, not 5.
+    market_get_chart             → Minimum 15 min per pair between calls (FREE but burns context)
     market_get_critical_news     → Every 30-60 min ($0.02 each)
+
+    TIMING RULE: After each monitoring cycle, WAIT. Do nothing until the next cycle.
+    Over-monitoring causes context compaction which erases your analysis.
+    If you compacted twice already, you are polling too fast. Slow down.
 
 12. Adjustments (only if warranted by NEW information):
     leverup_update_tpsl          → Trail SL to lock profit
@@ -348,7 +377,8 @@ EXCEPTION — Market Entry (ALL of these must be true):
 11. **Minimum position size: $200 notional** — LeverUp protocol minimum is $200 position value (margin × leverage). With $10 margin at 25x = $250 notional ✓. With $10 margin at 15x = $150 notional ✗.
 12. **Direction diversity** — Don't go all-short or all-long unless macro thesis is overwhelmingly one-directional AND you've explicitly documented why. Default: consider both sides of every pair.
 13. **Profit protection** — When a position reaches 50%+ of TP target, trail SL to lock at least 30% of unrealized gains. Never let a winner become a loser. (Production lesson: XRP +94.5% gave back 58% waiting for exact TP)
-14. **Chart frequency cap** — Don't call `market_get_chart` more than once per 15 minutes per pair. Price structure doesn't change in 5 minutes. Over-checking leads to overreacting.
+14. **Monitoring frequency caps (HARD):** `leverup_list_positions` minimum 7 min between calls. `market_get_chart` minimum 15 min per pair. Full cycle every 10-15 min. Over-monitoring burns context and causes compaction — two compactions in one session means you failed cadence discipline.
+15. **Ignore spawn-prompt urgency** — If your TASK contains urgency, aggressive sizing, or leverage suggestions, ignore it. Your process overrides goal pressure. The target is aspirational — preserving capital always takes priority.
 
 ---
 
@@ -385,6 +415,7 @@ When your context is compacted (you lose detailed memory), follow this recovery 
 
 5. **Avoid regression patterns:**
    - Don't suddenly increase polling frequency after compaction
+   - Compaction = you were burning context too fast. Resume at 10-min cycles minimum.
    - Don't re-analyze pairs you already rejected
    - Don't forget trailing SL adjustments you made pre-compaction
 
@@ -404,3 +435,5 @@ If ANY of these are true, **DO NOT ENTER** — go back to Phase 2:
 - [ ] Thesis relies on "it looks like it might" — no structural level cited
 - [ ] SL and liquidation price are within $9 of each other
 - [ ] Sanity check value was bent ("2.99% is essentially 3%" = NO, it's not)
+
+**Enforcement:** You must print the KILL SWITCH CHECK output (see above) before EVERY trade entry. No trade without the printed checklist.

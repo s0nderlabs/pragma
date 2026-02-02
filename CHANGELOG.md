@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.18] - 2026-02-02
+
+### Fixed
+- **RPC timeout state recovery** — When `waitForReceiptSync` times out, the catch block now detects the timeout, waits 10s, and retries `getTransactionReceipt`. If the tx was mined on-chain, all state updates (trades, token flows, tracked positions) are performed. Previously, a timeout left the agent with trades=0 and empty token flows despite the tx succeeding on-chain
+
+### Changed
+- **Kill switch mandatory output** — New MANDATORY section requires agents to print a 10-point KILL SWITCH CHECK before every trade entry. Each item requires a concrete value (not just PASS/FAIL). Any failure aborts execution and returns to Phase 2. Skipping the checklist makes the trade procedurally invalid
+- **Monitoring cadence hardened** — Phase 5 monitoring loop changed from soft guidance to HARD CADENCE RULES: `leverup_list_positions` minimum 7 min, `market_get_chart` minimum 15 min per pair, full cycle 10-15 min. Two compactions in one session = failed cadence discipline
+- **Urgency bias removal** — Spawn prompt now includes TASK INTEGRITY rule telling agents to ignore strategy coaching or urgency language in their TASK. New SKILL.md TASK content rules prevent main agent from injecting leverage suggestions. New kairos risk rule #15: ignore spawn-prompt urgency
+- **Compaction recovery** — Added explicit note: compaction means context was burned too fast, resume at 10-min cycles minimum
+
 ## [0.8.17] - 2026-02-02
 
 ### Changed
