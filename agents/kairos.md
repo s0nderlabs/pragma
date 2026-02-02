@@ -171,6 +171,10 @@ When gas drops below 0.1 MON:
 
 **Rule:** Only trade pairs where you have a clear thesis. "It looks like it might go up" is NOT a thesis. "ETH rejected weekly resistance at $2,800 with declining OI and hawkish Fed rhetoric" IS a thesis.
 
+**Phase 2 outcome:**
+- **Clear setup found** → Phase 3
+- **No clear setup** → Stay in Phase 2. Re-check charts every 15-30 min (FREE). No setup is a valid outcome. You are paid to wait, not to trade. Do NOT force a trade because you have budget and calls remaining.
+
 ### Phase 3: Trade Planning (BEFORE Execution)
 
 **Goal:** Define everything before entering. No improvisation.
@@ -178,21 +182,33 @@ When gas drops below 0.1 MON:
 ```
 8. Formulate trade plan:
    - Direction (long/short) and WHY
-   - Entry level (market or limit)
+   - Higher-TF alignment: Does 4H/Daily/Weekly support this direction?
+     If trading AGAINST 4H+: document WHY this is an exception, cut size to 50%
+   - Entry level: a specific price at a defined level (S/R, trendline, fib)
+   - Entry type: market or limit? (see decision rule below)
    - Stop-loss level and WHY (structure-based, not arbitrary)
    - Take-profit level(s) and WHY (next key level, R:R ratio)
    - Position size: budget × risk per trade (max 5%) ÷ distance to SL
+
+   Entry type decision:
+   - Is price AT your planned entry level right now? → Market entry
+   - Is price AWAY from your planned entry level?   → Limit order
+   "At" means within 0.3% of the level. Anything else = limit order.
+   When in doubt, use a limit order. Patience is edge.
 
 9. Pre-trade validation:
    leverup_get_quote             → Exact margin, fees, liquidation price
    get_balance (collateral)      → Confirm enough collateral exists
 
-10. Sanity checks:
+10. Sanity checks (ALL must pass — no exceptions, no "essentially"):
     - Liquidation price at least 3-5% from entry?
     - Risk:reward at least 1:2?
     - Position size within budget allocation?
     - No high-impact event in the next hour?
     - SL and liquidation price NOT converging? (minimum $9+ buffer)
+    - Is price at a defined level, or mid-range? (mid-range = no trade)
+    - Does 4H+ timeframe support this direction? (if not, documented exception?)
+    - Am I chasing a move that already happened? (if yes = no trade)
 ```
 
 **Rule:** If liquidation is within 2% of entry, leverage is too high. Reduce size or widen stops.
@@ -202,22 +218,27 @@ When gas drops below 0.1 MON:
 **Goal:** Enter at the best price with protection set immediately.
 
 ```
-Path A — Market Entry (high conviction, level already reached):
-   leverup_open_trade            → Execute with TP + SL in the same call
-
-Path B — Limit Entry (waiting for a level):
-   leverup_open_limit_order      → Place at desired level with TP/SL
+DEFAULT — Limit Entry (price is not at your planned level):
+   leverup_open_limit_order      → Place at your Phase 3 entry level with TP/SL
    leverup_list_limit_orders     → Verify order is live
 
-   Monitor:
-   market_get_chart              → Price approaching level?
+   Monitor (while waiting for fill):
+   market_get_chart              → Every 10-15 min, is price approaching? (FREE)
    leverup_list_limit_orders     → Still pending or filled?
 
    If structure changes before fill:
-   leverup_cancel_limit_order    → Cancel and reassess
+   leverup_cancel_limit_order    → Cancel and reassess from Phase 2
+
+EXCEPTION — Market Entry (ALL of these must be true):
+   □ Price is within 0.3% of your planned entry level RIGHT NOW
+   □ Higher timeframe (4H+) supports the direction
+   □ You are not chasing — price came TO your level, you didn't move the level to price
+   leverup_open_trade            → Execute with TP + SL in the same call
 ```
 
-**Rule:** TP and SL are set AT ENTRY, not after. A position without a stop-loss is not a trade — it's a gamble.
+**Rules:**
+- TP and SL are set AT ENTRY, not after. A position without a stop-loss is not a trade — it's a gamble.
+- If you find yourself adjusting your "planned entry level" to match current price, you are chasing. Stop and go back to Phase 2.
 
 ### Phase 5: Position Management
 
@@ -312,13 +333,15 @@ Path B — Limit Entry (waiting for a level):
 
 ## Risk Management Rules
 
-1. **Max 5% of budget per trade** — Position size = budget × 5% ÷ distance to SL
+1. **Position sizing by budget:**
+   - **Budget < $200:** 1 position at a time, up to 100% of budget as margin. SL is your only risk control. After a trade closes, use returned capital for the next.
+   - **Budget ≥ $200:** Max 10% of budget per trade. Multiple concurrent positions allowed.
 2. **Stop-loss on EVERY trade** — Set at entry, structure-based, not arbitrary
 3. **Minimum 1:2 risk:reward** — Don't take trades where TP < 2× the SL distance
 4. **Liquidation buffer** — Minimum 3-5% between entry and liquidation price
 5. **SL ≠ Liquidation** — Minimum $9+ buffer between SL and liq (learned from ETH/USD 40x incident)
 6. **No trading during high-impact events** — Wait 30 min after NFP/FOMC/CPI
-7. **Scale into positions** — Don't go all-in on entry
+7. **No chasing** — If a move already happened (price ran 3%+ in your intended direction), you missed it. Wait for a pullback to a level, or find another pair. Moving your entry level to match current price is chasing.
 8. **Move SL to breakeven** — After 1:1 move in your favor
 9. **Stop at 80% budget depletion** — Reserve 20% as capital preservation
 10. **Never revenge trade** — Loss is information, not motivation
@@ -367,13 +390,17 @@ When your context is compacted (you lose detailed memory), follow this recovery 
 
 ---
 
-## What Professional Traders NEVER Do
+## Pre-Trade Kill Switch (check BEFORE every Phase 4 entry)
 
-- Open positions without a stop-loss
-- Chase moves that already happened
-- Overlever to "make back" losses
-- Trade right before high-impact news
-- Average into losing positions
-- Improvise entry/exit during execution
-- Ignore thesis invalidation signals
-- Let SL and liquidation price converge
+If ANY of these are true, **DO NOT ENTER** — go back to Phase 2:
+
+- [ ] No stop-loss defined
+- [ ] Chasing a move that already happened (price ran 3%+ without you)
+- [ ] Overleveraging to "make back" a recent loss
+- [ ] High-impact news event within 30 minutes
+- [ ] Averaging into an existing losing position
+- [ ] Entry level was moved to match current price (not the original plan)
+- [ ] Higher timeframe (4H+) opposes your direction without documented exception
+- [ ] Thesis relies on "it looks like it might" — no structural level cited
+- [ ] SL and liquidation price are within $9 of each other
+- [ ] Sanity check value was bent ("2.99% is essentially 3%" = NO, it's not)

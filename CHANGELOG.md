@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.17] - 2026-02-02
+
+### Changed
+- **Kairos entry discipline** - Phase 2 now has explicit no-trade outcome (stay and re-check every 15-30 min). Phase 3 requires higher-timeframe alignment (4H/Daily/Weekly) and entry-type decision rule (limit order default, market entry only within 0.3% of level). Phase 4 reframed: limit orders as default, market entry as documented exception requiring 3 conditions
+- **Kairos sanity checks expanded** - 3 new Phase 3 checks: mid-range detection (no trade), 4H+ alignment verification, chasing detection
+- **Pre-Trade Kill Switch** - Replaced passive "What Professional Traders NEVER Do" list with active 10-point checklist that blocks entry if any condition is true
+- **Budget-tier position sizing** - Replaced flat 5% rule: budgets < $200 use 100% per single position (SL as risk control), budgets >= $200 use 10% per trade with multiple concurrent positions
+- **No chasing rule** - Risk rule 7 replaced "Scale into positions" with explicit anti-chasing rule (3%+ move = missed, wait for pullback)
+- **Spawn prompt call-counting fix** - Distinguishes on-chain delegation calls (counted) from read-only tool calls (unlimited). Fixed chart pricing to FREE. Renamed "max calls" to "max delegation calls" throughout SKILL.md
+
 ## [0.8.16] - 2026-02-02
 
 ### Fixed

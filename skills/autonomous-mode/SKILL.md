@@ -418,7 +418,7 @@ Description: |
   Agent: [type] ([one-line description])
   Budget: [X] MON + [Y] USDC (if applicable)
   Duration: [Z] days
-  Max calls: [N] (includes approval calls)
+  Max delegation calls: [N] (on-chain trades + approvals only; read-only tools are unlimited)
   Gas: 1 MON
 
   Why: [brief reasoning for config choices]
@@ -458,7 +458,7 @@ Before creating the sub-agent:
 3. **x402 USDC balance (if x402 mode):** Market intelligence tools consume USDC per call
    - Call `check_session_key_balance` and check USDC balance
    - Minimum recommended: 0.50 USDC for monitoring agents, 0.20 USDC for quick trades
-   - If USDC is low, warn user: "Session key has X USDC. Market intelligence tools cost $0.005-0.02 per call. Monitoring agents may exhaust this in ~Y hours."
+   - If USDC is low, warn user: "Session key has X USDC. Market intelligence tools cost $0.01-0.02 per call (charts are free). Monitoring agents may exhaust this in ~Y hours."
    - Soft warning only, not a blocker -- user decides whether to top up
 
 ### Step 7: Create Sub-Agent
@@ -520,18 +520,23 @@ Task({
     1. ALWAYS pass agentId: "${agentId}" to ALL trading tools
     2. NEVER trigger Touch ID - if prompted, you forgot agentId
     3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
-    4. Stop when budget depleted or max calls reached
-    5. Market intelligence tools cost USDC via x402 (sorted by cost):
-       - market_get_critical_news: $0.02
-       - market_search_news: $0.015
-       - market_get_currency_strength: $0.01
+    4. Stop when budget depleted or max delegation calls reached
+    5. CALL COUNTING — READ CAREFULLY:
+       "Max calls" counts ONLY on-chain delegation calls (trades + approvals).
+       These count: leverup_open_trade, leverup_close_trade, execute_swap, transfer (1-2 calls each)
+       These are FREE and UNLIMITED: market_get_chart, leverup_list_positions,
+       get_all_balances, leverup_get_quote, report_agent_status, ToolSearch,
+       market_get_critical_news, market_get_economic_events, and ALL read-only tools.
+       DO NOT count read-only tool calls against your max calls budget.
+    6. Market intelligence x402 costs (USDC per call):
+       - market_get_chart: FREE (Pyth Benchmark — use freely for price checks)
        - market_get_economic_events: $0.01
-       - market_get_chart: $0.005
-       - RPC calls: $0.001-0.002
-       Be conservative with expensive calls. In monitoring loops:
-       - Prefer chart ($0.005) over news ($0.02) for routine checks
-       - Run full macro scans only at start and before entries, not every cycle
-       - Limit full analysis cycles to every 15-20 minutes
+       - market_get_currency_strength: $0.01
+       - market_search_news: $0.015
+       - market_get_critical_news: $0.02
+       - RPC calls (leverup_list_positions, etc.): $0.001-0.002
+       Use chart (FREE) for routine price monitoring. Save expensive news calls
+       for session start and before entries. Full macro scans every 15-20 min max.
 
     FIRST ACTION - MANDATORY:
     Call report_agent_status(agentId: "${agentId}", status: "running")
@@ -540,7 +545,7 @@ Task({
     BEFORE TERMINATING - MANDATORY:
     You MUST call report_agent_status before finishing:
     - status: "completed" → Task goal was ACHIEVED
-    - status: "failed" → Goal NOT achieved (budget depleted, max calls, errors)
+    - status: "failed" → Goal NOT achieved (budget depleted, max delegation calls, errors)
     - status: "paused" → Low gas, need funding to continue
     Include a reason summarizing what happened and key results.
 
@@ -553,8 +558,8 @@ Task({
 
     TASK: ${userTask}
 
-    BUDGET: ${budgetMon} MON + ${budgetUsd} USD
-    MAX CALLS: ${maxCalls}
+    BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
+    MAX DELEGATION CALLS: ${maxCalls} (on-chain trades + approvals ONLY — read-only tools are unlimited)
     EXPIRES: ${expiresAt}
   `,
   run_in_background: true
@@ -654,13 +659,13 @@ Description: |
   Agent 1: Kairos (LeverUp perps)
     Budget: 30 MON + 15 USDC
     Allowed: MON + USD groups
-    Max calls: 30 (includes approval calls), Duration: 1 day
+    Max delegation calls: 30 (on-chain trades + approvals), Duration: 1 day
     Loop: continuous
 
   Agent 2: Thymos (nad.fun memecoins)
     Budget: 20 MON
     Allowed: MON group only
-    Max calls: 50 (includes approval calls), Duration: 1 day
+    Max delegation calls: 50 (on-chain trades + approvals), Duration: 1 day
     Loop: continuous
 
   Root delegation needs:
@@ -936,7 +941,7 @@ report_agent_status(
 - `running` + (no reason needed, first action after spawn)
 - `completed` + "Target reached - opened BTC long at $95,200"
 - `failed` + "Delegation expired before target was hit"
-- `failed` + "Max calls reached (10/10) - target not achieved"
+- `failed` + "Max delegation calls reached (10/10) - target not achieved"
 - `failed` + "Budget depleted"
 - `paused` + "Low gas - 0.05 MON remaining"
 
@@ -950,7 +955,7 @@ When any tool loads an agent's state, it automatically checks if the delegation 
 |------------------|-------------|--------------|------------|
 | Task achieved | Sub-agent | `completed` | Main Claude |
 | Delegation expired | System (lazy) | `failed` | Main Claude |
-| Max calls reached | Sub-agent | `failed` | Main Claude |
+| Max delegation calls reached | Sub-agent | `failed` | Main Claude |
 | Budget depleted | Sub-agent | `failed` | Main Claude |
 | Low gas (recoverable) | Sub-agent | `paused` | Fund → Resume |
 | User kills process | N/A | unchanged | Main Claude |
