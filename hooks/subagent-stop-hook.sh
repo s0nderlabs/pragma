@@ -74,7 +74,7 @@ STATE_FILE="$PRAGMA_AGENT_DIR/state.json"
 
 # Check agent status
 STATUS=$(jq -r '.status // "unknown"' "$STATE_FILE" 2>/dev/null)
-if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "revoked" ]; then
+if [ "$STATUS" = "completed" ] || [ "$STATUS" = "failed" ] || [ "$STATUS" = "revoked" ] || [ "$STATUS" = "paused" ]; then
   exit 0
 fi
 

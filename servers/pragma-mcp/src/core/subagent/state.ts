@@ -941,15 +941,24 @@ export function findGroupForToken(tokenAddress: Address): string | null {
  *
  * Rules:
  * 1. No allowedGroups or empty array → unrestricted (backward compatible)
- * 2. Token in an allowed group → allowed
- * 3. Token has prior inflows (agent acquired it during trading) → allowed
- * 4. Otherwise → blocked
+ * 2. Native MON with MON budget → always allowed (oracle fees, gas)
+ * 3. Token in an allowed group → allowed
+ * 4. Token has prior inflows (agent acquired it during trading) → allowed
+ * 5. Otherwise → blocked
  */
 export function isTokenAllowed(
   state: SubAgentState,
   tokenAddress: Address
 ): { allowed: boolean; reason?: string } {
   if (!state.budget.allowedGroups || state.budget.allowedGroups.length === 0) {
+    return { allowed: true };
+  }
+
+  // Native MON is always allowed when agent has MON budget (for oracle fees, gas)
+  if (
+    tokenAddress.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase() &&
+    BigInt(state.budget.monAllocated) > 0n
+  ) {
     return { allowed: true };
   }
 

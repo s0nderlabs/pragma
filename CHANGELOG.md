@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.16] - 2026-02-02
+
+### Fixed
+- **False liquidation from RPC block range limit** - `getSettlementLogs` now chunks requests into 200-block windows. Ankr RPC rejects ranges > ~200 blocks, causing the 2000-block lookback to fail deterministically on all 3 retries
+- **Native MON blocked by allowedGroups** - `isTokenAllowed` now exempts native MON when agent has MON budget (`monAllocated > 0`), allowing Pyth oracle fee payments regardless of group allowlist
+- **Misleading journal on TP-only close** - `formatInflowNote` now checks both `takeProfit` and `stopLoss` fields, and mentions liquidation as a possibility alongside query miss
+
+### Changed
+- **Pair-filtered position queries** - `getUserPositions` accepts optional `pairs` parameter. Agent polling queries only tracked pairs instead of all 20, reducing RPC cost from ~$0.02 to ~$0.001-0.003 per call
+- **Kairos cost table corrected** - `market_get_chart` is FREE (Pyth Benchmark), `leverup_list_positions` reflects optimized per-tracked-pair cost
+- **Kairos behavioral rules** - Added 4 risk rules from production analysis: $200 minimum position size, direction diversity, profit protection (trail SL at 50%+ TP), chart frequency cap (15 min per pair)
+- **Multi-timeframe analysis** - Kairos Phase 2 now requires top-down technical analysis (Weekly → Daily → 4H → 1H → 15m) using FREE Pyth Benchmark charts across all timeframes
+- **Context compaction recovery** - New section in kairos.md with full macro recovery protocol: all 7 macro tools required after compaction since agent retains NOTHING from prior context
+- **Phase 1 macro completeness** - Added rule requiring ALL macro tools in Phase 1 (~$0.06 total cost, cheap insurance against blind spots)
+- **Root delegation cleanup** - SKILL.md cleanup flow step 6: revoke root delegation after last agent terminates
+
 ## [0.8.15] - 2026-02-01
 
 ### Fixed

@@ -145,8 +145,12 @@ async function createConfiguredPublicClient(): Promise<ReturnType<typeof createP
   });
 }
 
+/** Max block range per getLogs call — Ankr RPC rejects ranges above ~200 blocks */
+const LOG_CHUNK_SIZE = 200n;
+
 /**
  * Query Transfer event logs from LeverUp diamond to a user address.
+ * Chunks the request into LOG_CHUNK_SIZE windows to stay within RPC limits.
  */
 async function getSettlementLogs(
   publicClient: ReturnType<typeof createPublicClient>,
@@ -154,20 +158,37 @@ async function getSettlementLogs(
   fromBlock: bigint,
   toBlock: bigint | "latest",
 ): Promise<Array<{ token: Address; amount: bigint }>> {
-  const logs = await publicClient.getLogs({
-    event: TRANSFER_EVENT,
-    args: {
-      from: WHITELISTED_SPENDERS.leverUpDiamond as Address,
-      to: userAddress,
-    },
-    fromBlock,
-    toBlock,
-  });
+  const endBlock = toBlock === "latest"
+    ? await publicClient.getBlockNumber()
+    : toBlock;
 
-  return logs.map(log => ({
-    token: log.address as Address,
-    amount: log.args.value!,
-  }));
+  if (endBlock < fromBlock) return [];
+
+  const allLogs: Array<{ token: Address; amount: bigint }> = [];
+
+  for (let chunkStart = fromBlock; chunkStart <= endBlock; chunkStart += LOG_CHUNK_SIZE) {
+    const chunkLast = chunkStart + LOG_CHUNK_SIZE - 1n;
+    const chunkEnd = chunkLast > endBlock ? endBlock : chunkLast;
+
+    const logs = await publicClient.getLogs({
+      event: TRANSFER_EVENT,
+      args: {
+        from: WHITELISTED_SPENDERS.leverUpDiamond as Address,
+        to: userAddress,
+      },
+      fromBlock: chunkStart,
+      toBlock: chunkEnd,
+    });
+
+    for (const log of logs) {
+      allLogs.push({
+        token: log.address as Address,
+        amount: log.args.value!,
+      });
+    }
+  }
+
+  return allLogs;
 }
 
 /**
@@ -2065,8 +2086,8 @@ export async function executeAutonomousLeverUpOpen(
   // Track opened position for reconciliation (non-critical)
   try {
     const smartAddr = config.wallet?.smartAccountAddress as Address;
-    const positions = await getUserPositions(smartAddr);
     const pairStr = pairMetadata!.pair;
+    const positions = await getUserPositions(smartAddr, [pairStr]);
 
     // Match the newly opened position by pair + side + margin proximity (5% tolerance for fees)
     const matched = positions.find(p =>

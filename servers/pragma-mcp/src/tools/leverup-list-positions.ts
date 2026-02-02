@@ -1,7 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
+import { createPublicClient, formatUnits, parseUnits, type Address } from "viem";
+import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
+import { buildViemChain } from "../config/chains.js";
 import { getUserPositions } from "../core/leverup/client.js";
+import { querySettlementInflows } from "../core/execution/autonomous.js";
 import {
   getTrackedPositions,
   updateTrackedPositionStatus,
@@ -10,10 +13,6 @@ import {
   updateTokenFlows,
   appendJournal,
 } from "../core/subagent/state.js";
-import { querySettlementInflows } from "../core/execution/autonomous.js";
-import { createPublicClient, formatUnits, parseUnits, type Address } from "viem";
-import { buildViemChain } from "../config/chains.js";
-import { getRpcUrl } from "../config/pragma-config.js";
 import { createSyncHttpTransport } from "../core/x402/client.js";
 
 const LeverUpListPositionsSchema = z.object({
@@ -95,7 +94,16 @@ async function leverupListPositionsHandler(
     }
 
     const userAddress = (params.address || config.wallet?.smartAccountAddress) as Address;
-    const positions = await getUserPositions(userAddress);
+
+    // When agent polling, only query tracked pairs to reduce RPC cost
+    let pairsFilter: string[] | undefined;
+    if (params.agentId) {
+      const tracked = getTrackedPositions(params.agentId);
+      if (tracked.length > 0) {
+        pairsFilter = [...new Set(tracked.map(tp => tp.pair))];
+      }
+    }
+    const positions = await getUserPositions(userAddress, pairsFilter);
 
     const formattedPositions = positions.map(p => ({
       tradeHash: p.position.positionHash,
@@ -298,13 +306,15 @@ function formatInflowNote(
   hasInflows: boolean,
   isBatch: boolean,
   totalInflowStr: string,
-  tp: { stopLoss: string },
+  tp: { stopLoss: string; takeProfit: string },
 ): string {
   if (hasInflows) {
     return isBatch ? `batch total: ${totalInflowStr}` : totalInflowStr;
   }
-  if (tp.stopLoss && tp.stopLoss !== "0") {
-    return "0 (SL was set — expected inflows, possible query miss)";
+  const hasSL = tp.stopLoss && tp.stopLoss !== "0";
+  const hasTP = tp.takeProfit && tp.takeProfit !== "0";
+  if (hasSL || hasTP) {
+    return "0 (TP/SL was set — possible query miss or liquidation)";
   }
   return "0 (liquidation or expired)";
 }

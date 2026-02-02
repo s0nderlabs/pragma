@@ -70,7 +70,8 @@ export async function createLeverUpClient(config: any) {
 }
 
 export async function getUserPositions(
-  userAddress: Address
+  userAddress: Address,
+  pairs?: string[],
 ): Promise<Array<{ position: LeverUpPosition; analysis: PositionAnalysis }>> {
   const config = await loadConfig();
   if (!config || !isWalletConfigured(config)) {
@@ -80,7 +81,11 @@ export async function getUserPositions(
   const client = await createLeverUpClient(config);
   const allPositions: Array<{ position: LeverUpPosition; analysis: PositionAnalysis }> = [];
 
-  for (const pairMetadata of SUPPORTED_PAIRS) {
+  const pairsToQuery = pairs
+    ? SUPPORTED_PAIRS.filter(p => pairs.includes(p.pair))
+    : SUPPORTED_PAIRS;
+
+  for (const pairMetadata of pairsToQuery) {
     const rawPositions = await withRetryOrThrow(
       async () => client.readContract({
         address: LEVERUP_DIAMOND,

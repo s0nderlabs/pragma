@@ -980,6 +980,12 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
 
 5. Report to user:
    "Agent finished: [status] - [reason]"
+
+6. If this was the LAST active agent:
+   list_sub_agents → check for any remaining active agents
+   If none remain:
+   revoke_root_delegation → clean up on-chain delegation
+   → Only when ALL agents are done, never between agents
 ```
 
 **IMPORTANT:** Always TaskStop before revoke. `revoke_sub_agent` only archives state files and releases the wallet — it does NOT kill the running Task process. Without TaskStop, the agent becomes a zombie (running but with revoked permissions).

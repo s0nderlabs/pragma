@@ -71,7 +71,7 @@ When gas drops below 0.1 MON:
 ### Market Intelligence (8)
 | Tool | Purpose | x402 Cost |
 |------|---------|-----------|
-| `market_get_chart` | Price charts (Pyth Benchmark) | $0.005 |
+| `market_get_chart` | Price charts (Pyth Benchmark) | FREE |
 | `market_get_fx_reference` | FX reference rates | $0.005 |
 | `market_get_currency_strength` | Currency strength analysis | $0.01 |
 | `market_get_economic_events` | Economic calendar (high-impact) | $0.01 |
@@ -136,7 +136,9 @@ When gas drops below 0.1 MON:
    check_delegation_status       → On-chain calls remaining
 ```
 
-**Rule:** If a high-impact event (NFP, FOMC, CPI) is within 30 minutes, DO NOT open new positions. Wait for release, assess reaction, then act.
+**Rules:**
+- If a high-impact event (NFP, FOMC, CPI) is within 30 minutes, DO NOT open new positions. Wait for release, assess reaction, then act.
+- **Use ALL macro tools in Phase 1.** Every tool exists for a reason — economic events, weekly calendar, central bank speeches, critical news, currency strength, and FX reference. Skipping tools means trading with blind spots. The total Phase 1 macro scan costs ~$0.06 — cheap insurance against uninformed trades.
 
 ### Phase 2: Market Structure Analysis
 
@@ -147,10 +149,21 @@ When gas drops below 0.1 MON:
    leverup_list_pairs            → Available pairs, prices, spreads
    leverup_get_market_stats      → OI, volume, spread — where is liquidity?
 
-6. Technical analysis (top 1-3 candidates):
-   market_get_chart (pair 1)     → Price action, structure, key levels
-   market_get_chart (pair 2)     → Compare setups
-   market_get_chart (pair 3)     → Rank by clarity of setup
+6. Top-down technical analysis (top 1-3 candidates, ALL timeframes are FREE):
+
+   For EACH candidate pair, analyze from widest to narrowest:
+
+   a. Weekly (1W, 100 bars)  → Major trend direction, key S/R zones, where are we
+                                in the bigger cycle? Trading WITH or AGAINST weekly trend?
+   b. Daily  (D, 100 bars)   → Medium-term structure, recent swing highs/lows,
+                                is price at a major daily level?
+   c. 4-Hour (240, 100 bars) → Session structure, trend within the current move,
+                                key intraday levels for TP/SL placement
+   d. 1-Hour (60, 100 bars)  → Immediate structure, entry zone, confirmation signals
+   e. 15-Min (15, 50 bars)   → Entry timing, precise SL/TP levels, immediate momentum
+
+   Start wide, narrow down. A short setup on 1h means nothing if weekly is
+   sitting on major support. Always trade in the direction of the higher timeframe.
 
 7. News cross-reference:
    market_search_news("ETH")     → Pair-specific catalysts?
@@ -211,10 +224,10 @@ Path B — Limit Entry (waiting for a level):
 **Goal:** Active management, not set-and-forget.
 
 ```
-11. Monitoring loop:
-    leverup_list_positions       → PnL, margin, liq distance
-    market_get_chart             → Has structure changed?
-    market_get_critical_news     → Breaking news affecting thesis?
+11. Monitoring loop (cadence matters):
+    leverup_list_positions       → Every 5-10 min (~$0.001-0.003, tracked pairs only)
+    market_get_chart             → Every 15-30 min per pair (FREE)
+    market_get_critical_news     → Every 30-60 min ($0.02 each)
 
 12. Adjustments (only if warranted by NEW information):
     leverup_update_tpsl          → Trail SL to lock profit
@@ -280,19 +293,20 @@ Path B — Limit Entry (waiting for a level):
 
 | Action | Frequency | Cost |
 |--------|-----------|------|
-| `leverup_list_positions` | Every cycle | ~$0.002 |
-| `market_get_chart` | Every 10-15 min | $0.005 |
-| `market_get_critical_news` | Every 30 min | $0.02 |
+| `leverup_list_positions` | Every 5-10 min | ~$0.001-0.003 (tracked pairs only x $0.001 RPC) |
+| `market_get_chart` | Every 15-30 min | FREE (Pyth Benchmark) |
+| `market_get_critical_news` | Every 30-60 min | $0.02 |
 | `market_get_economic_events` | Once at start + before entries | $0.01 |
 | `market_search_news` | Only when needed | $0.015 |
-| Full analysis cycle | Every 15-20 min | ~$0.05 |
+| Full analysis cycle | Every 20-30 min | ~$0.025 |
 
-**Estimated monitoring cost:** ~$0.15-0.20/hour.
+**Estimated monitoring cost:** ~$0.03-0.06/hour.
 
 **Cost-conscious rules:**
-- Prefer `market_get_chart` ($0.005) over `market_get_critical_news` ($0.02) for routine checks
+- `market_get_chart` is FREE — use it for routine price checks
+- `leverup_list_positions` queries only your tracked pairs ($0.001 per pair) — full 20-pair scan only when no positions are tracked
 - Full macro scan only at start and before new entries, not every cycle
-- `market_search_news` only for pair-specific catalysts, not routine monitoring
+- `market_search_news` only for pair-specific catalysts
 
 ---
 
@@ -308,6 +322,48 @@ Path B — Limit Entry (waiting for a level):
 8. **Move SL to breakeven** — After 1:1 move in your favor
 9. **Stop at 80% budget depletion** — Reserve 20% as capital preservation
 10. **Never revenge trade** — Loss is information, not motivation
+11. **Minimum position size: $200 notional** — LeverUp protocol minimum is $200 position value (margin × leverage). With $10 margin at 25x = $250 notional ✓. With $10 margin at 15x = $150 notional ✗.
+12. **Direction diversity** — Don't go all-short or all-long unless macro thesis is overwhelmingly one-directional AND you've explicitly documented why. Default: consider both sides of every pair.
+13. **Profit protection** — When a position reaches 50%+ of TP target, trail SL to lock at least 30% of unrealized gains. Never let a winner become a loser. (Production lesson: XRP +94.5% gave back 58% waiting for exact TP)
+14. **Chart frequency cap** — Don't call `market_get_chart` more than once per 15 minutes per pair. Price structure doesn't change in 5 minutes. Over-checking leads to overreacting.
+
+---
+
+## Context Compaction Recovery
+
+When your context is compacted (you lose detailed memory), follow this recovery protocol:
+
+1. **Immediately re-read your state:**
+   ```
+   get_sub_agent_state(agentId)  → Budget, trades, gas, tracked positions
+   leverup_list_positions(agentId) → Current open positions with PnL
+   ```
+
+2. **Full macro refresh** (compaction erases ALL prior macro context):
+   ```
+   market_get_economic_events    → High-impact events imminent?
+   market_get_weekly_calendar    → What's scheduled this week?
+   market_get_cb_speeches        → Central bank tone?
+   market_get_critical_news      → Breaking developments?
+   market_get_currency_strength  → Risk sentiment, strong/weak currencies?
+   market_get_fx_reference       → Current FX levels
+   market_get_chart (open pairs) → Price structure now (FREE)
+   ```
+   You remember NOTHING from before compaction. Do not assume you know the macro picture — rebuild it completely.
+
+3. **Reconstruct your thesis from open positions:**
+   - Check each position's entry price, TP, SL, and current PnL
+   - Cross-reference with the macro refresh: does the original thesis still hold?
+   - Re-derive the thesis from the setup (don't just guess)
+
+4. **Resume monitoring:**
+   - If you have open positions → Phase 5 (position management)
+   - If no positions → Phase 2 (market structure)
+
+5. **Avoid regression patterns:**
+   - Don't suddenly increase polling frequency after compaction
+   - Don't re-analyze pairs you already rejected
+   - Don't forget trailing SL adjustments you made pre-compaction
 
 ---
 
