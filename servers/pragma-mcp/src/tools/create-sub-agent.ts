@@ -27,8 +27,10 @@ import {
   createIntervalLoop,
   sumActiveMonAllocations,
   sumActiveUsdAllocations,
+  KNOWN_TOKEN_SYMBOLS,
   type StoredDelegation,
 } from "../core/subagent/index.js";
+import { findTokenBySymbol } from "../config/tokens.js";
 import { withRetry } from "../core/utils/retry.js";
 import {
   createSubDelegation,
@@ -75,6 +77,16 @@ const CreateSubAgentSchema = z.object({
         "MON group: native MON, WMON, LVMON. USD group: USDC, LVUSD. " +
         "Tokens acquired during trading are always sellable. " +
         "Omit for unrestricted access."
+    ),
+  allowedTokens: z
+    .array(z.string())
+    .optional()
+    .describe(
+      "Specific tokens this agent is allowed to spend (by symbol). " +
+        "More specific than allowedGroups — when set, takes priority. " +
+        "Examples: ['LVUSD'], ['USDC', 'LVUSD'], ['WMON']. " +
+        "Tokens acquired during trading are always sellable. " +
+        "Omit for no per-token restriction."
     ),
   expiryDays: z
     .number()
@@ -157,6 +169,7 @@ interface CreateSubAgentResult {
       usd: string;
       perTransaction: string;
       allowedGroups: string[] | string;
+      allowedTokens: string[] | string;
     };
     maxCalls: number;
     expiresAt: string;
@@ -430,6 +443,41 @@ async function createSubAgentHandler(
           ? { USD: BigInt(Math.floor(params.budgetUsd * 1e6)) }
           : undefined;
 
+      // Resolve allowedTokens symbols to addresses
+      let resolvedAllowedTokens: Address[] | undefined;
+      if (params.allowedTokens && params.allowedTokens.length > 0) {
+        const resolved: Address[] = [];
+        const unknown: string[] = [];
+
+        for (const symbol of params.allowedTokens) {
+          const upper = symbol.toUpperCase();
+          // 1. Core trading tokens (includes LVUSD, LVMON not in verified-tokens)
+          const fromKnown = KNOWN_TOKEN_SYMBOLS[upper];
+          if (fromKnown) {
+            resolved.push(fromKnown);
+            continue;
+          }
+          // 2. Verified tokens registry (WETH, WBTC, CHOG, etc.)
+          const fromRegistry = findTokenBySymbol(symbol);
+          if (fromRegistry) {
+            resolved.push(fromRegistry.address);
+            continue;
+          }
+          unknown.push(symbol);
+        }
+
+        if (unknown.length > 0) {
+          const knownSymbols = Object.keys(KNOWN_TOKEN_SYMBOLS).join(", ");
+          await releaseWallet(poolWallet.id);
+          return {
+            success: false,
+            message: `Unknown token symbols in allowedTokens: [${unknown.join(", ")}]. Core tokens: ${knownSymbols}`,
+          };
+        }
+
+        resolvedAllowedTokens = resolved;
+      }
+
       await createAgentState({
         id: agentId,
         walletId: poolWallet.id,
@@ -441,6 +489,7 @@ async function createSubAgentHandler(
           tokenLimits,
           groupBudgets,
           allowedGroups: params.allowedGroups,
+          allowedTokens: resolvedAllowedTokens,
         },
         maxCalls: params.maxCalls,
         expiresAt: delegationResult.expiresAt * 1000, // Convert to milliseconds
@@ -584,6 +633,7 @@ async function createSubAgentHandler(
             usd: (params.budgetUsd || 0) + " USD",
             perTransaction: formatEther(valueLtePerTx) + " MON/tx",
             allowedGroups: params.allowedGroups || "unrestricted",
+            allowedTokens: params.allowedTokens || "none (using allowedGroups)",
           },
           maxCalls: params.maxCalls,
           expiresAt: expiresAt.toISOString(),

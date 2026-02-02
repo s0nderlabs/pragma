@@ -139,6 +139,20 @@ export const TOKEN_GROUPS: Record<string, { tokens: Address[]; canonicalDecimals
 };
 
 /**
+ * Known token symbols for allowedTokens resolution.
+ * Maps symbol (uppercase) → Address for all core trading tokens.
+ * Used to validate and resolve user-friendly symbols to addresses.
+ * Includes LVUSD/LVMON which are NOT in the verified-tokens registry.
+ */
+export const KNOWN_TOKEN_SYMBOLS: Record<string, Address> = {
+  MON: NATIVE_TOKEN_ADDRESS,
+  WMON: "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A" as Address,
+  LVMON: "0x91b81bfbe3A747230F0529Aa28d8b2Bc898E6D56" as Address,
+  USDC: "0x754704Bc059F8C67012fEd69BC8A327a5aafb603" as Address,
+  LVUSD: "0xFD44B35139Ae53FFF7d8F2A9869c503D987f00d1" as Address,
+};
+
+/**
  * Sub-agent state stored in ~/.pragma/agents/<id>/state.json
  */
 export interface SubAgentState {
@@ -178,6 +192,11 @@ export interface SubAgentState {
     // Tokens acquired during trading (prior inflows) are always sellable
     // Omit or empty array for unrestricted access (backward compatible)
     allowedGroups?: string[];
+
+    // Per-token allowlist (resolved addresses, e.g. ["0xFD44...", "0x91b8..."])
+    // More specific than allowedGroups — when set, takes priority
+    // Tokens acquired during trading (prior inflows) are always sellable
+    allowedTokens?: string[];
 
     // @deprecated - kept for backwards compatibility, use tokenSpent instead
     usdcAllocated?: string;
@@ -259,6 +278,9 @@ export interface CreateAgentStateParams {
     // Optional token group allowlist (e.g. ["MON", "USD"])
     // Restricts which token groups the agent can spend
     allowedGroups?: string[];
+    // Optional per-token allowlist (resolved addresses)
+    // More specific than allowedGroups — when set, takes priority
+    allowedTokens?: Address[];
   };
   maxCalls: number;
   expiresAt: number;
@@ -326,6 +348,7 @@ export async function createAgentState(params: CreateAgentStateParams): Promise<
           )
         : undefined,
       allowedGroups: params.budget.allowedGroups,
+      allowedTokens: params.budget.allowedTokens,
     },
     trades: {
       executed: 0,
@@ -937,45 +960,88 @@ export function findGroupForToken(tokenAddress: Address): string | null {
 }
 
 /**
- * Check if a token is allowed by the agent's allowedGroups allowlist.
+ * Resolve a token address to its known symbol, if any.
+ * Returns the symbol (e.g. "USDC") or null if not found in KNOWN_TOKEN_SYMBOLS.
+ */
+function resolveSymbol(address: string): string | null {
+  const lower = address.toLowerCase();
+  for (const [symbol, addr] of Object.entries(KNOWN_TOKEN_SYMBOLS)) {
+    if (addr.toLowerCase() === lower) return symbol;
+  }
+  return null;
+}
+
+/**
+ * Format token addresses for display, resolving known symbols where possible.
+ * e.g. ["0xFD44..."] → "LVUSD (0xFD44...)"
+ */
+function formatTokenList(addresses: string[]): string {
+  return addresses
+    .map((addr) => {
+      const symbol = resolveSymbol(addr);
+      return symbol ? `${symbol} (${addr})` : addr;
+    })
+    .join(", ");
+}
+
+/**
+ * Check if a token is allowed by the agent's token restrictions.
+ *
+ * Priority: allowedTokens (per-token) > allowedGroups (per-group) > unrestricted
  *
  * Rules:
- * 1. No allowedGroups or empty array → unrestricted (backward compatible)
+ * 1. No allowedTokens AND no allowedGroups → unrestricted (backward compatible)
  * 2. Native MON with MON budget → always allowed (oracle fees, gas)
- * 3. Token in an allowed group → allowed
- * 4. Token has prior inflows (agent acquired it during trading) → allowed
- * 5. Otherwise → blocked
+ * 3. Token has prior inflows (agent acquired it during trading) → always sellable
+ * 4. If allowedTokens set → check token against per-token list
+ * 5. If allowedGroups set → check token against group list
+ * 6. Otherwise → blocked
  */
 export function isTokenAllowed(
   state: SubAgentState,
   tokenAddress: Address
 ): { allowed: boolean; reason?: string } {
-  if (!state.budget.allowedGroups || state.budget.allowedGroups.length === 0) {
+  const hasAllowedTokens = state.budget.allowedTokens && state.budget.allowedTokens.length > 0;
+  const hasAllowedGroups = state.budget.allowedGroups && state.budget.allowedGroups.length > 0;
+
+  if (!hasAllowedTokens && !hasAllowedGroups) {
     return { allowed: true };
   }
+
+  const normalized = tokenAddress.toLowerCase();
 
   // Native MON is always allowed when agent has MON budget (for oracle fees, gas)
-  if (
-    tokenAddress.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase() &&
-    BigInt(state.budget.monAllocated) > 0n
-  ) {
+  if (normalized === NATIVE_TOKEN_ADDRESS.toLowerCase() && BigInt(state.budget.monAllocated) > 0n) {
     return { allowed: true };
   }
 
-  const groupName = findGroupForToken(tokenAddress);
-  if (groupName && state.budget.allowedGroups.includes(groupName)) {
-    return { allowed: true };
-  }
-
-  // Check if agent acquired this token during trading (has inflows)
-  const flows = state.budget.tokenFlows?.[tokenAddress.toLowerCase()];
+  // Self-acquired tokens (prior inflows) are always sellable regardless of restrictions
+  const flows = state.budget.tokenFlows?.[normalized];
   if (flows && BigInt(flows.in) > 0n) {
+    return { allowed: true };
+  }
+
+  // Per-token allowlist takes priority over group allowlist
+  if (hasAllowedTokens) {
+    if (state.budget.allowedTokens!.some((a) => a.toLowerCase() === normalized)) {
+      return { allowed: true };
+    }
+
+    return {
+      allowed: false,
+      reason: `Token ${tokenAddress} not in allowedTokens [${formatTokenList(state.budget.allowedTokens!)}] and has no prior inflows`,
+    };
+  }
+
+  // Fall back to group allowlist
+  const groupName = findGroupForToken(tokenAddress);
+  if (groupName && state.budget.allowedGroups!.includes(groupName)) {
     return { allowed: true };
   }
 
   return {
     allowed: false,
-    reason: `Token not in allowed groups [${state.budget.allowedGroups.join(", ")}] and has no prior inflows`,
+    reason: `Token not in allowed groups [${state.budget.allowedGroups!.join(", ")}] and has no prior inflows`,
   };
 }
 

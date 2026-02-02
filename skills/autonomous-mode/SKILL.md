@@ -217,12 +217,22 @@ Net outflow = sum(out - in) across all tokens in group, normalized to canonical 
 
 ### Token Allowlist (Optional)
 
-- `allowedGroups` restricts which token groups the agent can spend
+Two levels of token restriction (more specific wins):
+
+**Per-token (`allowedTokens`)** — most specific, takes priority:
+- Restricts which specific tokens the agent can spend
+- Accepts token symbols, resolved to addresses at creation time
+- Example: `["LVUSD"]` allows ONLY LVUSD (blocks USDC even though both are in USD group)
+- Example: `["USDC", "LVUSD"]` allows both stablecoins
+
+**Per-group (`allowedGroups`)** — broader, used when `allowedTokens` is not set:
+- Example: `["MON"]` allows MON/WMON/LVMON spending
+- Example: `["USD"]` allows USDC/LVUSD spending
+
+**Shared rules:**
 - Tokens acquired during trading (prior inflows) are always sellable
-- Example: `["MON"]` allows MON/WMON/LVMON spending only
-- Example: `["USD"]` allows USDC/LVUSD spending only
-- Example: `["MON", "USD"]` allows both groups
-- Omit for unrestricted access (backward compatible)
+- Native MON always allowed when agent has MON budget (oracle fees, gas)
+- Omit both for unrestricted access (backward compatible)
 
 ## Sub-Agent Funding
 
@@ -394,6 +404,7 @@ Question: "Which tokens can this agent spend?"
 Options:
   - MON group only (MON, WMON, LVMON)
   - USD group only (USDC, LVUSD)
+  - LVUSD only (blocks USDC — per-token restriction)
   - Both MON + USD groups
   - Unrestricted (Recommended)
 Description: |
@@ -486,6 +497,7 @@ create_sub_agent(
   budgetMon: [user specified],
   budgetUsd: [user specified, optional],
   allowedGroups: [user specified, optional — e.g. ["MON"] or ["MON", "USD"]],
+  allowedTokens: [user specified, optional — e.g. ["LVUSD"] or ["USDC", "WMON"]],
   maxCalls: [inferred],
   expiryDays: [calculated],
   fundAmount: 1,

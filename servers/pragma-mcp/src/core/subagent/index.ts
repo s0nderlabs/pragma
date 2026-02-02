@@ -46,6 +46,7 @@ export {
   USDC_ADDRESS,
   TOKEN_GROUPS,
   TOKEN_DECIMALS,
+  KNOWN_TOKEN_SYMBOLS,
   normalizeToCanonical,
   createAgentState,
   loadAgentState,

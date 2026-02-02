@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.19] - 2026-02-02
+
+### Added
+- **Per-token allowlist (`allowedTokens`)** — New parameter on `create_sub_agent` accepts token symbols (e.g. `["LVUSD"]`). Two-tier resolution: `KNOWN_TOKEN_SYMBOLS` (5 core tokens) then verified registry. When set, takes priority over `allowedGroups`. Self-acquired tokens and native MON exemptions still apply
+- **Adversarial self-review** — Phase 3 now requires mandatory bear case before kill switch: argue against your own trade, compare TP to prior rejections. Only proceed if bull case survives
+- **Position health re-checks** — Phase 5 monitoring gains liq distance degradation check, pre-event exit planning, manual close levels, bounce quality comparison
+
+### Changed
+- **Analyst-first temperament** — Kairos identity reframed: "analyst with execution capability, not trader with analysis tools." Analysis is the product, trades are a side effect
+- **Sleep-based monitoring cadence** — Agents must call `Bash("sleep 600")` between monitoring cycles. Writing "I'll wait" does not pause execution
+- **SL-Liq buffer percentage-based** — Changed from fixed $9 to 0.4% of entry price. $9 was 0.4% on ETH but 0.012% on BTC and 9% on SOL
+
 ## [0.8.18] - 2026-02-02
 
 ### Fixed
