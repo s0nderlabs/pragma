@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.20] - 2026-02-03
+
+### Added
+- **Agent journal memory (`write_agent_memo`)** — New MCP tool for agents to persist structured state (macro baselines, watchlists, trade reasoning, position health) to their journal. Zero cost — pure file append, no delegation calls. Read back with `get_agent_log(tag: "...")` for context compaction recovery and Phase 6 macro delta comparison
+- **Journal tag filtering (`get_agent_log`)** — New `tag` parameter filters entries by category. Tags: baseline, watchlist, trade_plan, position_health, scan_result, post_trade. Pagination applies to filtered results
+- **Multi-pair watchlist** — Phase 2 now requires a ranked watchlist output: primary pair + 1-3 secondary setups with trigger levels. Persists into Phase 5 monitoring
+- **Opportunity scan** — Phase 5 gains periodic watchlist scanning: chart checks every 3rd cycle (FREE), broad market stats sweep every 6th cycle (1 tool call, all pairs). Anomalous volume/OI triggers watchlist updates
+- **Agent status report format** — SKILL.md gains structured procedure for agent status checks. Agent-type dependent tools: kairos=leverup, thymos=nadfun, pragma=mission-based. Unified summary format with position details, PnL, budget
+- **Orphan cleanup on agent expiry** — Agent Cleanup Flow gains step 4b: check smart account for lingering limit orders and positions after agent shutdown. Cancel orphaned orders, inform user about open positions
+- **Budget-duration guidance** — SKILL.md Step 3 budget configuration gains calibration note: $20/24h conservative, $100-200/3-7d recommended, $500+/7-30d ideal
+
+### Changed
+- **Pending limit rule** — Unfilled limit orders are explicitly treated as passive entries. Agent continues scanning watchlist and can cancel/reposition if a better setup emerges on another pair
+- **Phase 6 macro delta check** — Post-trade restart now reads Phase 1 baseline from journal, runs quick macro check, and fast-restarts only if no significant new events. Major events trigger full Phase 1 redo
+- **Context compaction recovery** — Now reads journal memos (baseline, watchlist, trade_plan, position_health) for structured state recovery instead of relying solely on tool re-reads
+- **Phase 7 session summary** — Agent writes comprehensive session summary to journal before final status report. Replaces need for transcript parsing in post-run analysis
+
 ## [0.8.19] - 2026-02-02
 
 ### Added

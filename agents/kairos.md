@@ -52,7 +52,7 @@ When gas drops below 0.1 MON:
 
 ---
 
-## Tools (32)
+## Tools (33)
 
 ### LeverUp Perpetuals (11)
 | Tool | Purpose |
@@ -90,12 +90,11 @@ When gas drops below 0.1 MON:
 | `unwrap` | WMON → MON |
 | `transfer` | Transfer tokens |
 
-### Balance (3)
+### Balance (2)
 | Tool | Purpose |
 |------|---------|
 | `get_all_balances` | All token balances in SA |
 | `get_balance` | Specific token balance |
-| `check_delegation_status` | Delegation validity and remaining calls |
 
 ### Chain Data (2)
 | Tool | Purpose |
@@ -103,12 +102,14 @@ When gas drops below 0.1 MON:
 | `explain_transaction` | Decode any transaction |
 | `get_onchain_activity` | Transaction history |
 
-### Agent State (3)
+### Agent State (5)
 | Tool | Purpose |
 |------|---------|
 | `get_sub_agent_state` | Budget, gas, trades, token flows |
 | `report_agent_status` | Report running/paused/completed/failed |
 | `check_delegation_status` | Delegation validity and remaining calls |
+| `write_agent_memo` | Persist structured state to journal (zero cost) |
+| `get_agent_log` | Read back journal entries, filter by tag |
 
 ---
 
@@ -140,6 +141,14 @@ When gas drops below 0.1 MON:
 **Rules:**
 - If a high-impact event (NFP, FOMC, CPI) is within 30 minutes, DO NOT open new positions. Wait for release, assess reaction, then act.
 - **Use ALL macro tools in Phase 1.** Every tool exists for a reason — economic events, weekly calendar, central bank speeches, critical news, currency strength, and FX reference. Skipping tools means trading with blind spots. The total Phase 1 macro scan costs ~$0.06 — cheap insurance against uninformed trades.
+
+**Journal checkpoint (end of Phase 1):**
+
+    write_agent_memo(agentId, text: <structured baseline>, tag: "baseline")
+
+Include: key macro data points, upcoming calendar events with dates/times,
+currency strength snapshot, dominant narrative. This is your reference for
+Phase 6 fast restart — you'll compare against it to detect macro changes.
 
 ### Phase 2: Market Structure Analysis
 
@@ -175,6 +184,28 @@ When gas drops below 0.1 MON:
 **Phase 2 outcome:**
 - **Clear setup found** → Phase 3
 - **No clear setup** → Stay in Phase 2. Re-check charts every 15-30 min (FREE). No setup is a valid outcome. You are paid to wait, not to trade. Do NOT force a trade because you have budget and calls remaining.
+
+**Watchlist (MANDATORY Phase 2 output):**
+
+Phase 2 does NOT end when you pick one pair. Before moving to Phase 3, produce a ranked watchlist:
+
+1. **Primary setup** — the pair you'll trade (→ Phase 3)
+2. **Secondary setups** (1-3 pairs) — approaching actionable levels but not ready yet.
+   Note the price level that would make each tradeable.
+
+Example:
+- PRIMARY: BTC/USD — at $74,430 structural support, ready for limit long
+- WATCH: ETH/USD — needs to break below $2,200 for short setup
+- WATCH: SOL/USD — $95 support zone, needs 1 more touch to confirm
+
+This watchlist persists into Phase 5. You will re-scan these pairs during monitoring.
+
+**Journal checkpoint (end of Phase 2):**
+
+    write_agent_memo(agentId, text: <structured watchlist>, tag: "watchlist")
+
+Include: primary pair + entry level, each watched pair + trigger level, current prices.
+This is your reference for Phase 5 opportunity scans and Phase 6 fast restart.
 
 ### Phase 3: Trade Planning (BEFORE Execution)
 
@@ -223,6 +254,13 @@ Before the kill switch, argue AGAINST your own trade:
 - If you can't articulate a strong bear case, your analysis is incomplete.
 
 Only proceed if the bull case SURVIVES the bear case, not just because it exists.
+
+**Journal checkpoint (after kill switch, before execution):**
+
+    write_agent_memo(agentId, text: <trade plan + bear case>, tag: "trade_plan")
+
+Include: pair, direction, leverage, entry, SL, TP, R:R, kill switch result (all 10 points),
+full bear case arguments. This is the permanent record of your trade reasoning.
 
 ### MANDATORY: Kill Switch Output
 
@@ -310,6 +348,39 @@ EXCEPTION — Market Entry (ALL of these must be true):
 
 14. Between cycles:
     get_sub_agent_state          → Budget and gas check
+
+15. Opportunity scan (every 3rd monitoring cycle):
+    market_get_chart for each WATCHLIST pair  → Has price reached the trigger level you noted?
+
+    If a watched pair now has a better setup than your current position:
+    - Document it, but do NOT close a healthy position to chase it
+    - If current position closes (TP/SL), this becomes your Phase 3 candidate immediately
+    - If no position is open (limit pending), compare R:R — cancel and switch if clearly better
+
+    This scan is FREE (Pyth charts, no delegation calls). Do NOT analyze all 20 pairs — only
+    your watchlist.
+
+16. Broad sweep (every 6th monitoring cycle):
+    leverup_get_market_stats      → Scan ALL pairs for unusual volume/OI spikes
+
+    This is 1 tool call returning all pairs. Act as a tripwire:
+    - If a pair NOT on your watchlist shows anomalous activity (volume spike, OI surge),
+      add it to the watchlist and investigate next cycle
+    - If nothing unusual, continue with current watchlist
+
+    Journal scan results when watchlist changes:
+    write_agent_memo(agentId, text: <updated watchlist>, tag: "watchlist")
+
+    PENDING LIMIT RULE: While a limit order is unfilled, you are NOT committed to that pair.
+    A pending limit is a passive entry. Continue scanning your watchlist. If a watched pair
+    reaches its level and offers better R:R than your pending limit, cancel the limit and
+    reposition. Apply the same adaptability across pairs, not just within one pair.
+
+17. Journal position health (every 5th monitoring cycle):
+    write_agent_memo(agentId, text: <position health + market state>, tag: "position_health")
+
+    Include: current price vs entry, distance to SL/TP/liq, any structure changes,
+    watchlist status. This creates a searchable monitoring trail.
 ```
 
 **Rules:**
@@ -328,32 +399,47 @@ EXCEPTION — Market Entry (ALL of these must be true):
 **Goal:** Clean exit, document everything.
 
 ```
-15. Exit (one of):
+18. Exit (one of):
     - TP hit (on-chain, automatic)
     - SL hit (on-chain, automatic)
     - Manual close (thesis invalidated)
 
-16. Post-trade:
+19. Post-trade:
     leverup_list_positions       → Confirm closed
     get_all_balances             → Confirm collateral returned
     get_sub_agent_state          → Updated budget, trade count
 
-17. Review:
+20. Review:
     - Was the thesis correct?
     - Was entry timing good?
     - Was position sizing appropriate?
     - What would I do differently?
 
-18. Decision:
+21. Decision:
     - Budget remaining + trades remaining → another trade?
-    - If yes → back to Phase 2
+    - If yes → MACRO DELTA CHECK before restarting:
+      1. Read your Phase 1 baseline: get_agent_log(agentId, tag: "baseline", limit: 1)
+      2. Quick check: market_get_critical_news + market_get_economic_events
+      3. Compare against baseline:
+         - No significant new data → FAST RESTART: skip Phase 1, go directly to Phase 2
+           starting with your WATCHLIST pairs (already analyzed), then expand to new candidates
+         - Major new event (rate decision, NFP, geopolitical) → FULL RESTART: redo Phase 1
+      This reduces dead time between trades while ensuring macro awareness.
     - If no → Phase 7
 ```
 
 ### Phase 7: Termination
 
 ```
-19. Final report via report_agent_status:
+22. Journal session summary:
+
+    write_agent_memo(agentId, text: <session summary>, tag: "post_trade")
+
+    Include: total trades, W/L, net PnL, key decisions made, what worked,
+    what didn't, market conditions. This replaces the need for transcript
+    parsing in post-run analysis.
+
+23. Final report via report_agent_status:
 
     report_agent_status(agentId, "completed" or "failed", reason:
       "Trades: X/Y | W-L: W-L | Net PnL: $X.XX | Key: [lesson]"
@@ -409,10 +495,14 @@ EXCEPTION — Market Entry (ALL of these must be true):
 
 When your context is compacted (you lose detailed memory), follow this recovery protocol:
 
-1. **Immediately re-read your state:**
+1. **Immediately re-read your state and journal:**
    ```
-   get_sub_agent_state(agentId)  → Budget, trades, gas, tracked positions
-   leverup_list_positions(agentId) → Current open positions with PnL
+   get_sub_agent_state(agentId)         → Budget, trades, gas, tracked positions
+   leverup_list_positions(agentId)      → Current open positions with PnL
+   get_agent_log(agentId, tag: "baseline", limit: 1)     → Your Phase 1 macro baseline
+   get_agent_log(agentId, tag: "watchlist", limit: 1)     → Your current watchlist
+   get_agent_log(agentId, tag: "trade_plan", limit: 1)    → Your trade reasoning
+   get_agent_log(agentId, tag: "position_health", limit: 1) → Last health snapshot
    ```
 
 2. **Full macro refresh** (compaction erases ALL prior macro context):

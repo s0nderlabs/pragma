@@ -86,7 +86,8 @@ export interface JournalEntry {
     | "status"
     | "error"
     | "limit_order"
-    | "cancel_order";
+    | "cancel_order"
+    | "memo";
   pair?: string;
   side?: string;
   margin?: string;
@@ -96,6 +97,7 @@ export interface JournalEntry {
   txHash?: string;
   tradeHash?: string;
   protocol?: string;
+  tag?: string;
 }
 
 /**
@@ -1259,23 +1261,28 @@ export function appendJournal(agentId: string, entry: JournalEntry): void {
 }
 
 /**
- * Load journal entries with optional pagination.
- * Returns { entries, total } where total is the count of all entries.
+ * Load journal entries with optional pagination and filtering.
+ * Returns { entries, total } where total is the count of matching entries.
  */
 export function loadJournal(
   agentId: string,
   offset = 0,
-  limit = 50
+  limit = 50,
+  filter?: { tag?: string }
 ): { entries: JournalEntry[]; total: number } {
   const journalPath = getJournalPath(agentId);
   if (!existsSync(journalPath)) return { entries: [], total: 0 };
 
   try {
     const lines = readFileSync(journalPath, "utf-8").trim().split("\n").filter(Boolean);
-    const entries = lines
-      .slice(offset, offset + limit)
-      .map((line) => JSON.parse(line) as JournalEntry);
-    return { entries, total: lines.length };
+    let allEntries = lines.map((line) => JSON.parse(line) as JournalEntry);
+
+    if (filter?.tag) {
+      allEntries = allEntries.filter((e) => e.tag === filter.tag);
+    }
+
+    const entries = allEntries.slice(offset, offset + limit);
+    return { entries, total: allEntries.length };
   } catch {
     return { entries: [], total: 0 };
   }

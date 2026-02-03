@@ -62,6 +62,7 @@ allowed-tools:
   - mcp__pragma__check_delegation_status
   - mcp__pragma__revoke_root_delegation
   - mcp__pragma__get_agent_log
+  - mcp__pragma__write_agent_memo
   - mcp__pragma__list_wallet_pool
   - AskUserQuestion
   - Read
@@ -276,7 +277,8 @@ Before executing multiple operations, calculate total gas needed:
 | Agent     | `report_agent_status`       | Sub-agent status updates (running/paused/completed/failed)     |
 | Agent     | `check_delegation_status`   | Check root or sub-agent delegation validity                    |
 | Agent     | `revoke_root_delegation`    | Revoke root delegation and stop all agents                     |
-| Agent     | `get_agent_log`             | Paginated journal log (trades, reasoning, status)              |
+| Agent     | `get_agent_log`             | Paginated journal log (trades, reasoning, status). Supports tag filter |
+| Agent     | `write_agent_memo`          | Persist structured state to agent journal (zero delegation cost) |
 | Agent     | `list_wallet_pool`          | List wallet pool wallets and assignments                       |
 
 ### Context-Optimized Operations (IMPORTANT)

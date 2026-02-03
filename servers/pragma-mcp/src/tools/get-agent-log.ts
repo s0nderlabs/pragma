@@ -21,6 +21,13 @@ const GetAgentLogSchema = z.object({
     .max(200)
     .optional()
     .describe("Max number of entries to return. Default: 50, max: 200"),
+  tag: z
+    .string()
+    .optional()
+    .describe(
+      "Filter entries by tag. Only returns entries with matching tag. " +
+        "Common tags: baseline, watchlist, trade_plan, position_health, scan_result, post_trade"
+    ),
 });
 
 interface GetAgentLogResult {
@@ -70,8 +77,9 @@ async function getAgentLogHandler(
 
     const offset = params.offset ?? 0;
     const limit = params.limit ?? 50;
+    const filter = params.tag ? { tag: params.tag } : undefined;
 
-    const { entries, total } = loadJournal(params.agentId, offset, limit);
+    const { entries, total } = loadJournal(params.agentId, offset, limit, filter);
 
     if (entries.length === 0 && total === 0) {
       return {

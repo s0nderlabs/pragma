@@ -12,6 +12,7 @@ allowed-tools:
   - mcp__pragma__check_delegation_status
   - mcp__pragma__revoke_root_delegation
   - mcp__pragma__get_agent_log
+  - mcp__pragma__write_agent_memo
   - mcp__pragma__list_wallet_pool
   - mcp__pragma__leverup_list_positions
   - mcp__pragma__get_all_balances
@@ -411,6 +412,13 @@ Description: |
   Restricts which of your existing holdings the agent can touch.
   Tokens the agent buys during trading can always be sold back.
 ```
+
+**Budget-Duration Guidance** (share with user during configuration):
+- $20 / 24h — Conservative. May produce 0-2 trades. Good for testing agent behavior.
+- $100-200 / 3-7 days — Recommended. Enough for 3-10 trades with proper selectivity.
+- $500+ / 7-30 days — Ideal for kairos methodology. Full patience model.
+
+Set expectations: Kairos is an analyst first. Some sessions produce zero trades — that's discipline, not failure.
 
 ### Step 4: Present Tailored Configuration
 
@@ -851,11 +859,22 @@ report_agent_status(agentId, status, reason?)
   - other statuses → logged as "status" type
 ```
 
+### Writing Agent Memos
+```
+write_agent_memo(agentId, text, tag?)
+- Persists structured state to the agent's journal (type: "memo")
+- Zero cost — pure file append, no delegation calls consumed
+- Tags for categorization: baseline, watchlist, trade_plan, position_health, scan_result, post_trade
+- Read back with get_agent_log(tag: "...") for filtered retrieval
+- Survives context compaction — use for data that must persist across long sessions
+```
+
 ### Viewing Agent Journal
 ```
-get_agent_log(agentId, offset?, limit?)
+get_agent_log(agentId, offset?, limit?, tag?)
 - Returns paginated journal entries (newest first)
-- Includes: trade events, reasoning, status changes, errors
+- Includes: trade events, reasoning, status changes, memos, errors
+- Filter by tag to retrieve specific entry types (e.g. "baseline", "watchlist", "trade_plan")
 - Default: 50 entries, max: 200 per request
 - Use offset for pagination through older entries
 ```
@@ -1011,6 +1030,15 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
    → Releases wallet to pool
    → Keeps gas in wallet for reuse
 
+4b. Check for orphaned on-chain artifacts:
+    leverup_list_limit_orders(address: <smart_account>)
+    leverup_list_positions(address: <smart_account>)
+    → If pending limit orders exist from this agent, cancel them:
+      leverup_cancel_limit_order(orderHash)
+    → If open positions exist, inform the user and ask whether to close or manage manually
+    → This step prevents unmanaged positions/orders from lingering after agent shutdown
+    IMPORTANT: Query the smart account (delegator), not the agent wallet (session key).
+
 5. Report to user:
    "Agent finished: [status] - [reason]"
 
@@ -1022,6 +1050,60 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
 ```
 
 **IMPORTANT:** Always TaskStop before revoke. `revoke_sub_agent` only archives state files and releases the wallet — it does NOT kill the running Task process. Without TaskStop, the agent becomes a zombie (running but with revoked permissions).
+
+### Agent Status Report
+
+When the user asks for an update on running agents ("how's my agent doing?", "status update",
+"check on kairos"), follow this procedure:
+
+**Step 1: List all agents**
+
+    list_sub_agents → identify running agents, status, budget summary
+
+**Step 2: For each running agent, get state + journal**
+
+    get_sub_agent_state(subAgentId, includeTrades: true)  → budget, trades, errors, timing
+    get_agent_log(agentId, limit: 20)                      → recent reasoning + trade events
+
+**Step 3: Check on-chain exposure (agent-type dependent)**
+
+| Agent Type | Tools to Call |
+|------------|--------------|
+| **Kairos** (perps) | `leverup_list_positions(address: <smart_account>)` + `leverup_list_limit_orders(address: <smart_account>)` |
+| **Thymos** (memecoins) | `nadfun_positions` + `get_all_balances(address: <smart_account>)` |
+| **Pragma** (general) | `get_all_balances(address: <smart_account>)` + check based on mission (perps → leverup, memecoins → nadfun) |
+
+IMPORTANT: Query the **smart account** (delegator), not the agent wallet (session key).
+Positions and orders live on the smart account.
+
+**Step 4: Present unified summary (per agent)**
+
+```
+Agent: {type}-{shortId} | {status} | {expiresIn} remaining
+Budget: {spent}/{total} {token} | {tradesExecuted}/{maxTrades} trades | {errorCount} errors
+
+[If Kairos with position:]
+Position: {pair} {side} {leverage}x
+  Entry ${entry} | PnL {pnl} ({pnlPct})
+  SL ${sl} | TP ${tp}
+  Liq ${liq} ({liqDistance} away)
+
+[If Kairos with pending limit:]
+Pending: {pair} {side} {leverage}x @ ${trigger}
+  SL ${sl} | TP ${tp}
+
+[If Thymos with holdings:]
+Holdings: {token1} ({pnl1}), {token2} ({pnl2}), ...
+
+Recent: (last 3 journal entries)
+  {time} — {summary}
+```
+
+For multiple agents, add portfolio summary:
+
+```
+Portfolio: {totalAgents} agents | {totalExposure} total exposure | {netPnl} net PnL
+```
 
 ### When User Kills Agent Process
 
