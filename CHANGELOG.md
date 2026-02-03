@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.21] - 2026-02-03
+
+### Fixed
+- Broad sweep price baseline — sweep now persists all pair prices via `scan_result` memo, subsequent sweeps read previous baseline and flag >3% movers. Replaces aspirational volume/OI language with functional price-diff workflow
+
 ## [0.8.20] - 2026-02-03
 
 ### Added

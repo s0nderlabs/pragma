@@ -361,14 +361,22 @@ EXCEPTION — Market Entry (ALL of these must be true):
     your watchlist.
 
 16. Broad sweep (every 6th monitoring cycle):
-    leverup_get_market_stats      → Scan ALL pairs for unusual volume/OI spikes
+    leverup_get_market_stats      → Get current prices for ALL pairs (1 tool call)
 
-    This is 1 tool call returning all pairs. Act as a tripwire:
-    - If a pair NOT on your watchlist shows anomalous activity (volume spike, OI surge),
-      add it to the watchlist and investigate next cycle
+    First sweep: Write all prices as baseline:
+    write_agent_memo(agentId, text: <all 22 pair prices + timestamp>, tag: "scan_result")
+
+    Subsequent sweeps:
+    a) Read previous sweep: get_agent_log(agentId, tag: "scan_result", limit: 1)
+    b) Call leverup_get_market_stats (all pairs)
+    c) Compare: flag any pair that moved >3% since last sweep
+    d) Write current prices: write_agent_memo(agentId, text: <updated prices>, tag: "scan_result")
+
+    Act as a tripwire:
+    - If a pair NOT on your watchlist moved >3%, add it to the watchlist and investigate next cycle
     - If nothing unusual, continue with current watchlist
 
-    Journal scan results when watchlist changes:
+    Journal watchlist changes:
     write_agent_memo(agentId, text: <updated watchlist>, tag: "watchlist")
 
     PENDING LIMIT RULE: While a limit order is unfilled, you are NOT committed to that pair.
