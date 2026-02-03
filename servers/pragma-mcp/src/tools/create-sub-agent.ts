@@ -20,6 +20,7 @@ import { x402HttpOptions } from "../core/x402/client.js";
 import {
   assignWallet,
   releaseWallet,
+  getFullWallet,
   createAgentState,
   storeDelegation,
   createContinuousLoop,
@@ -189,6 +190,7 @@ interface CreateSubAgentResult {
       intervalMinutes?: number;
       maxIterations?: number;
     };
+    keychainNote?: string;
   };
   error?: string;
 }
@@ -313,6 +315,21 @@ async function createSubAgentHandler(
 
     // Get or create wallet from pool and assign to task
     const poolWallet = await assignWallet(taskId);
+
+    // Pre-flight: trigger macOS Keychain prompt while user is present.
+    // Without this, the first autonomous trade would stall waiting for approval.
+    const keychainAccessible = await getFullWallet(poolWallet.id);
+    if (!keychainAccessible) {
+      await releaseWallet(poolWallet.id);
+      return {
+        success: false,
+        message: "Wallet key not found in Keychain",
+        error:
+          `Wallet ${poolWallet.id} exists in pool but private key missing from Keychain. ` +
+          `This can happen if Keychain was reset or pragma-signer was rebuilt. ` +
+          `Try running setup_wallet to repair, or delete ~/.pragma/wallet-pool.json and retry.`,
+      };
+    }
 
     // Wrap all operations in try-catch to release wallet on failure
     try {
@@ -655,6 +672,8 @@ async function createSubAgentHandler(
                 maxIterations: params.maxIterations ?? 0,
               }
             : undefined,
+          keychainNote:
+            "If macOS prompted for Keychain access, select 'Always Allow' to prevent interruptions during autonomous trading.",
         },
       };
     } catch (innerError) {

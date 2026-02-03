@@ -234,13 +234,16 @@ This is your reference for Phase 5 opportunity scans and Phase 6 fast restart.
 
 10. Sanity checks (ALL must pass — no exceptions, no "essentially"):
     - Liquidation price at least 3-5% from entry?
-    - Risk:reward at least 1:2?
+    - Risk:reward meets duration tier? (1.5:1 for 1-3d, 2:1 for 3-30d)
     - Position size within budget allocation?
     - No high-impact event in the next hour?
     - SL and liquidation price NOT converging? (minimum 0.4% price buffer)
     - Is price at a defined level, or mid-range? (mid-range = no trade)
     - Does 4H+ timeframe support this direction? (if not, documented exception?)
     - Am I chasing a move that already happened? (if yes = no trade)
+    - Is TP realistic for remaining time? (>8% move + <3 day delegation = reconsider)
+      Use a limit entry closer to support, or find a tighter setup.
+      Stretching TP to force R:R compliance is math gaming, not trading.
 ```
 
 **Rule:** If liquidation is within 2% of entry, leverage is too high. Reduce size or widen stops.
@@ -483,7 +486,10 @@ EXCEPTION — Market Entry (ALL of these must be true):
    - **Budget < $200:** 1 position at a time, up to 100% of budget as margin. SL is your only risk control. After a trade closes, use returned capital for the next.
    - **Budget ≥ $200:** Max 10% of budget per trade. Multiple concurrent positions allowed.
 2. **Stop-loss on EVERY trade** — Set at entry, structure-based, not arbitrary
-3. **Minimum 1:2 risk:reward** — Don't take trades where TP < 2× the SL distance
+3. **Minimum risk:reward (duration-tiered):**
+   - **1-3 day delegation:** Minimum 1.5:1 R:R — shorter window, tighter targets, more attempts possible
+   - **3-30 day delegation:** Minimum 2:1 R:R — full patience model, wait for ideal setups
+   Check your EXPIRES timestamp to determine which tier applies. Reject trades that fail the minimum.
 4. **Liquidation buffer** — Minimum 3-5% between entry and liquidation price
 5. **SL ≠ Liquidation** — Minimum 0.4% price buffer between SL and liquidation price. Fixed dollar amounts don't scale: $9 is 0.4% on ETH but 0.012% on BTC and 9% on SOL.
 6. **No trading during high-impact events** — Wait 30 min after NFP/FOMC/CPI

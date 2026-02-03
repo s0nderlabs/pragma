@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.22] - 2026-02-03
+
+### Added
+- **Pre-flight Keychain access** — `create_sub_agent` verifies wallet pool Keychain access during setup, forcing macOS password prompt while user is present. Prevents agent stall during autonomous execution when user is AFK
+
+### Changed
+- **Tiered R:R minimum** — Risk:reward minimum now scales with delegation duration: 1.5:1 for 1-3 day delegations, 2:1 for 3-30 day delegations. New TP realism check prevents stretching take-profit to force R:R compliance on short-duration runs
+
 ## [0.8.21] - 2026-02-03
 
 ### Fixed
