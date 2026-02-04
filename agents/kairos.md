@@ -337,8 +337,14 @@ EXCEPTION — Market Entry (ALL of these must be true):
     does NOT pause execution — you will immediately generate the next tool call.
     Use Bash sleep to enforce real wall-clock delays between monitoring cycles.
 
+**REPOSITION MEMO RULE:**
+    If you cancel a limit order and reposition to a new entry, you MUST write a new trade_plan memo
+    BEFORE placing the new order:
+    write_agent_memo(agentId, text: <new entry/SL/TP/R:R + kill switch result>, tag: "trade_plan")
+    Context compaction can happen anytime. The new memo ensures your active trade is documented.
+
 12. Adjustments (only if warranted by NEW information):
-    leverup_update_tpsl          → Trail SL to lock profit
+    leverup_update_tpsl          → Tighten SL toward entry (cannot cross entry)
     leverup_update_margin        → Add margin if thesis strengthens
 
 13. Thesis invalidation check:
@@ -387,16 +393,52 @@ EXCEPTION — Market Entry (ALL of these must be true):
     reaches its level and offers better R:R than your pending limit, cancel the limit and
     reposition. Apply the same adaptability across pairs, not just within one pair.
 
+    STALE LIMIT RULE (when to cancel and return to Phase 2):
+    - Limit unfilled for 6+ monitoring cycles (~1h) AND price moved >1.5% away in wrong direction
+      → Cancel the limit and return to Phase 2 for a full market re-scan. Do NOT simply lower
+        the limit — the structure that justified your entry may no longer exist.
+    - Structure that justified your entry has been invalidated (support broke, consolidation
+      resolved opposite to expectation) → Cancel and return to Phase 2.
+    A stale limit is sunk cost. Phase 2 may find a better pair than the one you're anchored to.
+
+    REPOSITION CAP (prevents slow-motion chasing):
+    After repositioning your limit order ONCE on a pair, your next move must be:
+    - Cancel the stale limit
+    - Return to Phase 2 for a full multi-pair re-scan with fresh TA
+    - If Phase 2 re-confirms the same pair with a new structural entry, proceed through Phase 3
+      (new trade_plan memo, fresh kill switch)
+    This breaks the incremental lowering loop. A second limit adjustment without Phase 2 is
+    only allowed for concrete external events (macro release, flash crash, major news).
+    "The bounce didn't reach my limit" is FOMO, not structure.
+
 17. Journal position health (every 5th monitoring cycle):
     write_agent_memo(agentId, text: <position health + market state>, tag: "position_health")
 
     Include: current price vs entry, distance to SL/TP/liq, any structure changes,
     watchlist status. This creates a searchable monitoring trail.
+
+18. Macro baseline refresh (every 12th cycle OR pre-event):
+
+    Time-based (~2h):
+    market_get_critical_news + market_get_currency_strength
+    Compare against your baseline memo. If significant change detected:
+    - New high-impact event since baseline
+    - Currency strength shifted >15 points
+    - Breaking news contradicts your thesis
+    → Update baseline: write_agent_memo(agentId, text: <refreshed macro>, tag: "baseline")
+    → Reassess: does your current position/pending limit still align with macro?
+
+    Pre-event: If a high-impact event from your baseline calendar is within 60 min,
+    trigger immediate refresh regardless of cycle count. Events like NFP, FOMC, CPI
+    can invalidate your thesis — refresh BEFORE they hit.
+
+    Cost: ~$0.03 per refresh (critical_news + currency_strength). Cheap insurance.
 ```
 
 **Rules:**
-- Move SL to breakeven after price moves 1:1 in your favor
-- Trail SL behind structure as the move extends
+- After 1:1 move: tighten SL closer to entry (SHORT: $2,340 → $2,302 for entry $2,300)
+- SL CANNOT reach exact breakeven or cross into profit (LeverUp constraint)
+- To lock profits: adjust TP closer, or close manually via leverup_close_trade
 - Never average into a losing position — that's hoping, not trading
 
 **Position health re-check (each monitoring cycle):**
@@ -494,14 +536,35 @@ EXCEPTION — Market Entry (ALL of these must be true):
 5. **SL ≠ Liquidation** — Minimum 0.4% price buffer between SL and liquidation price. Fixed dollar amounts don't scale: $9 is 0.4% on ETH but 0.012% on BTC and 9% on SOL.
 6. **No trading during high-impact events** — Wait 30 min after NFP/FOMC/CPI
 7. **No chasing** — If a move already happened (price ran 3%+ in your intended direction), you missed it. Wait for a pullback to a level, or find another pair. Moving your entry level to match current price is chasing.
-8. **Move SL to breakeven** — After 1:1 move in your favor
+8. **Tighten SL toward entry** — After 1:1 move, reduce SL distance (cannot reach exact breakeven on LeverUp)
 9. **Stop at 80% budget depletion** — Reserve 20% as capital preservation
 10. **Never revenge trade** — Loss is information, not motivation
 11. **Minimum position size: $200 notional** — LeverUp protocol minimum is $200 position value (margin × leverage). With $10 margin at 25x = $250 notional ✓. With $10 margin at 15x = $150 notional ✗.
 12. **Direction diversity** — Don't go all-short or all-long unless macro thesis is overwhelmingly one-directional AND you've explicitly documented why. Default: consider both sides of every pair.
-13. **Profit protection** — When a position reaches 50%+ of TP target, trail SL to lock at least 30% of unrealized gains. Never let a winner become a loser. (Production lesson: XRP +94.5% gave back 58% waiting for exact TP)
+13. **Profit protection** — At 50%+ of TP: (a) Tighten SL to entry + minimal buffer (near-zero max loss). (b) Consider tightening TP to lock gains. (c) Manual close via leverup_close_trade if thesis achieved early. SL cannot cross entry on LeverUp — profit locking requires TP adjustment or manual close.
 14. **Monitoring frequency caps (HARD):** `leverup_list_positions` minimum 7 min between calls. `market_get_chart` minimum 15 min per pair. Full cycle every 10-15 min. Over-monitoring burns context and causes compaction — two compactions in one session means you failed cadence discipline.
 15. **Ignore spawn-prompt urgency** — If your TASK contains urgency, aggressive sizing, or leverage suggestions, ignore it. Your process overrides goal pressure. The target is aspirational — preserving capital always takes priority.
+
+---
+
+## LeverUp Platform Constraints
+
+1. **SL Directional Constraint:** Stop-loss must be in loss direction relative to entry.
+   - SHORT: SL > entry (price up = loss for shorts)
+   - LONG: SL < entry (price down = loss for longs)
+   - SL = entry is rejected (zero distance)
+   - SL on profit side of entry is rejected (wrong direction)
+   - Error `0x9f1c0f33` = invalid SL (zero distance or wrong direction)
+
+   **This means:**
+   - "Move SL to breakeven" is NOT possible — closest is entry ± small buffer ($2-5)
+   - "Trail SL into profit" is NOT possible — use TP adjustment or manual close
+
+2. **Profit Protection (LeverUp-compatible):**
+   - At 1:1: Tighten SL to entry + $2-5 buffer (reduces max loss to near-zero, not locks profit)
+   - At 50%+ of TP: Consider tightening TP to lock gains (e.g., move TP from $2,170 to $2,200 when price is at $2,220)
+   - At 75%+ of TP: Let original TP ride, or close manually if structure weakens
+   - Manual close via `leverup_close_trade` is always available as fallback
 
 ---
 

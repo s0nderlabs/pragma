@@ -10,6 +10,7 @@ import {
   updateTrackedPositionStatus,
   removeTrackedPosition,
   linkTrackedPosition,
+  saveTrackedPositions,
   updateTokenFlows,
   appendJournal,
 } from "../core/subagent/state.js";
@@ -204,19 +205,24 @@ async function reconcileTrackedPositions(
   // Phase 1: Link unlinked tracked positions to API positions by pair+side+margin match
   for (let i = 0; i < tracked.length; i++) {
     const tp = tracked[i];
-    if (tp.tradeHash) continue; // Already linked
+    if (tp.tradeHash) continue;
 
-    // Match by pair + side + margin proximity (5% tolerance for fees)
     const trackedMargin = BigInt(tp.margin);
     const matched = apiPositions.find(ap => {
       if (ap.pair !== tp.pair || ap.side !== tp.side) return false;
       const apiMargin = parseUnits(ap.margin, 18);
-      return absDiff(apiMargin, trackedMargin) * 100n <= trackedMargin * 5n;
+      const withinTolerance = absDiff(apiMargin, trackedMargin) * 100n <= trackedMargin * 5n;
+      return withinTolerance;
     });
 
     if (matched) {
       linkTrackedPosition(agentId, i, matched.tradeHash);
-      tp.tradeHash = matched.tradeHash; // Update in-memory for phase 2
+      tp.tradeHash = matched.tradeHash;
+
+      if (tp.status === "pending_fill") {
+        updateTrackedPositionStatus(agentId, matched.tradeHash, "open");
+        tp.status = "open";
+      }
       linkedCount++;
     }
   }
@@ -237,9 +243,10 @@ async function reconcileTrackedPositions(
     tp.tradeHash && !apiTradeHashes.has(tp.tradeHash)
   );
 
-  // Mark newly-gone positions as pending_settlement
+  // Mark newly-gone positions as pending_settlement (includes filled limits that were then closed)
   for (const tp of gonePositions) {
-    if (tp.status === "open") {
+    const isNewlyGone = tp.status === "open" || tp.status === "pending_fill";
+    if (isNewlyGone) {
       updateTrackedPositionStatus(agentId, tp.tradeHash!, "pending_settlement", currentBlockNum);
       tp.status = "pending_settlement";
       tp.detectedGoneAt = currentBlockNum;
@@ -290,6 +297,20 @@ async function reconcileTrackedPositions(
   }
 
   const pendingSettlementCount = gonePositions.length - readyForSettlement.length;
+
+  // Phase 3: Clean up stale pending_fill entries
+  // Limit orders without a tradeHash after 2 hours were likely cancelled or never filled
+  const STALE_LIMIT_THRESHOLD_MS = 2 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  function isStaleUnfilledLimit(tp: typeof tracked[number]): boolean {
+    return tp.status === "pending_fill" && !tp.tradeHash && (now - tp.openedAt) > STALE_LIMIT_THRESHOLD_MS;
+  }
+
+  const freshTracked = tracked.filter(tp => !isStaleUnfilledLimit(tp));
+  if (freshTracked.length < tracked.length) {
+    saveTrackedPositions(agentId, freshTracked);
+  }
 
   return {
     trackedCount: tracked.length,

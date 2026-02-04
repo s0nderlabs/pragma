@@ -5,6 +5,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  formatUnits,
   parseUnits,
   encodeFunctionData,
   erc20Abi,
@@ -1120,6 +1121,45 @@ export async function executeAutonomousLeverUpUpdateTpSl(
       message: "Invalid parameters",
       error: "At least one of takeProfit or stopLoss must be provided.",
     };
+  }
+
+  // SL directional validation: LeverUp requires SL in the loss direction
+  if (stopLoss && stopLoss !== "0") {
+    const state = await loadAgentState(agentId);
+    const delegation = await loadDelegation(agentId);
+    if (state && delegation?.rootDelegation) {
+      const userAddress = delegation.rootDelegation.delegator as Address;
+      const positions = await getUserPositions(userAddress);
+      const position = positions.find(p => p.position.positionHash === tradeHash);
+
+      if (position) {
+        const entryPrice = Number(formatUnits(position.position.entryPrice, 18));
+        const newSL = Number(stopLoss);
+        const isLong = position.position.isLong;
+
+        const isInvalidLongSL = isLong && newSL >= entryPrice;
+        const isInvalidShortSL = !isLong && newSL <= entryPrice;
+
+        if (isInvalidLongSL) {
+          const suggestedSL = (entryPrice * 0.99).toFixed(2);
+          return {
+            success: false,
+            message: "Invalid SL direction",
+            error: `Invalid SL for LONG: SL ($${newSL}) must be below entry ($${entryPrice.toFixed(2)}). ` +
+              `LeverUp requires SL in loss direction. Suggested: $${suggestedSL}`,
+          };
+        }
+        if (isInvalidShortSL) {
+          const suggestedSL = (entryPrice * 1.01).toFixed(2);
+          return {
+            success: false,
+            message: "Invalid SL direction",
+            error: `Invalid SL for SHORT: SL ($${newSL}) must be above entry ($${entryPrice.toFixed(2)}). ` +
+              `LeverUp requires SL in loss direction. Suggested: $${suggestedSL}`,
+          };
+        }
+      }
+    }
   }
 
   // Parse prices (18 decimals)
@@ -2399,6 +2439,25 @@ export async function executeAutonomousLeverUpLimitOrder(
       protocol: "leverup",
     });
   } catch { /* non-critical */ }
+
+  // Track limit order position for budget reconciliation (Discussion #51)
+  // Status is "pending_fill" until the limit fills. Once filled, reconciliation
+  // will link the tradeHash and change status to "open". Keeper closes (TP/SL/liq)
+  // can then be detected and settlement inflows recorded properly.
+  try {
+    addTrackedPosition(agentId, {
+      pair: pairMetadata!.pair,
+      side: params.isLong ? "LONG" : "SHORT",
+      margin: marginWei.toString(),
+      collateralToken: limitCollateralAddress,
+      leverage: params.leverage,
+      entryPrice: params.triggerPrice,
+      stopLoss: params.stopLoss || "0",
+      takeProfit: params.takeProfit || "0",
+      openedAt: Date.now(),
+      status: "pending_fill",
+    });
+  } catch { /* non-critical: position tracking must never break trading */ }
 
   return {
     success: true,

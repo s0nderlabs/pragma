@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.23] - 2026-02-04
+
+### Added
+- **Limit order budget reconciliation** — Limit orders now tracked with `pending_fill` status. Reconciliation handles fill detection (`pending_fill` → `"open"`) and stale limit cleanup (>2h without fill). Fixes budget desync where TP/SL settlements from limit-filled positions were invisible to budget ledger
+- **SL directional validation** — Pre-validates stop-loss direction before sending to LeverUp. Rejects SL in wrong direction (LONG: SL >= entry, SHORT: SL <= entry) with helpful error message and suggested valid SL. Prevents wasted tx fees on invalid requests
+- **LeverUp Platform Constraints section** — kairos.md gains dedicated section documenting SL directional constraint and LeverUp-compatible profit protection strategies
+
+### Changed
+- **Profit protection rules** — Rules #8 and #13 rewritten for LeverUp compatibility. "Move SL to breakeven" → "Tighten SL toward entry (cannot reach exact breakeven)". Profit locking now uses TP adjustment or manual close
+- **Phase 5 behavioral rules** — Added REPOSITION MEMO RULE (write trade_plan before repositioning), STALE LIMIT RULE (6+ cycles + >1.5% away → Phase 2), REPOSITION CAP (one adjustment then mandatory Phase 2 return), macro baseline refresh (every 12th cycle + pre-event)
+
 ## [0.8.22] - 2026-02-03
 
 ### Added

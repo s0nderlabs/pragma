@@ -63,7 +63,7 @@ export interface TrackedPosition {
   stopLoss: string;
   takeProfit: string;
   openedAt: number;
-  status: "open" | "pending_settlement";
+  status: "open" | "pending_fill" | "pending_settlement";
   detectedGoneAt?: number; // block number when first detected missing
 }
 

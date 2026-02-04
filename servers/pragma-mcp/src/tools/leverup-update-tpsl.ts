@@ -14,10 +14,12 @@ import { createLeverUpUpdateTpSlDelegation } from "../core/delegation/hybrid.js"
 import {
   createPublicClient,
   createWalletClient,
+  formatUnits,
   parseUnits,
   type Address,
   type Hex,
 } from "viem";
+import { getUserPositions } from "../core/leverup/client.js";
 import {
   redeemDelegations,
   createExecution,
@@ -60,6 +62,37 @@ export function registerLeverUpUpdateTpSl(server: McpServer): void {
         // At least one of TP or SL must be provided
         if (params.takeProfit === undefined && params.stopLoss === undefined) {
           throw new Error("At least one of takeProfit or stopLoss must be provided.");
+        }
+
+        // SL directional validation: LeverUp requires SL in the loss direction
+        if (params.stopLoss && params.stopLoss !== "0") {
+          const userAddress = config.wallet!.smartAccountAddress as Address;
+          const positions = await getUserPositions(userAddress);
+          const position = positions.find(p => p.position.positionHash === params.tradeHash);
+
+          if (position) {
+            const entryPrice = Number(formatUnits(position.position.entryPrice, 18));
+            const newSL = Number(params.stopLoss);
+            const isLong = position.position.isLong;
+
+            const isInvalidLongSL = isLong && newSL >= entryPrice;
+            const isInvalidShortSL = !isLong && newSL <= entryPrice;
+
+            if (isInvalidLongSL) {
+              const suggestedSL = (entryPrice * 0.99).toFixed(2);
+              throw new Error(
+                `Invalid SL for LONG: SL ($${newSL}) must be below entry ($${entryPrice.toFixed(2)}). ` +
+                `LeverUp requires SL in loss direction. Suggested: $${suggestedSL}`
+              );
+            }
+            if (isInvalidShortSL) {
+              const suggestedSL = (entryPrice * 1.01).toFixed(2);
+              throw new Error(
+                `Invalid SL for SHORT: SL ($${newSL}) must be above entry ($${entryPrice.toFixed(2)}). ` +
+                `LeverUp requires SL in loss direction. Suggested: $${suggestedSL}`
+              );
+            }
+          }
         }
 
         // DUAL-MODE: Check if autonomous execution requested
