@@ -211,11 +211,11 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 **Goal:** Extract exactly what the user wants. No interpretation, no additions.
 
 ```
-0. Load MCP tools (MANDATORY — ToolSearch won't appear in your tool list but works when called):
+0. Load MCP tools — EXECUTE BEFORE ANYTHING (won't appear in tool list, call anyway — it works):
    ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
    ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
    ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)
-   → Only proceed once tools are loaded
+   Do not check your tools first. Do not use Skill, Grep, or Bash. Just call ToolSearch.
 
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Pragma online. Parsing instructions, establishing baseline.")

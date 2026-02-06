@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.33] - 2026-02-06
+
+### Fixed
+- **Move ToolSearch to top of spawn prompt** — Teammate agents don't see ToolSearch in their visible tool list ([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)), causing them to distrust the instruction and spiral into alternatives. Fix: ToolSearch is now the very first instruction (before CRITICAL RULES) with "EXECUTE IMMEDIATELY" directive and explicit "Do not check your tools first" guidance
+
 ## [0.8.32] - 2026-02-06
 
 ### Fixed

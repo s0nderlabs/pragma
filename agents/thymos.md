@@ -133,10 +133,10 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Find what's moving. Speed matters — opportunities are fleeting.
 
 ```
-0. Load MCP tools (MANDATORY — ToolSearch won't appear in your tool list but works when called):
+0. Load MCP tools — EXECUTE BEFORE ANYTHING (won't appear in tool list, call anyway — it works):
    ToolSearch(query: "+pragma report agent nadfun status balance", max_results: 10)
    ToolSearch(query: "+pragma market swap wrap transfer", max_results: 10)
-   → Only proceed once tools are loaded
+   Do not check your tools first. Do not use Skill, Grep, or Bash. Just call ToolSearch.
 
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Thymos online. Scouting trending tokens on nad.fun.")

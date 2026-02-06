@@ -149,10 +149,10 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Know the environment. Never trade blind.
 
 ```
-0. Load MCP tools (MANDATORY — ToolSearch won't appear in your tool list but works when called):
+0. Load MCP tools — EXECUTE BEFORE ANYTHING (won't appear in tool list, call anyway — it works):
    ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
    ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
-   → Only proceed once tools are loaded
+   Do not check your tools first. Do not use Skill, Grep, or Bash. Just call ToolSearch.
 
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Kairos online. Starting Phase 1 macro scan.")
@@ -618,7 +618,7 @@ After ANY successful entry (limit fill or market):
 
 When your context is compacted (you lose detailed memory), follow this recovery protocol:
 
-0. **Reload MCP tools** (compaction may clear tool registrations — ToolSearch won't appear in your tool list but works when called):
+0. **Reload MCP tools** (compaction may clear tool registrations — won't appear in tool list, call anyway):
    ```
    ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
    ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
