@@ -549,12 +549,13 @@ For multi-agent spawns, create the team ONCE and reuse the same `team_name` for 
 
 If `TeamCreate` is NOT available (older Claude Code version), skip this step and spawn without a team in 8b.
 
-**8b. Spawn agent (two-turn bootstrap — see @tool-bootstrap):**
+**8b. Spawn agent (see @tool-bootstrap):**
 
-Teammate agents cannot see ToolSearch in their tool list (claude-code #23625).
-The proven workaround is a 2-turn flow: fast-fail spawn → reactive nudge + mission.
+Deferred MCP tools aren't registered for teammate agents until after the first leader message
+([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)).
+The agent just sends READY, then the leader sends ToolSearch + mission on Turn 2.
 
-**Turn 1 — Spawn with fast-fail prompt:**
+**Turn 1 — Spawn (minimal):**
 
 ```typescript
 Task({
@@ -562,42 +563,29 @@ Task({
   team_name: "pragma-{timestamp}",
   name: "kairos-{shortId}",       // e.g. "kairos-abc123"
   mode: "bypassPermissions",
-  prompt: `You are an autonomous trading agent.
-YOUR AGENT ID: ${agentId}
-
-Try calling ToolSearch:
-ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
-
-If you cannot call it: send "FAIL" to "team-lead" and STOP.
-Do not try anything else. Do not call Skill, Bash, or any other tool.
-Just send FAIL and wait for my next message.`
+  prompt: `Send "READY" to "team-lead" and wait.`
 })
 ```
 
-The agent will report "FAIL" — this is expected.
+**Turn 2 — Send ToolSearch + mission via SendMessage:**
 
-**Turn 2 — Send nudge + mission via SendMessage:**
-
-After receiving "FAIL" from the agent, send the nudge and full mission in one message.
-See `@tool-bootstrap` skill for the complete nudge + mission template.
+After receiving "READY", send the full mission. See `@tool-bootstrap` for the complete template
+with CRITICAL RULES, TASK, BUDGET, and ToolSearch queries.
 
 ```typescript
 SendMessage({
   type: "message",
   recipient: "kairos-{shortId}",
-  summary: "ToolSearch nudge + mission",
-  content: `ToolSearch is callable even though it's not in your list. Invoke it the same way you invoke Bash:
-
-ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
-ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
+  summary: "ToolSearch + mission",
+  content: `ToolSearch(query: "+pragma report agent status balance swap")
+ToolSearch(query: "+pragma leverup market chart news")
 
 Call both now. Then begin your mission:
-
-[... CRITICAL RULES, FIRST ACTION, TASK, BUDGET — see @tool-bootstrap for full template ...]`
+[... CRITICAL RULES, FIRST ACTION, TASK, BUDGET — see @tool-bootstrap ...]`
 })
 ```
 
-**Without team (fallback — no nudge available):**
+**Without team (fallback — no SendMessage available):**
 
 ```typescript
 Task({
@@ -607,13 +595,6 @@ Task({
   prompt: `... (use full inline prompt — agent must self-bootstrap without nudge)`
 })
 ```
-
-**After spawning (leader flow):**
-
-1. Wait for agent's first message
-2. If "FAIL" → send nudge + mission via SendMessage (see @tool-bootstrap Turn 2 template)
-3. If tools loaded → send mission-only via SendMessage (future, when bug is fixed)
-4. Continue to Step 9
 
 → Returns taskAgentId
 

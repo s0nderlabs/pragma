@@ -5,30 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.34] - 2026-02-06
-
-### Changed
-- **Two-turn ToolSearch bootstrap** — After 12+ test iterations, no prompt wording makes teammate agents call ToolSearch on turn 1 ([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)). Root cause: LLMs won't call a tool not in their tool list — they must commit to "unavailable" first, then a reactive nudge overrides that belief. New pattern: fast-fail spawn (agent reports FAIL) → leader nudge + mission via SendMessage (agent calls ToolSearch). Implemented as separate `tool-bootstrap` skill for clean removal when bug is fixed. Agent definitions now use FAIL+STOP pattern instead of self-serve ToolSearch
-
-## [0.8.33] - 2026-02-06
+## [0.8.35] - 2026-02-06
 
 ### Fixed
-- **Move ToolSearch to top of spawn prompt** — Teammate agents don't see ToolSearch in their visible tool list ([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)), causing them to distrust the instruction and spiral into alternatives. Fix: ToolSearch is now the very first instruction (before CRITICAL RULES) with "EXECUTE IMMEDIATELY" directive and explicit "Do not check your tools first" guidance
-
-## [0.8.32] - 2026-02-06
-
-### Fixed
-- **ToolSearch hidden tool list fix** — Live diagnostic revealed ToolSearch doesn't appear in teammate agents' visible tool list, causing them to assume it's unavailable and spiral into alternatives. Updated all agent definitions and spawn prompt: "ToolSearch will NOT appear in your tool list — call it anyway, it works" with explicit blocklist of failure paths (no Skill, no Grep, no Bash, no Task)
-
-## [0.8.31] - 2026-02-06
-
-### Fixed
-- **Clarify ToolSearch is a built-in tool** — Agents misinterpreted ToolSearch as a bash command (`which ToolSearch`) or web search. All agent definitions and spawn prompt now explicitly state "ToolSearch is a BUILT-IN Claude Code tool (like Read or Bash)" and include `query:` parameter name for clarity
-
-## [0.8.30] - 2026-02-06
-
-### Fixed
-- **Add ToolSearch loading step for deferred MCP tools** — Spawn prompt and all agent definitions (kairos, thymos, pragma) now include mandatory ToolSearch calls at startup to load deferred pragma MCP tools. Kairos compaction recovery also reloads tools. Prevents agents from wasting context trying to figure out why tools aren't available
+- **Teammate agent MCP tool loading** ([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)) — Root cause identified after 12+ test iterations across v0.8.30-v0.8.34: deferred MCP tools are not registered for teammate agents until after the first leader message arrives. ToolSearch returns empty on Turn 1 regardless of prompt wording. Fix: minimal spawn prompt (`Send "READY" to "team-lead" and wait`), leader sends ToolSearch + mission on Turn 2. Removed all previous workarounds (FAIL+STOP, cognitive overrides, skill-based bootstrap) from agent definitions. Simplified `tool-bootstrap` skill to document the pattern
 
 ## [0.8.29] - 2026-02-06
 

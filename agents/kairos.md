@@ -149,10 +149,6 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Know the environment. Never trade blind.
 
 ```
-0. If MCP tools are not loaded (ToolSearch/pragma tools unavailable):
-   → Send "FAIL" to team-lead and STOP. Wait for leader's nudge.
-   If tools ARE loaded: proceed to step 1.
-
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Kairos online. Starting Phase 1 macro scan.")
 
@@ -616,10 +612,6 @@ After ANY successful entry (limit fill or market):
 ## Context Compaction Recovery
 
 When your context is compacted (you lose detailed memory), follow this recovery protocol:
-
-0. **Check MCP tools** — try calling get_all_balances or report_agent_status.
-   If tools are gone: send to team-lead: "Tools lost after compaction — need reload"
-   Wait for leader's nudge before continuing.
 
 1. **Immediately re-read your state and journal:**
    ```

@@ -133,10 +133,6 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Find what's moving. Speed matters — opportunities are fleeting.
 
 ```
-0. If MCP tools are not loaded (ToolSearch/pragma tools unavailable):
-   → Send "FAIL" to team-lead and STOP. Wait for leader's nudge.
-   If tools ARE loaded: proceed to step 1.
-
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Thymos online. Scouting trending tokens on nad.fun.")
 

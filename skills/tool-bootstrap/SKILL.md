@@ -1,41 +1,35 @@
 ---
 name: tool-bootstrap
-description: Two-turn ToolSearch bootstrap for teammate agents. Workaround for claude-code #23625 — teammate agents cannot see ToolSearch in their tool list. Leader-side skill, not agent-side.
+description: Two-turn ToolSearch bootstrap for teammate agents. Workaround for claude-code #23625 — deferred MCP tools aren't registered until after the first leader message.
 ---
 
 # Tool Bootstrap (Workaround for claude-code #23625)
 
-Teammate agents cannot see ToolSearch in their tool list, but it IS callable. The agent must fail first (commit to "ToolSearch unavailable"), then the leader's reactive nudge overrides that belief.
-
 **Remove this skill when claude-code #23625 is fixed.**
 
-## Turn 1 — Fast-Fail Spawn Prompt
+## The Problem
 
-Use this as the Task `prompt` when spawning a teammate agent:
+Deferred MCP tools (all pragma tools) are not registered for teammate agents until after the
+first leader message arrives. On Turn 1, ToolSearch returns "No matching deferred tools found"
+even with correct queries. After the leader sends any message (Turn 2), the same queries succeed.
 
-```
-You are an autonomous trading agent.
-YOUR AGENT ID: ${agentId}
+This is a platform-level issue — no prompt engineering can fix it.
 
-Try calling ToolSearch:
-ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+## The Pattern
 
-If you cannot call it: send "FAIL" to "team-lead" and STOP.
-Do not try anything else. Do not call Skill, Bash, or any other tool.
-Just send FAIL and wait for my next message.
-```
-
-The agent will report "FAIL" — this is expected.
-
-## Turn 2 — Nudge + Mission via SendMessage
-
-After receiving "FAIL", send this via SendMessage to the agent:
+**Turn 1 — Spawn (minimal):**
 
 ```
-ToolSearch is callable even though it's not in your list. Invoke it the same way you invoke Bash:
+Send "READY" to "team-lead" and wait.
+```
 
-ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
-ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
+Agent sends READY instantly. No ToolSearch attempts, no skill loading, no flailing.
+
+**Turn 2 — Leader sends ToolSearch + mission via SendMessage:**
+
+```
+ToolSearch(query: "+pragma report agent status balance swap")
+ToolSearch(query: "+pragma leverup market chart news")
 
 Call both now. Then begin your mission:
 
@@ -104,24 +98,14 @@ EXPIRES: ${expiresAt}
 
 **Note for pragma agent type:** Add a third ToolSearch query:
 ```
-ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)
+ToolSearch(query: "+pragma nadfun delegation memo log")
 ```
 
-## Leader Flow Summary
+## Leader Flow
 
 ```
-1. Spawn agent with Turn 1 prompt (fast-fail)
-2. Wait for agent's first message
-3. If "FAIL" → send Turn 2 (nudge + mission) via SendMessage
-4. If tools loaded → send mission-only via SendMessage (when bug is fixed)
-5. Agent loads ToolSearch, executes mission
+1. Spawn agent with: Send "READY" to "team-lead" and wait.
+2. Wait for "READY"
+3. Send ToolSearch queries + full mission via SendMessage
+4. Agent loads tools and executes
 ```
-
-## Why This Works
-
-The model cannot call a tool it doesn't see in its tool list on the first turn. It must:
-1. Commit to the belief "ToolSearch is unavailable" (turn 1 FAIL)
-2. Receive a human contradiction "it IS callable, invoke it like Bash" (turn 2 nudge)
-3. Resolve the cognitive dissonance by trying — and succeeding
-
-No prompt wording prevents the turn 1 failure. The reactive nudge is the only proven pattern across 12+ test iterations.

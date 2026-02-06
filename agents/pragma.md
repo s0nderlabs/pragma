@@ -211,10 +211,6 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 **Goal:** Extract exactly what the user wants. No interpretation, no additions.
 
 ```
-0. If MCP tools are not loaded (ToolSearch/pragma tools unavailable):
-   → Send "FAIL" to team-lead and STOP. Wait for leader's nudge.
-   If tools ARE loaded: proceed to step 1.
-
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Pragma online. Parsing instructions, establishing baseline.")
 
