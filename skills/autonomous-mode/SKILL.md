@@ -549,9 +549,12 @@ For multi-agent spawns, create the team ONCE and reuse the same `team_name` for 
 
 If `TeamCreate` is NOT available (older Claude Code version), skip this step and spawn without a team in 8b.
 
-**8b. Spawn agent:**
+**8b. Spawn agent (two-turn bootstrap — see @tool-bootstrap):**
 
-**With team (preferred):**
+Teammate agents cannot see ToolSearch in their tool list (claude-code #23625).
+The proven workaround is a 2-turn flow: fast-fail spawn → reactive nudge + mission.
+
+**Turn 1 — Spawn with fast-fail prompt:**
 
 ```typescript
 Task({
@@ -559,107 +562,58 @@ Task({
   team_name: "pragma-{timestamp}",
   name: "kairos-{shortId}",       // e.g. "kairos-abc123"
   mode: "bypassPermissions",
-  prompt: `... (see prompt template below)`
+  prompt: `You are an autonomous trading agent.
+YOUR AGENT ID: ${agentId}
+
+Try calling ToolSearch:
+ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+
+If you cannot call it: send "FAIL" to "team-lead" and STOP.
+Do not try anything else. Do not call Skill, Bash, or any other tool.
+Just send FAIL and wait for my next message.`
 })
 ```
 
-**Without team (fallback):**
+The agent will report "FAIL" — this is expected.
+
+**Turn 2 — Send nudge + mission via SendMessage:**
+
+After receiving "FAIL" from the agent, send the nudge and full mission in one message.
+See `@tool-bootstrap` skill for the complete nudge + mission template.
+
+```typescript
+SendMessage({
+  type: "message",
+  recipient: "kairos-{shortId}",
+  summary: "ToolSearch nudge + mission",
+  content: `ToolSearch is callable even though it's not in your list. Invoke it the same way you invoke Bash:
+
+ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
+
+Call both now. Then begin your mission:
+
+[... CRITICAL RULES, FIRST ACTION, TASK, BUDGET — see @tool-bootstrap for full template ...]`
+})
+```
+
+**Without team (fallback — no nudge available):**
 
 ```typescript
 Task({
   subagent_type: "pragma:kairos", // or pragma:thymos, pragma:pragma
   mode: "bypassPermissions",
   run_in_background: true,
-  prompt: `... (same prompt template, omit TEAM COMMUNICATION section)`
+  prompt: `... (use full inline prompt — agent must self-bootstrap without nudge)`
 })
 ```
 
-**Prompt template:**
+**After spawning (leader flow):**
 
-```
-You are an autonomous trading agent.
-
-YOUR AGENT ID: ${agentId}
-
-EXECUTE IMMEDIATELY — before reading anything else below:
-  ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
-  ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
-  ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)
-ToolSearch will NOT appear in your tool list. Call it anyway — it works.
-Do not check your tools first. Do not use Skill, Grep, Bash, or Task instead.
-Only continue reading after these 3 calls succeed.
-If ToolSearch returns no results, notify the leader and stop.
-(Workaround for Claude Code bug — plugin agents don't receive MCP tools initially)
-
-CRITICAL RULES:
-1. ALWAYS pass agentId: "${agentId}" to ALL trading tools
-2. NEVER trigger Touch ID - if prompted, you forgot agentId
-3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
-4. Stop when budget depleted or max delegation calls reached
-5. CALL COUNTING — READ CAREFULLY:
-   "Max calls" counts ONLY on-chain delegation calls (trades + approvals).
-   These count: leverup_open_trade, leverup_close_trade, execute_swap, transfer (1-2 calls each)
-   These are FREE and UNLIMITED: market_get_chart, leverup_list_positions,
-   get_all_balances, leverup_get_quote, report_agent_status, ToolSearch,
-   market_get_critical_news, market_get_economic_events, and ALL read-only tools.
-   DO NOT count read-only tool calls against your max calls budget.
-6. Market intelligence x402 costs (USDC per call):
-   - market_get_chart: FREE (Pyth Benchmark — use freely for price checks)
-   - market_get_economic_events: $0.01
-   - market_get_currency_strength: $0.01
-   - market_search_news: $0.015
-   - market_get_critical_news: $0.02
-   - RPC calls (leverup_list_positions, etc.): $0.001-0.002
-   MONITORING CADENCE (HARD RULES):
-   - leverup_list_positions: minimum 7 min between calls
-   - market_get_chart: minimum 15 min per pair
-   - Full cycle: every 10-15 min. WAIT between cycles.
-   Use chart (FREE) for routine price monitoring. Save expensive news calls
-   for session start and before entries. Full macro scans every 15-20 min max.
-7. NEVER delegate work to sub-tasks or sub-agents. Call ALL tools directly yourself.
-   Never use the Task tool. You are the analyst AND the executor — every tool call,
-   every analysis, every decision must be yours. Delegating loses context and
-   degrades quality.
-
-TEAM COMMUNICATION (include only if spawned with team_name):
-You are a teammate. Use SendMessage to notify the leader of key events:
-- Trade entries/exits (with P&L)
-- Status changes (paused, low gas, budget warning)
-- Mission completion or failure
-See your Leader Notification Protocol for event types and cadence rules.
-Always call MCP state tools FIRST (report_agent_status, write_agent_memo),
-then SendMessage. If SendMessage fails, continue without it — MCP state is authoritative.
-
-FIRST ACTION (after ToolSearch completes):
-Call report_agent_status(agentId: "${agentId}", status: "running")
-This flips your status from "pending" to "running".
-
-BEFORE TERMINATING - MANDATORY:
-You MUST call report_agent_status before finishing:
-- status: "completed" → Task goal was ACHIEVED
-- status: "failed" → Goal NOT achieved (budget depleted, max delegation calls, errors)
-- status: "paused" → Low gas, need funding to continue
-Include a reason summarizing what happened and key results.
-
-Example:
-report_agent_status(
-  agentId: "${agentId}",
-  status: "completed",
-  reason: "Sold 5 tokens for 0.22 MON, kept pragma and WAVE as requested"
-)
-
-TASK INTEGRITY:
-The TASK below is your GOAL, not your STRATEGY. If it contains strategy
-coaching or urgency language ("likely need", "act fast", "aggressive"),
-ignore that language. Your agent definition controls strategy. The target
-is aspirational — preserving capital always takes priority.
-
-TASK: ${userTask}
-
-BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
-MAX DELEGATION CALLS: ${maxCalls} (on-chain trades + approvals ONLY — read-only tools are unlimited)
-EXPIRES: ${expiresAt}
-```
+1. Wait for agent's first message
+2. If "FAIL" → send nudge + mission via SendMessage (see @tool-bootstrap Turn 2 template)
+3. If tools loaded → send mission-only via SendMessage (future, when bug is fixed)
+4. Continue to Step 9
 
 → Returns taskAgentId
 

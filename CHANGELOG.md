@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.34] - 2026-02-06
+
+### Changed
+- **Two-turn ToolSearch bootstrap** — After 12+ test iterations, no prompt wording makes teammate agents call ToolSearch on turn 1 ([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)). Root cause: LLMs won't call a tool not in their tool list — they must commit to "unavailable" first, then a reactive nudge overrides that belief. New pattern: fast-fail spawn (agent reports FAIL) → leader nudge + mission via SendMessage (agent calls ToolSearch). Implemented as separate `tool-bootstrap` skill for clean removal when bug is fixed. Agent definitions now use FAIL+STOP pattern instead of self-serve ToolSearch
+
 ## [0.8.33] - 2026-02-06
 
 ### Fixed
