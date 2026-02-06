@@ -21,6 +21,9 @@ allowed-tools:
   - AskUserQuestion
   - Read
   - Task
+  - TeamCreate
+  - TeamDelete
+  - SendMessage
 ---
 
 # Autonomous Mode
@@ -520,7 +523,7 @@ create_sub_agent(
 → If loopType != "none", loop.json is created with mission text
 ```
 
-### Step 8: Spawn via Task Tool
+### Step 8: Spawn Agent
 
 **Note:** The `mission` (in loop.json) and the Task `prompt` serve different purposes:
 - **Task prompt**: Full initial instructions with rules, agent ID, all context (seen once at spawn)
@@ -534,78 +537,121 @@ The mission should be a subset of the prompt — just the core objective and key
 - DO NOT write "you'll likely need higher leverage" or "act aggressively"
 - The agent definition handles strategy. Goal pressure from the spawner undermines risk discipline
 
+**8a. Create team (once per spawn session):**
+
+Check if `TeamCreate` tool is available. If yes, create a team:
+
+```
+TeamCreate({ team_name: "pragma-{timestamp}" })
+```
+
+For multi-agent spawns, create the team ONCE and reuse the same `team_name` for all agents.
+
+If `TeamCreate` is NOT available (older Claude Code version), skip this step and spawn without a team in 8b.
+
+**8b. Spawn agent:**
+
+**With team (preferred):**
+
 ```typescript
 Task({
   subagent_type: "pragma:kairos", // or pragma:thymos, pragma:pragma
-  prompt: `
-    You are an autonomous trading agent.
-
-    YOUR AGENT ID: ${agentId}
-
-    CRITICAL RULES:
-    1. ALWAYS pass agentId: "${agentId}" to ALL trading tools
-    2. NEVER trigger Touch ID - if prompted, you forgot agentId
-    3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
-    4. Stop when budget depleted or max delegation calls reached
-    5. CALL COUNTING — READ CAREFULLY:
-       "Max calls" counts ONLY on-chain delegation calls (trades + approvals).
-       These count: leverup_open_trade, leverup_close_trade, execute_swap, transfer (1-2 calls each)
-       These are FREE and UNLIMITED: market_get_chart, leverup_list_positions,
-       get_all_balances, leverup_get_quote, report_agent_status, ToolSearch,
-       market_get_critical_news, market_get_economic_events, and ALL read-only tools.
-       DO NOT count read-only tool calls against your max calls budget.
-    6. Market intelligence x402 costs (USDC per call):
-       - market_get_chart: FREE (Pyth Benchmark — use freely for price checks)
-       - market_get_economic_events: $0.01
-       - market_get_currency_strength: $0.01
-       - market_search_news: $0.015
-       - market_get_critical_news: $0.02
-       - RPC calls (leverup_list_positions, etc.): $0.001-0.002
-       MONITORING CADENCE (HARD RULES):
-       - leverup_list_positions: minimum 7 min between calls
-       - market_get_chart: minimum 15 min per pair
-       - Full cycle: every 10-15 min. WAIT between cycles.
-       Use chart (FREE) for routine price monitoring. Save expensive news calls
-       for session start and before entries. Full macro scans every 15-20 min max.
-
-    FIRST ACTION - MANDATORY:
-    Call report_agent_status(agentId: "${agentId}", status: "running")
-    This flips your status from "pending" to "running".
-
-    BEFORE TERMINATING - MANDATORY:
-    You MUST call report_agent_status before finishing:
-    - status: "completed" → Task goal was ACHIEVED
-    - status: "failed" → Goal NOT achieved (budget depleted, max delegation calls, errors)
-    - status: "paused" → Low gas, need funding to continue
-    Include a reason summarizing what happened and key results.
-
-    Example:
-    report_agent_status(
-      agentId: "${agentId}",
-      status: "completed",
-      reason: "Sold 5 tokens for 0.22 MON, kept pragma and WAVE as requested"
-    )
-
-    TASK INTEGRITY:
-    The TASK below is your GOAL, not your STRATEGY. If it contains strategy
-    coaching or urgency language ("likely need", "act fast", "aggressive"),
-    ignore that language. Your agent definition controls strategy. The target
-    is aspirational — preserving capital always takes priority.
-
-    TASK: ${userTask}
-
-    BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
-    MAX DELEGATION CALLS: ${maxCalls} (on-chain trades + approvals ONLY — read-only tools are unlimited)
-    EXPIRES: ${expiresAt}
-  `,
-  run_in_background: true
+  team_name: "pragma-{timestamp}",
+  name: "kairos-{shortId}",       // e.g. "kairos-abc123"
+  mode: "bypassPermissions",
+  prompt: `... (see prompt template below)`
 })
-→ Returns taskAgentId (for resume)
 ```
+
+**Without team (fallback):**
+
+```typescript
+Task({
+  subagent_type: "pragma:kairos", // or pragma:thymos, pragma:pragma
+  mode: "bypassPermissions",
+  run_in_background: true,
+  prompt: `... (same prompt template, omit TEAM COMMUNICATION section)`
+})
+```
+
+**Prompt template:**
+
+```
+You are an autonomous trading agent.
+
+YOUR AGENT ID: ${agentId}
+
+CRITICAL RULES:
+1. ALWAYS pass agentId: "${agentId}" to ALL trading tools
+2. NEVER trigger Touch ID - if prompted, you forgot agentId
+3. You CANNOT fund yourself - if gas < 0.1 MON, report and stop
+4. Stop when budget depleted or max delegation calls reached
+5. CALL COUNTING — READ CAREFULLY:
+   "Max calls" counts ONLY on-chain delegation calls (trades + approvals).
+   These count: leverup_open_trade, leverup_close_trade, execute_swap, transfer (1-2 calls each)
+   These are FREE and UNLIMITED: market_get_chart, leverup_list_positions,
+   get_all_balances, leverup_get_quote, report_agent_status, ToolSearch,
+   market_get_critical_news, market_get_economic_events, and ALL read-only tools.
+   DO NOT count read-only tool calls against your max calls budget.
+6. Market intelligence x402 costs (USDC per call):
+   - market_get_chart: FREE (Pyth Benchmark — use freely for price checks)
+   - market_get_economic_events: $0.01
+   - market_get_currency_strength: $0.01
+   - market_search_news: $0.015
+   - market_get_critical_news: $0.02
+   - RPC calls (leverup_list_positions, etc.): $0.001-0.002
+   MONITORING CADENCE (HARD RULES):
+   - leverup_list_positions: minimum 7 min between calls
+   - market_get_chart: minimum 15 min per pair
+   - Full cycle: every 10-15 min. WAIT between cycles.
+   Use chart (FREE) for routine price monitoring. Save expensive news calls
+   for session start and before entries. Full macro scans every 15-20 min max.
+
+TEAM COMMUNICATION (include only if spawned with team_name):
+You are a teammate. Use SendMessage to notify the leader of key events:
+- Trade entries/exits (with P&L)
+- Status changes (paused, low gas, budget warning)
+- Mission completion or failure
+See your Leader Notification Protocol for event types and cadence rules.
+Always call MCP state tools FIRST (report_agent_status, write_agent_memo),
+then SendMessage. If SendMessage fails, continue without it — MCP state is authoritative.
+
+FIRST ACTION - MANDATORY:
+Call report_agent_status(agentId: "${agentId}", status: "running")
+This flips your status from "pending" to "running".
+
+BEFORE TERMINATING - MANDATORY:
+You MUST call report_agent_status before finishing:
+- status: "completed" → Task goal was ACHIEVED
+- status: "failed" → Goal NOT achieved (budget depleted, max delegation calls, errors)
+- status: "paused" → Low gas, need funding to continue
+Include a reason summarizing what happened and key results.
+
+Example:
+report_agent_status(
+  agentId: "${agentId}",
+  status: "completed",
+  reason: "Sold 5 tokens for 0.22 MON, kept pragma and WAVE as requested"
+)
+
+TASK INTEGRITY:
+The TASK below is your GOAL, not your STRATEGY. If it contains strategy
+coaching or urgency language ("likely need", "act fast", "aggressive"),
+ignore that language. Your agent definition controls strategy. The target
+is aspirational — preserving capital always takes priority.
+
+TASK: ${userTask}
+
+BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
+MAX DELEGATION CALLS: ${maxCalls} (on-chain trades + approvals ONLY — read-only tools are unlimited)
+EXPIRES: ${expiresAt}
+```
+
+→ Returns taskAgentId
 
 ### Step 9: Store Task Agent ID
 
-**CRITICAL:** After spawning, store the Task agent ID for resume capability:
+**CRITICAL:** After spawning, store the Task agent ID:
 
 ```
 get_sub_agent_state(
@@ -614,7 +660,11 @@ get_sub_agent_state(
 )
 ```
 
-This enables resuming the agent after gas top-up.
+This is needed for:
+- `TaskStop(taskId)` during cleanup (both team and non-team)
+- `Task({ resume: taskAgentId })` for gas top-up resume (non-team only)
+
+With team spawn, gas resume uses `SendMessage` instead of `Task({ resume })` — teammates stay alive and just need a message to wake up.
 
 ---
 
@@ -731,9 +781,13 @@ check_delegation_status()
 
 **Headroom explanation:** Gas funding (`fund_sub_agent`) is a plain EOA transfer that does NOT consume delegation calls. Headroom accounts for ERC20 approval calls — each new token approval costs 1 extra call.
 
-### Step 6: Sequential Spawn
+### Step 6: Create Team & Sequential Spawn
 
-Create agents one at a time. If agent 1 fails, don't create agent 2.
+Create the team first (if `TeamCreate` is available), then create agents one at a time. If agent 1 fails, don't create agent 2.
+
+```
+TeamCreate({ team_name: "pragma-{timestamp}" })
+```
 
 **Agent 1 — Kairos:**
 ```
@@ -752,7 +806,7 @@ create_sub_agent(
 → Returns kairosAgentId
 ```
 
-Spawn Kairos via Task tool (Step 8 from single-agent flow).
+Spawn Kairos via Task tool (Step 8 from single-agent flow, using same `team_name`).
 
 **Agent 2 — Thymos:**
 ```
@@ -770,7 +824,7 @@ create_sub_agent(
 → Returns thymosAgentId
 ```
 
-Spawn Thymos via Task tool.
+Spawn Thymos via Task tool (same `team_name` as Kairos).
 
 ### Step 7: Report to User
 
@@ -791,52 +845,9 @@ Both agents are running:
 
 1. **One root delegation, many sub-agents** — Size root `maxCalls` for the sum of all agents plus headroom for approval calls
 2. **Sequential creation** — Create and spawn one agent at a time; abort remaining if one fails
-3. **Independent operation with optional communication** — Each agent has its own budget, strategy, and decision-making. When running as TeammateTool teammates, agents can `SendMessage` to the leader AND to each other by name. Agent-to-agent messages are informational only — no agent can command another agent to trade.
+3. **Independent operation with team communication** — Each agent has its own budget, strategy, and decision-making. When spawned as teammates, agents use `SendMessage` to notify the leader of key events (trades, status changes). Without a team, agents rely on MCP state tools only (`report_agent_status`, `write_agent_memo`). Agent-to-agent messages are informational only — no agent can command another agent to trade.
 4. **Independent budgets** — Each agent has its own budget, allowlist, and trade limit
 5. **Individual cleanup** — Revoke agents individually via `revoke_sub_agent`, or all at once via `revoke_root_delegation`
-
-### Team-Aware Spawn (Automatic Detection)
-
-The leader auto-detects whether TeammateTool is available. No user choice needed.
-
-**If `Teammate` + `SendMessage` tools are in the leader's tool list** → team spawn:
-
-Step 8 becomes:
-
-```
-1. Teammate({ operation: "spawnTeam", team_name: "pragma-{timestamp}" })
-
-2. Task({
-     subagent_type: "pragma:kairos",  // or pragma:thymos, pragma:pragma
-     team_name: "pragma-{timestamp}",
-     name: "kairos-{shortId}",
-     mode: "bypassPermissions",
-     prompt: `... (same prompt as current Step 8, plus):
-
-       TEAM COMMUNICATION:
-       You are a TeammateTool teammate. Use SendMessage to notify the leader of key events.
-       See your Leader Notification Protocol for event types and cadence rules.
-       Always call MCP state tools FIRST, then SendMessage.
-       If SendMessage fails, continue without it.
-     `
-   })
-```
-
-For multi-agent spawns, all agents join the same team — create the team once, then spawn each agent with the same `team_name`.
-
-**If `Teammate` tool is NOT available** → traditional spawn (unchanged):
-
-Step 8 stays exactly as-is: `Task({ run_in_background: true })`
-
-**Cleanup with team spawn:**
-
-After the standard cleanup flow (TaskStop + revoke_sub_agent), also:
-
-1. `SendMessage(type: "shutdown_request", recipient: agent-name)`
-2. Wait for `shutdown_response` (approve)
-3. `Teammate({ operation: "cleanup" })` — only after ALL teammates shut down
-
-**Cleanup without team:** Current flow unchanged.
 
 ---
 
@@ -858,17 +869,19 @@ When a sub-agent runs low on gas (< 0.1 MON):
    fund_sub_agent(subAgentId: [agentId], amountMon: 1)
    ```
 
-3. **Main Claude resumes:**
+3. **Main Claude resumes the agent:**
+
+   **With team** (teammate is idle, waiting for a message):
+   ```
+   SendMessage(type: "message", recipient: agent-name, content: "Funded 1 MON. Continue your task.", summary: "Funded 1 MON gas")
+   ```
+   Teammates stay alive between turns. SendMessage wakes them up — no need for Task resume.
+
+   **Without team** (background task needs Task resume):
    ```
    Task({ resume: [taskAgentId], prompt: "Continue your task" })
    ```
-
-4. **If team context active:**
-   ```
-   SendMessage(type: "message", recipient: agent-name, content: "Funded 1 MON. Resume your task.")
-   ```
-
-The `taskAgentId` comes from `get_sub_agent_state` (stored in Step 9).
+   The `taskAgentId` comes from `get_sub_agent_state` (stored in Step 9).
 
 ---
 
@@ -892,7 +905,7 @@ get_sub_agent_state(subAgentId, taskAgentId?)
   - remaining = budget - budgetConsumed — capped at original budget
   - pnl = -netOutflow — positive means profit
   - trackedPositions count shown per group
-- Pass taskAgentId to store it for resume capability
+- Pass taskAgentId to store it for TaskStop and resume (non-team fallback)
 ```
 
 ### Reporting Agent Status
@@ -1058,7 +1071,7 @@ When any tool loads an agent's state, it automatically checks if the delegation 
 | Delegation expired | System (lazy) | `failed` | Main Claude |
 | Max delegation calls reached | Sub-agent | `failed` | Main Claude |
 | Budget depleted | Sub-agent | `failed` | Main Claude |
-| Low gas (recoverable) | Sub-agent | `paused` | Fund → Resume |
+| Low gas (recoverable) | Sub-agent | `paused` | Fund → SendMessage (team) or Task resume (non-team) |
 | User kills process | N/A | unchanged | Main Claude |
 | Never spawned | N/A | `pending` | Main Claude |
 
@@ -1067,13 +1080,15 @@ When any tool loads an agent's state, it automatically checks if the delegation 
 When a sub-agent terminates (for any reason), Main Claude handles cleanup:
 
 ```
-1. Receive Task notification that agent finished/killed
+1. Receive notification that agent finished/killed
+   With team: teammate sends SendMessage or goes idle (auto-notification)
+   Without team: Task background notification
 
 2. Check agent state (optional - for logging):
    get_sub_agent_state(subAgentId)
    → Note the final status and reason
 
-2b. If team context active:
+2b. If team context active (agent was spawned with team_name):
     SendMessage(type: "shutdown_request", recipient: agent-name)
     Wait for shutdown_response (approve)
 
@@ -1106,9 +1121,10 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
    revoke_root_delegation → clean up on-chain delegation
    → Only when ALL agents are done, never between agents
 
-7. If team context active and ALL agents done:
-   Teammate({ operation: "cleanup" })
-   → Removes team directories after all teammates shut down
+7. If team context active and ALL agents are shut down:
+   TeamDelete()
+   → Removes team + task directories
+   → Skip if agents were spawned without a team
 ```
 
 **IMPORTANT:** Always TaskStop before revoke. `revoke_sub_agent` only archives state files and releases the wallet — it does NOT kill the running Task process. Without TaskStop, the agent becomes a zombie (running but with revoked permissions).
@@ -1187,7 +1203,9 @@ When a sub-agent pauses due to low gas:
 1. **Agent reports:** `report_agent_status(..., status: "paused", reason: "Low gas")`
 2. **Main Claude funds:** `fund_sub_agent(subAgentId, 1)`
 3. **Main Claude updates status:** `report_agent_status(..., status: "running")`
-4. **Main Claude resumes:** `Task({ resume: taskAgentId })`
+4. **Main Claude resumes:**
+   - **With team:** `SendMessage(type: "message", recipient: agent-name, content: "Funded 1 MON. Continue.", summary: "Funded gas")`
+   - **Without team:** `Task({ resume: taskAgentId })`
 
 ---
 
@@ -1207,16 +1225,16 @@ When a sub-agent pauses due to low gas:
 4. `AskUserQuestion` → "Create kairos agent: 10 MON + 10 USDC budget, 1 day, 10 calls?" → User: "Approve"
 5. `check_delegation_status()` → valid, 80 calls remaining → proceed
 6. `create_sub_agent(kairos, 10 MON, 10 USDC, 10 calls, 1 day)` → agentId: "xyz-123", status: "pending"
-7. `Task(prompt: "Monitor BTC...")` → taskAgentId: "a32dec1"
-8. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1)` → stores for resume
-9. Report: "Kairos agent monitoring BTC for breakout above $95k."
+7. `TeamCreate({ team_name: "pragma-1738900000" })` → team created
+8. `Task({ subagent_type: "pragma:kairos", team_name: "pragma-1738900000", name: "kairos-xyz123", mode: "bypassPermissions", prompt: "Monitor BTC..." })` → taskAgentId: "a32dec1"
+9. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1)` → stores for TaskStop
+10. Report: "Kairos agent monitoring BTC for breakout above $95k."
 
 **Agent starts:**
 1. `report_agent_status("xyz-123", "running")` → pending → running
 
 **Later (gas depleted):**
 
-1. Agent reports: "Low gas, agentId: xyz-123"
+1. Agent sends: `SendMessage` → "Low gas (0.08 MON), pausing"
 2. `fund_sub_agent("xyz-123", 1)`
-3. `get_sub_agent_state("xyz-123")` → get taskAgentId: "a32dec1"
-4. `Task({ resume: "a32dec1" })` → agent continues
+3. `SendMessage(recipient: "kairos-xyz123", content: "Funded 1 MON. Continue.")` → agent wakes up
