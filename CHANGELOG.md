@@ -9,14 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`leverup_get_funding_rates` tool** — New MCP tool reads holding fee rates from LeverUp Diamond Proxy. Shows per-second rate, 1h/8h percentages, accumulated funding, and funding direction (longs pay / shorts pay / neutral) per pair. Filters synthetic high-leverage pairs. Registered in kairos.md (34 tools) and pragma.md (47 tools)
-- **On-chain delegation revocation** — Both `revoke_root_delegation` and `revoke_sub_agent` gain `revocationMode: "local" | "onchain"` parameter. Root on-chain: `incrementNonceViaUserOp()` invalidates ALL delegations via UserOp (Touch ID). Sub-agent on-chain: `disableSubDelegationViaSessionKey()` calls DelegationManager directly (no Touch ID). New file: `src/core/delegation/revocation.ts`
+- **On-chain delegation revocation** — `revoke_root_delegation` gains `revocationMode: "local" | "onchain"`. On-chain mode: `incrementNonceViaUserOp()` invalidates ALL delegations (root + sub) via UserOp (Touch ID). Cascades to sub-delegations via authority chain — no per-sub-agent on-chain revocation needed. New file: `src/core/delegation/revocation.ts`
 - **Plugin distribution via esbuild bundle** — Single-file ESM bundle (`dist/index.js`, 1.8MB minified) committed to git. Users no longer need `bun install` or `tsc` build. Signer binary persists at `~/.pragma/bin/` across plugin updates
 
 ### Changed
 - **Setup simplified** — `/pragma:setup` reduced from 7 steps to 5. Phase 1 only builds Swift binary (MCP server ships pre-bundled). No `bun install` or TypeScript compilation required
 - **`.mcp.json` production entry** — Removed `PRAGMA_SIGNER_PATH` env var (signer resolves naturally via `~/.pragma/bin/`)
 - **`.gitignore`** — Allows `servers/pragma-mcp/dist/index.js` for distribution while ignoring other build artifacts
-- **`revocationMode` documented** — `skills/autonomous-mode/SKILL.md` updated with `revocationMode` parameter docs for both revoke tools
+- **Revocation docs updated** — `skills/autonomous-mode/SKILL.md` updated: `revoke_root_delegation` gains `revocationMode` docs, `revoke_sub_agent` simplified (removed on-chain path, root cascade is sufficient)
 - **Tool Implementation Bible** — Added checklist items for updating skills (pragma-core, autonomous-mode) and agent definitions when implementing new tools
 
 ### Fixed
