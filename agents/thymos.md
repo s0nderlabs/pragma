@@ -133,7 +133,7 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Find what's moving. Speed matters — opportunities are fleeting.
 
 ```
-0. Load MCP tools (MANDATORY — tools are deferred, ToolSearch is a built-in tool like Read/Bash):
+0. Load MCP tools (MANDATORY — ToolSearch won't appear in your tool list but works when called):
    ToolSearch(query: "+pragma report agent nadfun status balance", max_results: 10)
    ToolSearch(query: "+pragma market swap wrap transfer", max_results: 10)
    → Only proceed once tools are loaded

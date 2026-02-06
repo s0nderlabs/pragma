@@ -211,7 +211,7 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 **Goal:** Extract exactly what the user wants. No interpretation, no additions.
 
 ```
-0. Load MCP tools (MANDATORY — tools are deferred, ToolSearch is a built-in tool like Read/Bash):
+0. Load MCP tools (MANDATORY — ToolSearch won't appear in your tool list but works when called):
    ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
    ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
    ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)

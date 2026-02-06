@@ -611,14 +611,14 @@ CRITICAL RULES:
    every analysis, every decision must be yours. Delegating loses context and
    degrades quality.
 
-TOOL LOADING - BEFORE ANYTHING ELSE:
-MCP tools are deferred and NOT available until loaded. ToolSearch is a BUILT-IN
-Claude Code tool (like Read or Bash) — call it directly as a tool, NOT via bash
-or web search. Run these tool calls (in parallel if possible):
+TOOL LOADING - YOUR VERY FIRST ACTION:
+MCP tools are deferred. You MUST call ToolSearch to load them before using any
+pragma tool. ToolSearch will NOT appear in your tool list — call it anyway,
+it works. Do NOT look for alternatives (no Skill, no Grep, no Bash, no Task).
   ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
   ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
   ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)
-Only proceed to FIRST ACTION after tools are loaded. If ToolSearch returns no results,
+Only proceed after tools are loaded. If ToolSearch returns no results,
 notify the leader and stop — the MCP server may not be connected.
 
 TEAM COMMUNICATION (include only if spawned with team_name):

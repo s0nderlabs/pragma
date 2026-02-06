@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.32] - 2026-02-06
+
+### Fixed
+- **ToolSearch hidden tool list fix** — Live diagnostic revealed ToolSearch doesn't appear in teammate agents' visible tool list, causing them to assume it's unavailable and spiral into alternatives. Updated all agent definitions and spawn prompt: "ToolSearch will NOT appear in your tool list — call it anyway, it works" with explicit blocklist of failure paths (no Skill, no Grep, no Bash, no Task)
+
 ## [0.8.31] - 2026-02-06
 
 ### Fixed
