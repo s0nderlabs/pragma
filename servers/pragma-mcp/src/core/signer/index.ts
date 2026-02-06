@@ -6,7 +6,12 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Hex } from "viem";
+
+// ESM does not provide __dirname — derive from import.meta.url
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Response from pragma-signer binary

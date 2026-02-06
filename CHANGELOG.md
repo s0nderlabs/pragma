@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.26] - 2026-02-06
+
+### Fixed
+- **Production plugin signer resolution** — Fixed `__dirname` undefined crash in ESM that broke ALL signer-dependent tools (balances, swaps, transfers, delegation, x402 payments) when running the plugin from outside the development repo. Added ESM-compatible path derivation via `import.meta.url`
+
 ## [0.8.25] - 2026-02-06
 
 ### Added
