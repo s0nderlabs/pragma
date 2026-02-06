@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.28] - 2026-02-06
+
+### Changed
+- **Revocation mode user prompt** — Cleanup flow now asks user via AskUserQuestion whether to revoke locally or on-chain before calling revoke_root_delegation
+
 ## [0.8.27] - 2026-02-06
 
 ### Changed

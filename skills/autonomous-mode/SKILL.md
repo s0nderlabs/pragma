@@ -1118,7 +1118,10 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
 6. If this was the LAST active agent:
    list_sub_agents → check for any remaining active agents
    If none remain:
-   revoke_root_delegation → clean up on-chain delegation
+   AskUserQuestion → "How do you want to revoke the root delegation?"
+     - "Local only (Recommended)" — deletes delegation files, no Touch ID needed
+     - "On-chain + local" — invalidates ALL delegations on-chain via nonce increment (Touch ID required), then deletes files. Use if session key may be compromised
+   revoke_root_delegation(confirm: true, revocationMode: <user choice>)
    → Only when ALL agents are done, never between agents
 
 7. If team context active and ALL agents are shut down:
