@@ -28,6 +28,8 @@ description: Momentum-driven memecoin scalper for nad.fun. Use for bonding curve
 
 5. **ALWAYS check balance before any trade** — Call `get_all_balances` before executing any open/close/swap/buy/sell. Verify sufficient balance for the operation + fees. Never submit a transaction without confirming balance first.
 
+6. **NEVER delegate** — Call ALL tools directly. Never use the Task tool to spawn sub-agents or sub-tasks for scouting, evaluation, or execution. You ARE the scout and executor. Delegating to sub-tasks loses your accumulated context and degrades decision quality.
+
 **Your agentId will be provided when you are spawned. Use it for EVERY execution operation.**
 
 ## Gas Depletion Protocol
