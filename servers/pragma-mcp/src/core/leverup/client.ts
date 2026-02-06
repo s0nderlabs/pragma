@@ -12,6 +12,8 @@ import {
   LEVERUP_DIAMOND,
   READER_ABI,
   LIMIT_ORDER_READER_ABI,
+  HOLDING_FEE_ABI,
+  ACC_FUNDING_ABI,
   SUPPORTED_PAIRS,
   LIQUIDATION_LOSS_RATE,
   DEGEN_MODE_LEVERAGE_OPTIONS,
@@ -19,17 +21,17 @@ import {
   TP_LIMIT_HIGH_LEVERAGE,
   TP_LEVERAGE_THRESHOLD
 } from "./constants.js";
-import {
+import type {
   LeverUpPosition,
   LeverUpLimitOrder,
   PositionAnalysis,
   LeverUpQuote,
-  LimitOrderQuote
+  LimitOrderQuote,
+  PairFundingData,
 } from "./types.js";
 import { fetchPythPriceData } from "./pyth-client.js";
 import { withRetryOrThrow } from "../utils/retry.js";
 
-// Collateral types that are MON-denominated (require MON/USD price conversion)
 const MON_DENOMINATED_COLLATERAL = ["MON", "LVMON"] as const;
 
 export function isMonDenominated(collateral: string): boolean {
@@ -50,16 +52,14 @@ export function getCollateralDecimals(collateralToken: string): number {
 
 export async function createLeverUpClient(config: any) {
   const rpcUrl = await (getRpcUrl as any)(config);
-  const chainId = (config as any).network?.chainId || 143;
-  const chain = (buildViemChain as any)(chainId);
+  const chainId = config.network?.chainId || 143;
+  const chain = (buildViemChain as any)(chainId, rpcUrl);
 
   const inX402 = await isX402Mode();
-  
   if (inX402) {
-    const options = x402HttpOptions(config);
     return createPublicClient({
       chain,
-      transport: http(rpcUrl, options as any),
+      transport: http(rpcUrl, x402HttpOptions(config) as any),
     });
   }
 
@@ -173,21 +173,21 @@ export async function getLeverUpQuote(
     : (liqPrice - entryPrice) * 10000n / entryPrice;
 
   const marginUsdFormatted = formatUnits(marginUsd, 18);
-  // Hard limit: Position size must be >= $200 USD (enforced at contract level)
-  // Soft guideline: Margin >= $10 USD (recommended but not strictly enforced)
-  const minMarginUsd = 10; // Soft guideline
-  const minNotionalUsd = 200; // Hard limit
+  const positionValueFormatted = Number(formatUnits(positionValueUsd, 18));
+  const marginUsdNum = Number(marginUsdFormatted);
+
+  const MIN_NOTIONAL_USD = 200;
+  const MIN_MARGIN_USD = 10;
 
   const warnings: string[] = [];
   let hasHardFailure = false;
 
-  if (Number(formatUnits(positionValueUsd, 18)) < minNotionalUsd) {
-    warnings.push(`Position size is below the protocol minimum of $200.00 USD (Current: $${Number(formatUnits(positionValueUsd, 18)).toFixed(2)}). This will be rejected by the contract.`);
+  if (positionValueFormatted < MIN_NOTIONAL_USD) {
+    warnings.push(`Position size is below the protocol minimum of $200.00 USD (Current: $${positionValueFormatted.toFixed(2)}). This will be rejected by the contract.`);
     hasHardFailure = true;
   }
-  if (Number(marginUsdFormatted) < minMarginUsd) {
-    // Soft warning only - don't set hasHardFailure
-    warnings.push(`Margin is below the recommended $10.00 USD (Current: $${Number(marginUsdFormatted).toFixed(2)}). This may work but is not recommended.`);
+  if (marginUsdNum < MIN_MARGIN_USD) {
+    warnings.push(`Margin is below the recommended $10.00 USD (Current: $${marginUsdNum.toFixed(2)}). This may work but is not recommended.`);
   }
 
   if (pairMetadata.isHighLeverage && !isDegenModeLeverage(leverage)) {
@@ -204,9 +204,9 @@ export async function getLeverUpQuote(
     leverage,
     entryPrice: Number(formatUnits(entryPrice, 18)).toFixed(2),
     marginAmount: `${marginAmount} ${collateralToken}`,
-    marginUsd: Number(marginUsdFormatted).toFixed(2),
+    marginUsd: marginUsdNum.toFixed(2),
     positionSize: formatUnits(qty, 10),
-    positionValueUsd: Number(formatUnits(positionValueUsd, 18)).toFixed(2),
+    positionValueUsd: positionValueFormatted.toFixed(2),
     liqPrice: Number(formatUnits(liqPrice, 18)).toFixed(2),
     openFee: Number(formatUnits(openFeeUsd, 18)).toFixed(4),
     healthFactor: Math.max(0, Math.min(100, Number(distance))),
@@ -220,30 +220,21 @@ export async function getLeverUpQuote(
 }
 
 function analyzePosition(pos: LeverUpPosition, currentPrice: bigint): PositionAnalysis {
-  const isLong = pos.isLong;
-  const entryPrice = pos.entryPrice;
-  const qty = pos.qty;
-  const margin = pos.margin;
+  const { isLong, entryPrice, qty, margin, openFee, holdingFee, fundingFee } = pos;
 
-  let pnl: bigint;
-  if (isLong) {
-    pnl = (currentPrice - entryPrice) * qty / (10n ** 10n);
-  } else {
-    pnl = (entryPrice - currentPrice) * qty / (10n ** 10n);
-  }
+  const pnl = isLong
+    ? (currentPrice - entryPrice) * qty / (10n ** 10n)
+    : (entryPrice - currentPrice) * qty / (10n ** 10n);
 
-  const totalFees = pos.openFee + pos.holdingFee + pos.fundingFee;
+  const totalFees = openFee + holdingFee + fundingFee;
   const netPnl = pnl - totalFees;
 
   const collateralFactor = (margin * LIQUIDATION_LOSS_RATE) / 10000n;
   const buffer = collateralFactor - totalFees;
 
-  let liqPrice: bigint;
-  if (isLong) {
-    liqPrice = entryPrice - (buffer * (10n ** 10n) / qty);
-  } else {
-    liqPrice = entryPrice + (buffer * (10n ** 10n) / qty);
-  }
+  const liqPrice = isLong
+    ? entryPrice - (buffer * (10n ** 10n) / qty)
+    : entryPrice + (buffer * (10n ** 10n) / qty);
 
   const distance = isLong
     ? (currentPrice - liqPrice) * 10000n / currentPrice
@@ -255,17 +246,13 @@ function analyzePosition(pos: LeverUpPosition, currentPrice: bigint): PositionAn
     liqPrice: Number(formatUnits(liqPrice, 18)).toFixed(2),
     distanceToLiq: `${(Number(distance) / 100).toFixed(2)}%`,
     healthFactor: Math.max(0, Math.min(100, Number(distance))),
-    isLiquidatable: distance <= 0
+    isLiquidatable: distance <= 0,
   };
 }
 
-// ========== LIMIT ORDER FUNCTIONS ==========
+// MARK: - Limit Orders
 
-/**
- * Get all pending limit orders for a user across all supported pairs.
- * Note: These are PENDING orders that haven't been filled yet.
- * For filled positions, use getUserPositions() instead.
- */
+/** Get all pending (unfilled) limit orders for a user across all supported pairs. */
 export async function getUserLimitOrders(
   userAddress: Address
 ): Promise<LeverUpLimitOrder[]> {
@@ -307,13 +294,7 @@ export async function getUserLimitOrders(
   return results.flat();
 }
 
-/**
- * Get a quote for a limit order with trigger price validation.
- *
- * Trigger price rules:
- * - Long orders: trigger price must be BELOW current market price
- * - Short orders: trigger price must be ABOVE current market price
- */
+/** Get a quote for a limit order with trigger price validation. */
 export async function getLimitOrderQuote(
   symbol: string,
   isLong: boolean,
@@ -328,12 +309,10 @@ export async function getLimitOrderQuote(
   const triggerPriceBigInt = parseUnits(triggerPrice, 18);
   const currentPriceBigInt = parseUnits(baseQuote.entryPrice, 18);
 
-  // Validate trigger price direction
   let isTriggerValid: boolean;
   let triggerValidationMessage: string;
 
   if (isLong) {
-    // Long orders: trigger must be BELOW current market
     isTriggerValid = triggerPriceBigInt < currentPriceBigInt;
     if (isTriggerValid) {
       const diffPercent = ((currentPriceBigInt - triggerPriceBigInt) * 10000n / currentPriceBigInt);
@@ -342,7 +321,6 @@ export async function getLimitOrderQuote(
       triggerValidationMessage = `Invalid: Long limit orders require trigger price BELOW current market ($${baseQuote.entryPrice}).`;
     }
   } else {
-    // Short orders: trigger must be ABOVE current market
     isTriggerValid = triggerPriceBigInt > currentPriceBigInt;
     if (isTriggerValid) {
       const diffPercent = ((triggerPriceBigInt - currentPriceBigInt) * 10000n / currentPriceBigInt);
@@ -352,7 +330,6 @@ export async function getLimitOrderQuote(
     }
   }
 
-  // Add warning if trigger is invalid
   const warnings = [...baseQuote.warnings];
   if (!isTriggerValid) {
     warnings.unshift(triggerValidationMessage);
@@ -360,7 +337,7 @@ export async function getLimitOrderQuote(
 
   return {
     ...baseQuote,
-    triggerPrice: triggerPrice,
+    triggerPrice,
     triggerPriceUsd: `$${Number(triggerPrice).toFixed(2)}`,
     currentPrice: baseQuote.entryPrice,
     isTriggerValid,
@@ -368,4 +345,120 @@ export async function getLimitOrderQuote(
     warnings,
     meetsMinimums: baseQuote.meetsMinimums && isTriggerValid,
   };
+}
+
+// MARK: - Funding Rates
+
+function formatHoldingFeeRate(perSecond: bigint, seconds: bigint): string {
+  const periodRate = perSecond * seconds;
+  return `${(Number(periodRate) / 1e10 * 100).toFixed(6)}%`;
+}
+
+function determineFundingDirection(acc: bigint): "longs pay" | "shorts pay" | "neutral" {
+  if (acc > 0n) return "longs pay";
+  if (acc < 0n) return "shorts pay";
+  return "neutral";
+}
+
+export async function getFundingRates(
+  symbol?: string
+): Promise<PairFundingData[]> {
+  const config = await loadConfig();
+  if (!config) {
+    throw new Error("Config not loaded. Run setup_wallet first.");
+  }
+
+  const client = await createLeverUpClient(config);
+
+  let pairs = SUPPORTED_PAIRS.filter((p) => !p.isHighLeverage);
+
+  if (symbol) {
+    const normalized = symbol.toUpperCase().trim();
+    pairs = pairs.filter(
+      (p) =>
+        p.pair.toUpperCase().startsWith(normalized) ||
+        p.pair.toUpperCase() === `${normalized}/USD` ||
+        p.pair.toUpperCase().includes(normalized)
+    );
+
+    if (pairs.length === 0) {
+      throw new Error(
+        `No LeverUp pair found for '${symbol}'. Use leverup_list_pairs to see available markets.`
+      );
+    }
+  }
+
+  const settled = await Promise.all(
+    pairs.map(async (pairMetadata): Promise<PairFundingData | null> => {
+      try {
+        const [longRate, shortRate, accFunding] = await Promise.all([
+          withRetryOrThrow(
+            async () =>
+              client.readContract({
+                address: LEVERUP_DIAMOND,
+                abi: HOLDING_FEE_ABI,
+                functionName: "getPairHoldingFeeRate",
+                args: [pairMetadata.pairBase as Address, true],
+              }),
+            { operationName: `funding-long-${pairMetadata.pair}` }
+          ),
+          withRetryOrThrow(
+            async () =>
+              client.readContract({
+                address: LEVERUP_DIAMOND,
+                abi: HOLDING_FEE_ABI,
+                functionName: "getPairHoldingFeeRate",
+                args: [pairMetadata.pairBase as Address, false],
+              }),
+            { operationName: `funding-short-${pairMetadata.pair}` }
+          ),
+          withRetryOrThrow(
+            async () =>
+              client.readContract({
+                address: LEVERUP_DIAMOND,
+                abi: ACC_FUNDING_ABI,
+                functionName: "lastLongAccFundingFeePerShare",
+                args: [pairMetadata.pairBase as Address],
+              }),
+            { operationName: `acc-funding-${pairMetadata.pair}` }
+          ),
+        ]);
+
+        const longPerSecond = longRate as bigint;
+        const shortPerSecond = shortRate as bigint;
+        const accFundingValue = accFunding as bigint;
+
+        return {
+          symbol: pairMetadata.pair,
+          category: pairMetadata.category,
+          pairBase: pairMetadata.pairBase,
+          holdingFeeRatePerSecond: {
+            long: longPerSecond,
+            short: shortPerSecond,
+          },
+          holdingFeeRate8h: {
+            long: formatHoldingFeeRate(longPerSecond, 28800n),
+            short: formatHoldingFeeRate(shortPerSecond, 28800n),
+          },
+          holdingFeeRate1h: {
+            long: formatHoldingFeeRate(longPerSecond, 3600n),
+            short: formatHoldingFeeRate(shortPerSecond, 3600n),
+          },
+          accumulatedFunding: accFundingValue,
+          fundingDirection: determineFundingDirection(accFundingValue),
+        };
+      } catch {
+        return null;
+      }
+    })
+  );
+
+  const results = settled.filter((r): r is PairFundingData => r !== null);
+
+  results.sort((a, b) => {
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    return a.symbol.localeCompare(b.symbol);
+  });
+
+  return results;
 }

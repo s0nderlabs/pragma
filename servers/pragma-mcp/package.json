@@ -6,6 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "build:bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/index.js --format=esm --minify --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "esbuild": "^0.27.3",
     "typescript": "^5.3.0"
   }
 }

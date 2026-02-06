@@ -41,6 +41,7 @@ allowed-tools:
   - mcp__pragma__leverup_update_margin
   - mcp__pragma__leverup_update_tpsl
   - mcp__pragma__leverup_get_market_stats
+  - mcp__pragma__leverup_get_funding_rates
   - mcp__pragma__leverup_open_limit_order
   - mcp__pragma__leverup_list_limit_orders
   - mcp__pragma__leverup_cancel_limit_order
@@ -263,6 +264,7 @@ Before executing multiple operations, calculate total gas needed:
 | LeverUp   | `leverup_update_margin`     | Add collateral to position (Touch ID)                          |
 | LeverUp   | `leverup_update_tpsl`       | Update TP/SL on position (Touch ID)                            |
 | LeverUp   | `leverup_get_market_stats`  | Real-time prices for all LeverUp pairs                         |
+| LeverUp   | `leverup_get_funding_rates` | Holding fee rates (funding) for perp pairs                     |
 | LeverUp   | `leverup_open_limit_order`  | Place limit order at trigger price (Touch ID)                  |
 | LeverUp   | `leverup_list_limit_orders` | View pending limit orders                                      |
 | LeverUp   | `leverup_cancel_limit_order`| Cancel pending limit orders (Touch ID)                         |

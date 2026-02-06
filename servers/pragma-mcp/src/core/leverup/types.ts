@@ -68,20 +68,35 @@ export interface LeverUpQuote {
   distanceToLiq: string;
   meetsMinimums: boolean;
   warnings: string[];
-  // Additional info
   isHighLeveragePair: boolean;
-  maxTpPercent: number; // Max take profit % (500 for <50x, 300 for >=50x)
-  canAddMargin: boolean; // false for 500x/750x/1001x positions
+  maxTpPercent: number;
+  canAddMargin: boolean;
 }
 
-// ========== LIMIT ORDERS ==========
+// MARK: - Funding Rates
 
-/**
- * A pending limit order that hasn't been filled yet.
- * Limit orders trigger when market price reaches the specified limit price.
- * - Long orders: trigger when price drops BELOW limit price
- * - Short orders: trigger when price rises ABOVE limit price
- */
+export interface PairFundingData {
+  symbol: string;
+  category: LeverUpCategory;
+  pairBase: Address;
+  holdingFeeRatePerSecond: {
+    long: bigint;
+    short: bigint;
+  };
+  holdingFeeRate8h: {
+    long: string;
+    short: string;
+  };
+  holdingFeeRate1h: {
+    long: string;
+    short: string;
+  };
+  accumulatedFunding: bigint;
+  fundingDirection: "longs pay" | "shorts pay" | "neutral";
+}
+
+// MARK: - Limit Orders
+
 export interface LeverUpLimitOrder {
   orderHash: Hex;
   pair: string;
@@ -98,9 +113,6 @@ export interface LeverUpLimitOrder {
   timestamp: number;
 }
 
-/**
- * Parameters for creating a new limit order
- */
 export interface LimitOrderParams {
   symbol: string;
   isLong: boolean;
@@ -113,9 +125,6 @@ export interface LimitOrderParams {
   collateralToken: "MON" | "USDC" | "LVUSD" | "LVMON";
 }
 
-/**
- * Extended quote for limit orders - includes trigger price validation
- */
 export interface LimitOrderQuote extends LeverUpQuote {
   triggerPrice: string;
   triggerPriceUsd: string;

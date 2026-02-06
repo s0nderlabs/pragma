@@ -4,14 +4,12 @@ import { type LeverUpPairMetadata } from "./types.js";
 export const LEVERUP_DIAMOND = "0xea1b8E4aB7f14F7dCA68c5B214303B13078FC5ec" as Address;
 export const PYTH_CONTRACT = "0x2880aB155794e7179c9eE2e38200202908C17B43" as Address;
 
-// Collateral token addresses (Monad Mainnet)
 export const USDC_ADDRESS = "0x754704Bc059F8C67012fEd69BC8A327a5aafb603" as Address;
 export const LVUSD_ADDRESS = "0xFD44B35139Ae53FFF7d8F2A9869c503D987f00d1" as Address;
 export const LVMON_ADDRESS = "0x91b81bfbe3A747230F0529Aa28d8b2Bc898E6D56" as Address;
 export const NATIVE_MON_ADDRESS = "0x0000000000000000000000000000000000000000" as Address;
 export const WMON_ADDRESS = "0x3bd359C1119dA7Da1D913D1C4D2B7c461115433A" as Address;
 
-// WMON ABI for wrapping/unwrapping native MON
 export const WMON_ABI = [
   {
     name: "deposit",
@@ -31,15 +29,12 @@ export const WMON_ABI = [
 
 export const LIQUIDATION_LOSS_RATE = 8500n;
 
-// High-leverage (degen mode) constants
-// 500BTC/500ETH pairs ONLY support these specific leverage values
 export const DEGEN_MODE_LEVERAGE_OPTIONS = [500, 750, 1001] as const;
 export const DEGEN_MODE_MIN_LEVERAGE = 500;
 
-// TP limits enforced by contract
-export const TP_LIMIT_LOW_LEVERAGE = 500; // Max 500% TP for leverage < 50x
-export const TP_LIMIT_HIGH_LEVERAGE = 300; // Max 300% TP for leverage >= 50x
-export const TP_LEVERAGE_THRESHOLD = 50; // Leverage threshold for TP limits
+export const TP_LIMIT_LOW_LEVERAGE = 500;
+export const TP_LIMIT_HIGH_LEVERAGE = 300;
+export const TP_LEVERAGE_THRESHOLD = 50;
 
 export const PYTH_HERMES_URL = "https://hermes.pyth.network";
 
@@ -141,8 +136,6 @@ export const TRADING_PORTAL_ABI = [
   }
 ] as const;
 
-// Limit Order ABI - uses same OpenDataInput struct as market orders
-// The only difference: `price` field = trigger price (order fills when market reaches this)
 export const LIMIT_ORDER_ABI = [
   {
     inputs: [
@@ -185,7 +178,6 @@ export const LIMIT_ORDER_ABI = [
   }
 ] as const;
 
-// Limit Order Reader ABI - for fetching pending limit orders
 export const LIMIT_ORDER_READER_ABI = [
   {
     type: "function",
@@ -217,6 +209,26 @@ export const LIMIT_ORDER_READER_ABI = [
     ],
     stateMutability: "view"
   }
+] as const;
+
+export const HOLDING_FEE_ABI = [
+  {
+    type: "function",
+    name: "getPairHoldingFeeRate",
+    inputs: [{ type: "address", name: "pairBase" }, { type: "bool", name: "isLong" }],
+    outputs: [{ type: "uint256", name: "" }],
+    stateMutability: "view",
+  },
+] as const;
+
+export const ACC_FUNDING_ABI = [
+  {
+    type: "function",
+    name: "lastLongAccFundingFeePerShare",
+    inputs: [{ type: "address", name: "pairBase" }],
+    outputs: [{ type: "int256", name: "" }],
+    stateMutability: "view",
+  },
 ] as const;
 
 export const PYTH_ABI = [

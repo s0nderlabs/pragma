@@ -42,7 +42,7 @@ export function registerLeverUpGetMarketStats(server: McpServer): void {
     "leverup_get_market_stats",
     "Get current market prices and stats for LeverUp trading pairs. " +
       "Returns real-time Pyth oracle prices for all supported markets (crypto, stocks, forex, commodities). " +
-      "NOTE: Global Open Interest and Funding Rates are not yet available via public LeverUp API.",
+      "NOTE: For holding fees and funding rates, use leverup_get_funding_rates. Global OI not yet available.",
     LeverUpGetMarketStatsSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await leverUpGetMarketStatsHandler(
@@ -80,11 +80,9 @@ async function leverUpGetMarketStatsHandler(
       }
     }
 
-    // Fetch prices from Pyth
     const priceIds = pairs.map((p) => p.pythId);
     const pythData = await fetchPythPriceData(priceIds as `0x${string}`[]);
 
-    // Build market stats
     const markets: MarketStats[] = pairs.map((pair) => {
       const priceData = pythData.parsed?.find(
         (p) => `0x${p.id}` === pair.pythId
@@ -95,21 +93,18 @@ async function leverUpGetMarketStatsHandler(
       let publishTime = "N/A";
 
       if (priceData) {
-        // Calculate price with proper decimals (expo is negative)
         const price =
           BigInt(priceData.price.price) *
           10n ** BigInt(18 + priceData.price.expo);
         const priceNum = Number(formatUnits(price, 18));
         currentPrice = formatUsdPrice(priceNum, true);
 
-        // Confidence interval
         const conf =
           BigInt(priceData.price.conf) *
           10n ** BigInt(18 + priceData.price.expo);
         const confNum = Number(formatUnits(conf, 18));
         confidence = `\u00B1$${confNum < 1 ? confNum.toFixed(4) : confNum.toFixed(2)}`;
 
-        // Publish time
         publishTime = new Date(
           priceData.price.publish_time * 1000
         ).toISOString();
@@ -126,7 +121,6 @@ async function leverUpGetMarketStatsHandler(
       };
     });
 
-    // Get unique categories
     const supportedCategories = [...new Set(markets.map((m) => m.category))];
 
     return {
@@ -136,8 +130,8 @@ async function leverUpGetMarketStatsHandler(
         markets,
         supportedCategories,
         note:
-          "Global Open Interest and Funding Rates are not yet available via public LeverUp API. " +
-          "These metrics will be added when LeverUp exposes them publicly.",
+          "For holding fees and funding rates, use leverup_get_funding_rates. " +
+          "Global Open Interest is not yet available via public LeverUp API.",
       },
     };
   } catch (error) {

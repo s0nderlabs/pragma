@@ -1,5 +1,3 @@
-// Revoke Sub-Agent Tool
-// Revokes a sub-agent's delegation, sweeps balance, and returns wallet to pool
 // Copyright (c) 2026 s0nderlabs
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -55,7 +53,8 @@ export function registerRevokeSubAgent(server: McpServer): void {
     "Revoke a sub-agent's delegation, optionally sweep its balance back to session key, " +
       "and return its wallet to the pool for reuse. " +
       "Use this to stop an autonomous agent and reclaim its resources. " +
-      "DTK automatically invalidates sub-delegations when parent is revoked.",
+      "For on-chain invalidation, use revoke_root_delegation with revocationMode: 'onchain' " +
+      "which cascades to ALL sub-delegations via NonceEnforcer nonce increment.",
     RevokeSubAgentSchema.shape,
     async (
       params
@@ -83,7 +82,6 @@ async function revokeSubAgentHandler(
       };
     }
 
-    // Load sub-agent state
     const state = await loadAgentState(params.subAgentId);
     if (!state) {
       return {
@@ -95,7 +93,6 @@ async function revokeSubAgentHandler(
 
     const previousStatus = state.status;
 
-    // Check if already revoked
     if (state.status === "revoked") {
       return {
         success: false,
@@ -104,14 +101,12 @@ async function revokeSubAgentHandler(
       };
     }
 
-    // Get sub-agent wallet
     const subAgentWallet = await getFullWallet(state.walletId);
     if (!subAgentWallet) {
-      // Wallet not found in Keychain - clean up state and release from pool
       try {
         await releaseWallet(state.walletId);
       } catch {
-        // Pool entry might not exist
+        // Ignore: pool entry may not exist
       }
       await deleteAgentState(params.subAgentId);
 
@@ -127,7 +122,6 @@ async function revokeSubAgentHandler(
       };
     }
 
-    // Get clients
     const chainId = config.network.chainId;
     const rpcUrl = await getRpcUrl(config);
     const chain = buildViemChain(chainId, rpcUrl);
@@ -140,7 +134,6 @@ async function revokeSubAgentHandler(
     let balanceSwept = 0n;
     let sweepTxHash: string | undefined;
 
-    // Sweep balance if requested
     if (params.sweepBalance && subAgentWallet.privateKey) {
       const balanceResult = await withRetry(
         async () => publicClient.getBalance({ address: subAgentWallet.address as Address }),
@@ -154,9 +147,8 @@ async function revokeSubAgentHandler(
           { operationName: "get-gas-price" }
         );
         const gasPrice = gasPriceResult.success ? (gasPriceResult.data ?? 0n) : 0n;
-        const gasCost = gasPrice * 21000n; // Standard transfer gas limit
+        const gasCost = gasPrice * 21000n;
 
-        // Only sweep if balance exceeds gas cost
         if (balance > gasCost) {
           const subAgentAccount = privateKeyToAccount(
             subAgentWallet.privateKey as `0x${string}`
@@ -182,20 +174,15 @@ async function revokeSubAgentHandler(
 
             balanceSwept = sweepAmount;
           } catch (sweepError) {
-            // Log but don't fail - wallet can still be released
             console.error("Failed to sweep balance:", sweepError);
           }
         }
       }
     }
 
-    // Release wallet back to pool
     await releaseWallet(state.walletId);
-
-    // Archive agent state (trade history preserved in ~/.pragma/agents/archive/)
     await deleteAgentState(params.subAgentId);
 
-    // Stop caffeinate if no more active agents
     try {
       const remaining = await listAgentStates();
       const hasActive = remaining.some(
@@ -205,12 +192,12 @@ async function revokeSubAgentHandler(
         stopCaffeinate();
       }
     } catch {
-      // Non-critical
+      // Non-critical: caffeinate cleanup is best-effort
     }
 
     return {
       success: true,
-      message: `Revoked and cleaned up sub-agent ${state.agentType}`,
+      message: `Revoked and cleaned up sub-agent ${state.agentType}.`,
       revocation: {
         subAgentId: params.subAgentId,
         previousStatus,

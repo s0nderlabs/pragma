@@ -90,9 +90,9 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 
 ---
 
-## Tools (46)
+## Tools (47)
 
-### LeverUp Perpetuals (11)
+### LeverUp Perpetuals (12)
 | Tool | Purpose |
 |------|---------|
 | `leverup_list_pairs` | Available trading pairs, prices, spreads |
@@ -100,6 +100,7 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 | `leverup_list_limit_orders` | Pending limit orders |
 | `leverup_get_quote` | Position quote (margin, fees, liq price) |
 | `leverup_get_market_stats` | OI, volume, spread per pair |
+| `leverup_get_funding_rates` | Holding fee rates (carry cost) per pair |
 | `leverup_open_trade` | Open market position |
 | `leverup_close_trade` | Close position |
 | `leverup_update_margin` | Add margin to position |

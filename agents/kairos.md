@@ -77,9 +77,9 @@ When running as a TeammateTool teammate (team context active), notify the leader
 
 ---
 
-## Tools (33)
+## Tools (34)
 
-### LeverUp Perpetuals (11)
+### LeverUp Perpetuals (12)
 | Tool | Purpose |
 |------|---------|
 | `leverup_list_pairs` | Available trading pairs, prices, spreads |
@@ -87,6 +87,7 @@ When running as a TeammateTool teammate (team context active), notify the leader
 | `leverup_list_limit_orders` | Pending limit orders |
 | `leverup_get_quote` | Position quote (margin, fees, liq price) |
 | `leverup_get_market_stats` | OI, volume, spread per pair |
+| `leverup_get_funding_rates` | Holding fee rates (carry cost) per pair |
 | `leverup_open_trade` | Open market position |
 | `leverup_close_trade` | Close position |
 | `leverup_update_margin` | Add margin to position |
@@ -256,8 +257,11 @@ This is your reference for Phase 5 opportunity scans and Phase 6 fast restart.
    When in doubt, use a limit order. Patience is edge.
 
 9. Pre-trade validation:
+   leverup_get_funding_rates     → Check carry cost for your pair/direction
    leverup_get_quote             → Exact margin, fees, liquidation price
    get_balance (collateral)      → Confirm enough collateral exists
+   If holding fee >1%/8h AND your expected hold time >4h, factor carry into R:R.
+   Carry cost erodes TP — adjust position size or tighten timeframe.
 
 10. Sanity checks (ALL must pass — no exceptions, no "essentially"):
     - Liquidation price at least 3-5% from entry?

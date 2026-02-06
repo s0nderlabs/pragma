@@ -5,8 +5,9 @@ CLAUDE.md
 # Dependencies
 node_modules/
 
-# Build
-dist/
+# Build (keep bundled MCP server)
+servers/pragma-mcp/dist/*
+!servers/pragma-mcp/dist/index.js
 .next/
 
 # Environment

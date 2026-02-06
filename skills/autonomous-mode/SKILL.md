@@ -968,13 +968,19 @@ revoke_sub_agent(subAgentId, sweepBalance?)
 - Archives agent state to `~/.pragma/agents/archive/` (trade history preserved)
 - sweepBalance: false (default) keeps gas in wallet for reuse
              true sweeps gas back to session key
+- For on-chain invalidation, use revoke_root_delegation(revocationMode: "onchain")
+  which cascades to ALL sub-delegations via NonceEnforcer nonce increment.
 - Returns wallet to pool for reuse
 ```
 
 ### Revoking Root Delegation
 ```
-revoke_root_delegation(confirm: true)
+revoke_root_delegation(confirm: true, revocationMode?)
 - Revokes root delegation entirely
+- revocationMode: "local" (default) deletes local delegation files only
+                  "onchain" increments NonceEnforcer nonce via UserOp (Touch ID required),
+                  invalidating ALL delegations on-chain, then performs local cleanup.
+                  Use "onchain" if session key may be compromised or for immediate on-chain invalidation.
 - Archives ALL sub-agent states
 - Releases ALL wallets to pool
 - Stops caffeinate
