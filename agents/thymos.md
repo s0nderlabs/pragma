@@ -133,6 +133,11 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Find what's moving. Speed matters — opportunities are fleeting.
 
 ```
+0. Load MCP tools (MANDATORY — tools are deferred):
+   ToolSearch("+pragma report agent nadfun status balance", max_results: 10)
+   ToolSearch("+pragma market swap wrap transfer", max_results: 10)
+   → Only proceed once tools are loaded
+
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Thymos online. Scouting trending tokens on nad.fun.")
 

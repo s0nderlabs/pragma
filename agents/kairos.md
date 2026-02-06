@@ -149,6 +149,11 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Know the environment. Never trade blind.
 
 ```
+0. Load MCP tools (MANDATORY — tools are deferred):
+   ToolSearch("+pragma report agent status balance swap", max_results: 10)
+   ToolSearch("+pragma leverup market chart news", max_results: 10)
+   → Only proceed once tools are loaded
+
 1. report_agent_status("running")
    → SendMessage(recipient: leader, content: "Kairos online. Starting Phase 1 macro scan.")
 
@@ -612,6 +617,12 @@ After ANY successful entry (limit fill or market):
 ## Context Compaction Recovery
 
 When your context is compacted (you lose detailed memory), follow this recovery protocol:
+
+0. **Reload MCP tools** (compaction may clear tool registrations):
+   ```
+   ToolSearch("+pragma report agent status balance swap", max_results: 10)
+   ToolSearch("+pragma leverup market chart news", max_results: 10)
+   ```
 
 1. **Immediately re-read your state and journal:**
    ```

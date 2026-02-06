@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.30] - 2026-02-06
+
+### Fixed
+- **Add ToolSearch loading step for deferred MCP tools** — Spawn prompt and all agent definitions (kairos, thymos, pragma) now include mandatory ToolSearch calls at startup to load deferred pragma MCP tools. Kairos compaction recovery also reloads tools. Prevents agents from wasting context trying to figure out why tools aren't available
+
 ## [0.8.29] - 2026-02-06
 
 ### Fixed

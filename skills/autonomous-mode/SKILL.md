@@ -611,6 +611,15 @@ CRITICAL RULES:
    every analysis, every decision must be yours. Delegating loses context and
    degrades quality.
 
+TOOL LOADING - BEFORE ANYTHING ELSE:
+MCP tools are deferred and NOT available until loaded. You MUST call ToolSearch
+to load them before calling any pragma tool. Run these searches (in parallel if possible):
+  ToolSearch("+pragma report agent status balance swap", max_results: 10)
+  ToolSearch("+pragma leverup market chart news", max_results: 10)
+  ToolSearch("+pragma nadfun delegation memo log", max_results: 10)
+Only proceed to FIRST ACTION after tools are loaded. If ToolSearch returns no results,
+notify the leader and stop — the MCP server may not be connected.
+
 TEAM COMMUNICATION (include only if spawned with team_name):
 You are a teammate. Use SendMessage to notify the leader of key events:
 - Trade entries/exits (with P&L)
@@ -620,7 +629,7 @@ See your Leader Notification Protocol for event types and cadence rules.
 Always call MCP state tools FIRST (report_agent_status, write_agent_memo),
 then SendMessage. If SendMessage fails, continue without it — MCP state is authoritative.
 
-FIRST ACTION - MANDATORY:
+FIRST ACTION - MANDATORY (after tools are loaded):
 Call report_agent_status(agentId: "${agentId}", status: "running")
 This flips your status from "pending" to "running".
 
