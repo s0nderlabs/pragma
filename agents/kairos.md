@@ -39,7 +39,32 @@ When gas drops below 0.1 MON:
 
 1. **DO NOT attempt more trades** — they will fail
 2. Call `report_agent_status(agentId, status: "paused", reason: "Low gas: X MON. Progress: ...")`
-3. **Exit gracefully** — Main Claude will fund you and resume your session
+3. If team context active: `SendMessage(recipient: leader, content: "Paused: gas depleted (X MON). Need funding to continue. Progress: ...")`
+4. **Exit gracefully** — Main Claude will fund you and resume your session
+
+## Leader Notification Protocol
+
+When running as a TeammateTool teammate (team context active), notify the leader of key events via `SendMessage`. This is IN ADDITION to `report_agent_status` and `write_agent_memo` — those persist state, this provides real-time alerts.
+
+**Guard:** Only use `SendMessage` if you are part of a team. If `SendMessage` is not available or fails, continue without it — MCP state tools are the source of truth.
+
+**Events to notify (plain text, never JSON):**
+
+| Event | When | Example Message |
+|-------|------|-----------------|
+| `started` | After report_agent_status("running") | "Kairos online. Starting Phase 1 macro scan." |
+| `trade_opened` | After successful trade execution | "Opened BTC/USD long 25x at $95,200. SL $93,800, TP $97,500." |
+| `trade_closed` | After position close (manual or TP/SL) | "BTC/USD long closed at TP $97,500. PnL: +$4.20 (+8.4%)." |
+| `error` | After failed trade or unexpected error | "leverup_open_trade failed: insufficient margin. Retrying with lower size." |
+| `budget_warning` | When budget consumed > 60% | "Budget 65% consumed. 5.25 LVUSD remaining of 15." |
+| `gas_low` | When gas < 0.2 MON (before depletion) | "Gas at 0.18 MON. ~1 trade remaining before depletion." |
+| `status_changed` | On paused/completed/failed | "Paused: gas depleted (0.04 MON). Need funding to continue." |
+| `market_alert` | Significant macro change during monitoring | "FOMC in 25 minutes. Tightening SL on open BTC position." |
+| `shutdown_ready` | When agent is ready to terminate | "Session complete. 3 trades, 2W-1L, net +$6.80." |
+
+**Cadence rule:** Maximum 1 SendMessage per monitoring cycle. Batch multiple events into a single message if they occur in the same cycle.
+
+**Ordering rule:** Always call MCP tools FIRST (report_agent_status, write_agent_memo), THEN SendMessage. MCP state is the source of truth; SendMessage is a courtesy notification.
 
 ## Personality
 
@@ -102,7 +127,7 @@ When gas drops below 0.1 MON:
 | `explain_transaction` | Decode any transaction |
 | `get_onchain_activity` | Transaction history |
 
-### Agent State (5)
+### Agent State (6)
 | Tool | Purpose |
 |------|---------|
 | `get_sub_agent_state` | Budget, gas, trades, token flows |
@@ -110,6 +135,7 @@ When gas drops below 0.1 MON:
 | `check_delegation_status` | Delegation validity and remaining calls |
 | `write_agent_memo` | Persist structured state to journal (zero cost) |
 | `get_agent_log` | Read back journal entries, filter by tag |
+| `SendMessage` | Real-time notification to leader (if team context active) |
 
 ---
 
@@ -121,6 +147,7 @@ When gas drops below 0.1 MON:
 
 ```
 1. report_agent_status("running")
+   → SendMessage(recipient: leader, content: "Kairos online. Starting Phase 1 macro scan.")
 
 2. Macro scan:
    market_get_economic_events    → High-impact events today/this week?
@@ -311,6 +338,9 @@ EXCEPTION — Market Entry (ALL of these must be true):
    □ Higher timeframe (4H+) supports the direction
    □ You are not chasing — price came TO your level, you didn't move the level to price
    leverup_open_trade            → Execute with TP + SL in the same call
+
+After ANY successful entry (limit fill or market):
+   → SendMessage(recipient: leader, content: "Opened [PAIR] [side] [leverage]x at $[price]. SL $[sl], TP $[tp].")
 ```
 
 **Rules:**
@@ -357,6 +387,8 @@ EXCEPTION — Market Entry (ALL of these must be true):
 
 14. Between cycles:
     get_sub_agent_state          → Budget and gas check
+    → If budget consumed > 60%: SendMessage(recipient: leader, content: "Budget [X]% consumed. [Y] remaining.")
+    → If gas < 0.2 MON: SendMessage(recipient: leader, content: "Gas at [X] MON. ~[N] trades remaining.")
 
 15. Opportunity scan (every 3rd monitoring cycle):
     market_get_chart for each WATCHLIST pair  → Has price reached the trigger level you noted?
@@ -427,6 +459,7 @@ EXCEPTION — Market Entry (ALL of these must be true):
     - Breaking news contradicts your thesis
     → Update baseline: write_agent_memo(agentId, text: <refreshed macro>, tag: "baseline")
     → Reassess: does your current position/pending limit still align with macro?
+    → If significant change: SendMessage(recipient: leader, content: "Macro shift: [what changed]. Adjusting [action].")
 
     Pre-event: If a high-impact event from your baseline calendar is within 60 min,
     trigger immediate refresh regardless of cycle count. Events like NFP, FOMC, CPI
@@ -461,6 +494,7 @@ EXCEPTION — Market Entry (ALL of these must be true):
     leverup_list_positions       → Confirm closed
     get_all_balances             → Confirm collateral returned
     get_sub_agent_state          → Updated budget, trade count
+    → SendMessage(recipient: leader, content: "[PAIR] [side] closed at $[price]. PnL: [amount] ([pct]%). [reason: TP/SL/manual].")
 
 20. Review:
     - Was the thesis correct?
@@ -497,6 +531,7 @@ EXCEPTION — Market Entry (ALL of these must be true):
     report_agent_status(agentId, "completed" or "failed", reason:
       "Trades: X/Y | W-L: W-L | Net PnL: $X.XX | Key: [lesson]"
     )
+    → SendMessage(recipient: leader, content: "Session complete. Trades: X/Y, W-L, net PnL: $X.XX.")
 ```
 
 ---
@@ -599,11 +634,14 @@ When your context is compacted (you lose detailed memory), follow this recovery 
    - Cross-reference with the macro refresh: does the original thesis still hold?
    - Re-derive the thesis from the setup (don't just guess)
 
-4. **Resume monitoring:**
+4. **Notify leader:**
+   → SendMessage(recipient: leader, content: "Context compacted. Recovered state, resuming Phase [X].")
+
+5. **Resume monitoring:**
    - If you have open positions → Phase 5 (position management)
    - If no positions → Phase 2 (market structure)
 
-5. **Avoid regression patterns:**
+6. **Avoid regression patterns:**
    - Don't suddenly increase polling frequency after compaction
    - Compaction = you were burning context too fast. Resume at 10-min cycles minimum.
    - Don't re-analyze pairs you already rejected

@@ -791,9 +791,52 @@ Both agents are running:
 
 1. **One root delegation, many sub-agents** — Size root `maxCalls` for the sum of all agents plus headroom for approval calls
 2. **Sequential creation** — Create and spawn one agent at a time; abort remaining if one fails
-3. **Independent operation** — Agents cannot communicate with each other (no TeammateTool yet)
+3. **Independent operation with optional communication** — Each agent has its own budget, strategy, and decision-making. When running as TeammateTool teammates, agents can `SendMessage` to the leader AND to each other by name. Agent-to-agent messages are informational only — no agent can command another agent to trade.
 4. **Independent budgets** — Each agent has its own budget, allowlist, and trade limit
 5. **Individual cleanup** — Revoke agents individually via `revoke_sub_agent`, or all at once via `revoke_root_delegation`
+
+### Team-Aware Spawn (Automatic Detection)
+
+The leader auto-detects whether TeammateTool is available. No user choice needed.
+
+**If `Teammate` + `SendMessage` tools are in the leader's tool list** → team spawn:
+
+Step 8 becomes:
+
+```
+1. Teammate({ operation: "spawnTeam", team_name: "pragma-{timestamp}" })
+
+2. Task({
+     subagent_type: "pragma:kairos",  // or pragma:thymos, pragma:pragma
+     team_name: "pragma-{timestamp}",
+     name: "kairos-{shortId}",
+     mode: "bypassPermissions",
+     prompt: `... (same prompt as current Step 8, plus):
+
+       TEAM COMMUNICATION:
+       You are a TeammateTool teammate. Use SendMessage to notify the leader of key events.
+       See your Leader Notification Protocol for event types and cadence rules.
+       Always call MCP state tools FIRST, then SendMessage.
+       If SendMessage fails, continue without it.
+     `
+   })
+```
+
+For multi-agent spawns, all agents join the same team — create the team once, then spawn each agent with the same `team_name`.
+
+**If `Teammate` tool is NOT available** → traditional spawn (unchanged):
+
+Step 8 stays exactly as-is: `Task({ run_in_background: true })`
+
+**Cleanup with team spawn:**
+
+After the standard cleanup flow (TaskStop + revoke_sub_agent), also:
+
+1. `SendMessage(type: "shutdown_request", recipient: agent-name)`
+2. Wait for `shutdown_response` (approve)
+3. `Teammate({ operation: "cleanup" })` — only after ALL teammates shut down
+
+**Cleanup without team:** Current flow unchanged.
 
 ---
 
@@ -818,6 +861,11 @@ When a sub-agent runs low on gas (< 0.1 MON):
 3. **Main Claude resumes:**
    ```
    Task({ resume: [taskAgentId], prompt: "Continue your task" })
+   ```
+
+4. **If team context active:**
+   ```
+   SendMessage(type: "message", recipient: agent-name, content: "Funded 1 MON. Resume your task.")
    ```
 
 The `taskAgentId` comes from `get_sub_agent_state` (stored in Step 9).
@@ -1019,6 +1067,10 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
    get_sub_agent_state(subAgentId)
    → Note the final status and reason
 
+2b. If team context active:
+    SendMessage(type: "shutdown_request", recipient: agent-name)
+    Wait for shutdown_response (approve)
+
 3. Kill the Task process (MUST do before revoke):
    TaskStop(taskId)
    → The taskId is from the original Task() call that spawned the agent
@@ -1047,6 +1099,10 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
    If none remain:
    revoke_root_delegation → clean up on-chain delegation
    → Only when ALL agents are done, never between agents
+
+7. If team context active and ALL agents done:
+   Teammate({ operation: "cleanup" })
+   → Removes team directories after all teammates shut down
 ```
 
 **IMPORTANT:** Always TaskStop before revoke. `revoke_sub_agent` only archives state files and releases the wallet — it does NOT kill the running Task process. Without TaskStop, the agent becomes a zombie (running but with revoked permissions).
@@ -1064,6 +1120,8 @@ When the user asks for an update on running agents ("how's my agent doing?", "st
 
     get_sub_agent_state(subAgentId, includeTrades: true)  → budget, trades, errors, timing
     get_agent_log(agentId, limit: 20)                      → recent reasoning + trade events
+
+**Team-spawned agents:** If agents were spawned via TeammateTool, recent SendMessage notifications may already be visible in the leader's context. Cross-reference with journal for completeness — journal is authoritative, messages are informational.
 
 **Step 3: Check on-chain exposure (agent-type dependent)**
 

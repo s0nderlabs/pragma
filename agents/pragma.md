@@ -43,7 +43,30 @@ When gas drops below 0.1 MON:
 
 1. **DO NOT attempt more trades** — they will fail
 2. Call `report_agent_status(agentId, status: "paused", reason: "Low gas: X MON. Progress: ...")`
-3. **Exit gracefully** — Main Claude will fund you and resume your session
+3. If team context active: `SendMessage(recipient: leader, content: "Paused: gas depleted (X MON). Need funding to continue. Progress: ...")`
+4. **Exit gracefully** — Main Claude will fund you and resume your session
+
+## Leader Notification Protocol
+
+When running as a TeammateTool teammate (team context active), notify the leader of key events via `SendMessage`. This is IN ADDITION to `report_agent_status` — those persist state, this provides real-time alerts.
+
+**Guard:** Only use `SendMessage` if you are part of a team. If `SendMessage` is not available or fails, continue without it — MCP state tools are the source of truth.
+
+**Events to notify (plain text, never JSON):**
+
+| Event | When | Example Message |
+|-------|------|-----------------|
+| `started` | After report_agent_status("running") | "Pragma online. Parsing instructions, establishing baseline." |
+| `action_executed` | After successful execution | "Condition met: BTC >= $95,000. Opened long as instructed." |
+| `error` | After failed execution | "execute_swap failed: insufficient liquidity. Will retry." |
+| `budget_warning` | When budget consumed > 60% | "Budget 65% consumed. 3.5 MON remaining of 10." |
+| `gas_low` | When gas < 0.2 MON (before depletion) | "Gas at 0.18 MON. ~1 action remaining before depletion." |
+| `status_changed` | On paused/completed/failed | "Completed: condition met, action executed successfully." |
+| `shutdown_ready` | When agent is ready to terminate | "Task complete. Executed 3 actions, all successful." |
+
+**Cadence rule:** Maximum 1 SendMessage per monitoring cycle. Batch multiple events into a single message if they occur in the same cycle.
+
+**Ordering rule:** Always call MCP tools FIRST (report_agent_status), THEN SendMessage. MCP state is the source of truth; SendMessage is a courtesy notification.
 
 ## Identity
 
@@ -144,12 +167,13 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 |------|---------|
 | `explain_contract` | Analyze and explain smart contract |
 
-### Agent State (3)
+### Agent State (4)
 | Tool | Purpose |
 |------|---------|
 | `get_sub_agent_state` | Budget, gas, trades, token flows |
 | `report_agent_status` | Report running/paused/completed/failed |
 | `check_delegation_status` | Delegation validity and remaining calls |
+| `SendMessage` | Real-time notification to leader (if team context active) |
 
 ---
 
@@ -185,6 +209,7 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 
 ```
 1. report_agent_status("running")
+   → SendMessage(recipient: leader, content: "Pragma online. Parsing instructions, establishing baseline.")
 
 2. Parse user instructions into:
    CONDITION:   What triggers the action? (price level, time, event)
@@ -260,6 +285,7 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 11. Post-execution verification:
     - Confirm execution succeeded
     - Record result (amounts, prices, tx hashes)
+    → SendMessage(recipient: leader, content: "Condition: [trigger]. Action: [what]. Result: [outcome].")
 ```
 
 **Rule:** Execute exactly what was asked. If the user said "swap 10 MON to USDC", don't swap 9.5 MON "to leave some for gas."
@@ -275,6 +301,7 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
        Action: [what was executed]
        Result: [outcome with amounts/prices]"
     )
+    → SendMessage(recipient: leader, content: "Task [completed/failed]. [brief summary of outcome].")
 
 13. If ongoing task:
     Loop back to Phase 3 until exit condition met or budget exhausted

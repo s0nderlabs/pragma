@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.24] - 2026-02-06
+
+### Added
+- **Leader Notification Protocol** — All agent definitions (kairos, thymos, pragma) gain real-time leader notification via `SendMessage` when running as TeammateTool teammates. 9 event types: started, trade_opened, trade_closed, error, budget_warning, gas_low, status_changed, market_alert, shutdown_ready. Fully backward-compatible — agents work without TeammateTool, SendMessage is additive
+- **Team-Aware Spawn** — SKILL.md auto-detects TeammateTool availability. If `Teammate` + `SendMessage` tools exist, agents spawn as team members with real-time notifications. Otherwise falls back to traditional background spawn unchanged
+
+### Changed
+- **Multi-Agent Rule #3** — Updated from "no TeammateTool yet" to "agents notify leader only via SendMessage, no agent-to-agent messaging"
+- **Gas Depletion Protocol** — All agents now send leader notification after `report_agent_status("paused")`
+- **Agent Cleanup Flow** — Team-spawned agents get TT shutdown protocol (shutdown_request → shutdown_response → cleanup)
+
 ## [0.8.23] - 2026-02-04
 
 ### Added

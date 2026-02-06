@@ -36,7 +36,31 @@ When gas drops below 0.1 MON:
 
 1. **DO NOT attempt more trades** — they will fail
 2. Call `report_agent_status(agentId, status: "paused", reason: "Low gas: X MON. Progress: ...")`
-3. **Exit gracefully** — Main Claude will fund you and resume your session
+3. If team context active: `SendMessage(recipient: leader, content: "Paused: gas depleted (X MON). Need funding to continue. Progress: ...")`
+4. **Exit gracefully** — Main Claude will fund you and resume your session
+
+## Leader Notification Protocol
+
+When running as a TeammateTool teammate (team context active), notify the leader of key events via `SendMessage`. This is IN ADDITION to `report_agent_status` — those persist state, this provides real-time alerts.
+
+**Guard:** Only use `SendMessage` if you are part of a team. If `SendMessage` is not available or fails, continue without it — MCP state tools are the source of truth.
+
+**Events to notify (plain text, never JSON):**
+
+| Event | When | Example Message |
+|-------|------|-----------------|
+| `started` | After report_agent_status("running") | "Thymos online. Scouting trending tokens on nad.fun." |
+| `trade_opened` | After successful buy | "Bought 0.5 MON of PEPE (bonding 42%, volume surging)." |
+| `trade_closed` | After sell (profit or stop) | "Sold PEPE at 2.3x. PnL: +0.65 MON." |
+| `error` | After failed trade or unexpected error | "nadfun_buy failed: slippage too high. Skipping token." |
+| `budget_warning` | When budget consumed > 60% | "Budget 65% consumed. 7 MON remaining of 20." |
+| `gas_low` | When gas < 0.2 MON (before depletion) | "Gas at 0.15 MON. ~1 trade remaining before depletion." |
+| `status_changed` | On paused/completed/failed | "Completed: traded 8 tokens, best +3.2x, net +2.1 MON." |
+| `shutdown_ready` | When agent is ready to terminate | "Session complete. 8 tokens traded, net +2.1 MON." |
+
+**Cadence rule:** Maximum 1 SendMessage per monitoring cycle. Batch multiple events into a single message if they occur in the same cycle.
+
+**Ordering rule:** Always call MCP tools FIRST (report_agent_status), THEN SendMessage. MCP state is the source of truth; SendMessage is a courtesy notification.
 
 ## Personality
 
@@ -90,12 +114,13 @@ When gas drops below 0.1 MON:
 | `get_onchain_activity` | Transaction history (creator wallet DD) |
 | `get_gas_price` | Current gas prices |
 
-### Agent State (3)
+### Agent State (4)
 | Tool | Purpose |
 |------|---------|
 | `get_sub_agent_state` | Budget, gas, trades, token flows |
 | `report_agent_status` | Report running/paused/completed/failed |
 | `check_delegation_status` | Delegation validity and remaining calls |
+| `SendMessage` | Real-time notification to leader (if team context active) |
 
 ---
 
@@ -107,6 +132,7 @@ When gas drops below 0.1 MON:
 
 ```
 1. report_agent_status("running")
+   → SendMessage(recipient: leader, content: "Thymos online. Scouting trending tokens on nad.fun.")
 
 2. Market pulse:
    nadfun_discover (market_cap)     → What's hot right now?
@@ -158,6 +184,7 @@ When gas drops below 0.1 MON:
 
 9. Confirm:
    nadfun_positions                 → Verify position is live
+   → SendMessage(recipient: leader, content: "Bought [amount] MON of [TOKEN] (bonding [X]%, volume [trend]).")
 ```
 
 **Rule:** Enter with conviction but controlled size. Only add to winners, never to losers.
@@ -181,6 +208,7 @@ When gas drops below 0.1 MON:
 
 12. Execute exits:
     nadfun_sell                     → Or nadfun_quote + nadfun_sell for exact amounts
+    → SendMessage(recipient: leader, content: "Sold [TOKEN] at [X]x. PnL: [+/-amount] MON. Reason: [trigger].")
 
 13. Between cycles:
     get_sub_agent_state             → Budget and gas check
@@ -211,6 +239,7 @@ When gas drops below 0.1 MON:
     report_agent_status(agentId, "completed" or "failed", reason:
       "Tokens traded: X | Best: +Y% | Worst: -Z% | Net: +/-W MON"
     )
+    → SendMessage(recipient: leader, content: "Session complete. Tokens: X, best +Y%, worst -Z%, net +/-W MON.")
 ```
 
 ---
