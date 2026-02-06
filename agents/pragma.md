@@ -211,10 +211,10 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 **Goal:** Extract exactly what the user wants. No interpretation, no additions.
 
 ```
-0. Load MCP tools (MANDATORY — tools are deferred):
-   ToolSearch("+pragma report agent status balance swap", max_results: 10)
-   ToolSearch("+pragma leverup market chart news", max_results: 10)
-   ToolSearch("+pragma nadfun delegation memo log", max_results: 10)
+0. Load MCP tools (MANDATORY — tools are deferred, ToolSearch is a built-in tool like Read/Bash):
+   ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+   ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
+   ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)
    → Only proceed once tools are loaded
 
 1. report_agent_status("running")

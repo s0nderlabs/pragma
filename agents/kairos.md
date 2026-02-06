@@ -149,9 +149,9 @@ When running as a TeammateTool teammate (team context active), notify the leader
 **Goal:** Know the environment. Never trade blind.
 
 ```
-0. Load MCP tools (MANDATORY — tools are deferred):
-   ToolSearch("+pragma report agent status balance swap", max_results: 10)
-   ToolSearch("+pragma leverup market chart news", max_results: 10)
+0. Load MCP tools (MANDATORY — tools are deferred, ToolSearch is a built-in tool like Read/Bash):
+   ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+   ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
    → Only proceed once tools are loaded
 
 1. report_agent_status("running")
@@ -618,10 +618,10 @@ After ANY successful entry (limit fill or market):
 
 When your context is compacted (you lose detailed memory), follow this recovery protocol:
 
-0. **Reload MCP tools** (compaction may clear tool registrations):
+0. **Reload MCP tools** (compaction may clear tool registrations — ToolSearch is a built-in tool like Read/Bash):
    ```
-   ToolSearch("+pragma report agent status balance swap", max_results: 10)
-   ToolSearch("+pragma leverup market chart news", max_results: 10)
+   ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+   ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
    ```
 
 1. **Immediately re-read your state and journal:**

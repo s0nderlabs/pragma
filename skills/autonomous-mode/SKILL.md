@@ -612,11 +612,12 @@ CRITICAL RULES:
    degrades quality.
 
 TOOL LOADING - BEFORE ANYTHING ELSE:
-MCP tools are deferred and NOT available until loaded. You MUST call ToolSearch
-to load them before calling any pragma tool. Run these searches (in parallel if possible):
-  ToolSearch("+pragma report agent status balance swap", max_results: 10)
-  ToolSearch("+pragma leverup market chart news", max_results: 10)
-  ToolSearch("+pragma nadfun delegation memo log", max_results: 10)
+MCP tools are deferred and NOT available until loaded. ToolSearch is a BUILT-IN
+Claude Code tool (like Read or Bash) — call it directly as a tool, NOT via bash
+or web search. Run these tool calls (in parallel if possible):
+  ToolSearch(query: "+pragma report agent status balance swap", max_results: 10)
+  ToolSearch(query: "+pragma leverup market chart news", max_results: 10)
+  ToolSearch(query: "+pragma nadfun delegation memo log", max_results: 10)
 Only proceed to FIRST ACTION after tools are loaded. If ToolSearch returns no results,
 notify the leader and stop — the MCP server may not be connected.
 
