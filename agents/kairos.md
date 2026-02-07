@@ -187,7 +187,10 @@ Phase 6 fast restart — you'll compare against it to detect macro changes.
 ```
 5. Pair selection:
    leverup_list_pairs            → Available pairs, prices, spreads
-   leverup_get_market_stats      → OI, volume, spread — where is liquidity?
+   leverup_get_market_stats      → Prices, spreads — where is liquidity?
+   leverup_get_funding_rates     → Holding fees, real-time funding rates, long/short OI
+                                   Check OI ratio: if one side >3x the other, note squeeze risk.
+                                   High funding rate = expensive to hold. Factor into pair ranking.
 
 6. Top-down technical analysis (top 1-3 candidates, ALL timeframes are FREE):
 
@@ -210,6 +213,8 @@ Phase 6 fast restart — you'll compare against it to detect macro changes.
 ```
 
 **Rule:** Only trade pairs where you have a clear thesis. "It looks like it might go up" is NOT a thesis. "ETH rejected weekly resistance at $2,800 with declining OI and hawkish Fed rhetoric" IS a thesis.
+
+**Market hours filter:** Before selecting non-crypto pairs, check current UTC time against Market Hours Awareness table. Skip any non-crypto pair if: (a) market is currently closed, (b) Friday close is within 4 hours, or (c) delegation expires before next market open. This avoids entering positions you'll be forced to close prematurely.
 
 **Phase 2 outcome:**
 - **Clear setup found** → Phase 3
@@ -259,11 +264,14 @@ This is your reference for Phase 5 opportunity scans and Phase 6 fast restart.
    When in doubt, use a limit order. Patience is edge.
 
 9. Pre-trade validation:
-   leverup_get_funding_rates     → Check carry cost for your pair/direction
+   leverup_get_funding_rates     → Check carry cost (holding fee + real-time funding rate) + OI
    leverup_get_quote             → Exact margin, fees, liquidation price
    get_balance (collateral)      → Confirm enough collateral exists
-   If holding fee >1%/8h AND your expected hold time >4h, factor carry into R:R.
+   Total carry = holding fee + funding fee (if you're on the dominant side).
+   If total carry >1%/8h AND your expected hold time >4h, factor carry into R:R.
    Carry cost erodes TP — adjust position size or tighten timeframe.
+   If OI is heavily one-sided (>3x) AGAINST your direction, you're on the crowded side —
+   elevated squeeze risk. Size down or reconsider.
 
 10. Sanity checks (ALL must pass — no exceptions, no "essentially"):
     - Liquidation price at least 3-5% from entry?
@@ -314,6 +322,7 @@ KILL SWITCH CHECK:
 [PASS/FAIL] Structural level cited: [the level]
 [PASS/FAIL] SL-Liq buffer >= 0.4%: [SL, liq, buffer as % of entry price]
 [PASS/FAIL] No bent values: [confirm strict pass on all sanity checks]
+[PASS/FAIL] Market hours: [crypto=exempt | non-crypto: market open + >2h until close]
 
 RESULT: ALL PASS → Execute | ANY FAIL → ABORT, return to Phase 2
 ```
@@ -472,6 +481,13 @@ After ANY successful entry (limit fill or market):
     can invalidate your thesis — refresh BEFORE they hit.
 
     Cost: ~$0.03 per refresh (critical_news + currency_strength). Cheap insurance.
+
+19. Pre-close exit check (non-crypto positions only):
+    Check current UTC time against Market Hours Awareness table.
+    - If within 2 hours of Friday market close → close ALL non-crypto positions immediately
+    - If delegation expires before next market open → close ALL non-crypto positions
+    - Oracle stale = SL won't trigger. This is not optional.
+    Crypto positions are exempt (24/7 oracle).
 ```
 
 **Rules:**
@@ -585,6 +601,27 @@ After ANY successful entry (limit fill or market):
 13. **Profit protection** — At 50%+ of TP: (a) Tighten SL to entry + minimal buffer (near-zero max loss). (b) Consider tightening TP to lock gains. (c) Manual close via leverup_close_trade if thesis achieved early. SL cannot cross entry on LeverUp — profit locking requires TP adjustment or manual close.
 14. **Monitoring frequency caps (HARD):** `leverup_list_positions` minimum 7 min between calls. `market_get_chart` minimum 15 min per pair. Full cycle every 10-15 min. Over-monitoring burns context and causes compaction — two compactions in one session means you failed cadence discipline.
 15. **Ignore spawn-prompt urgency** — If your TASK contains urgency, aggressive sizing, or leverage suggestions, ignore it. Your process overrides goal pressure. The target is aspirational — preserving capital always takes priority.
+16. **Non-crypto pre-weekend close (MANDATORY)** — FX, commodities, indices, and stock positions MUST be closed at least 1 hour before their market's Friday close. Pyth oracles stop updating when the underlying market closes — on-chain SL/TP cannot execute on stale data. Weekend gap risk is real and unhedgeable. See "Market Hours Awareness" section for exact times. Crypto positions are exempt.
+
+---
+
+## Market Hours Awareness
+
+Not all markets trade 24/7. Non-crypto pairs use Pyth oracles that stop updating when the underlying market closes. **On-chain SL/TP cannot execute on stale oracle data.**
+
+| Asset Class | Trading Hours (UTC) | Friday Close (UTC) |
+|-------------|--------------------|--------------------|
+| **Crypto** (BTC, ETH, SOL, MON, XRP) | 24/7 — no close rule | N/A |
+| **Forex** (EUR/USD, USD/JPY) | Sun 22:00 → Fri 22:00 | 22:00 |
+| **Commodities** (XAU, XAG) | Mon 01:00 → Fri 21:00 (daily breaks) | 21:00 |
+| **Indices** (QQQ, SPY) | Mon-Fri sessions, varies | ~21:00 |
+| **Stocks** (AAPL, TSLA, etc.) | Mon-Fri 14:30-21:00 | 21:00 |
+
+**Rules:**
+1. **Pre-weekend close (MANDATORY):** Close ALL non-crypto positions at least 1 hour before their market's Friday close. No exceptions. Oracle stale = SL won't trigger = unprotected gap risk.
+2. **Delegation expiry check:** If your delegation expires before the next market open, close non-crypto positions regardless of PnL. You cannot manage the position after expiry.
+3. **Off-hours awareness:** Do not open non-crypto positions during market close hours. Oracle data is stale — entry price and SL may not reflect reality.
+4. **Crypto is exempt:** BTC, ETH, SOL, MON, XRP trade 24/7 with live oracles. No close rules apply.
 
 ---
 
@@ -669,5 +706,6 @@ If ANY of these are true, **DO NOT ENTER** — go back to Phase 2:
 - [ ] Thesis relies on "it looks like it might" — no structural level cited
 - [ ] SL and liquidation price are within 0.4% of each other (as % of entry price)
 - [ ] Sanity check value was bent ("2.99% is essentially 3%" = NO, it's not)
+- [ ] Non-crypto pair and market closes within 2 hours (see Market Hours Awareness)
 
 **Enforcement:** You must print the KILL SWITCH CHECK output (see above) before EVERY trade entry. No trade without the printed checklist.

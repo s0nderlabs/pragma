@@ -42,7 +42,7 @@ export function registerLeverUpGetMarketStats(server: McpServer): void {
     "leverup_get_market_stats",
     "Get current market prices and stats for LeverUp trading pairs. " +
       "Returns real-time Pyth oracle prices for all supported markets (crypto, stocks, forex, commodities). " +
-      "NOTE: For holding fees and funding rates, use leverup_get_funding_rates. Global OI not yet available.",
+      "For holding fees, funding rates, and open interest, use leverup_get_funding_rates.",
     LeverUpGetMarketStatsSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await leverUpGetMarketStatsHandler(
@@ -59,7 +59,6 @@ async function leverUpGetMarketStatsHandler(
   params: z.infer<typeof LeverUpGetMarketStatsSchema>
 ): Promise<LeverUpGetMarketStatsResult> {
   try {
-    // Filter pairs if symbol specified
     let pairs = SUPPORTED_PAIRS;
     if (params.symbol) {
       const normalized = params.symbol.toUpperCase().trim();
@@ -130,8 +129,7 @@ async function leverUpGetMarketStatsHandler(
         markets,
         supportedCategories,
         note:
-          "For holding fees and funding rates, use leverup_get_funding_rates. " +
-          "Global Open Interest is not yet available via public LeverUp API.",
+          "For holding fees, funding rates, and open interest (long/short OI), use leverup_get_funding_rates.",
       },
     };
   } catch (error) {

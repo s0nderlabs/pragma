@@ -231,6 +231,23 @@ export const ACC_FUNDING_ABI = [
   },
 ] as const;
 
+export const MARKET_INFO_ABI = [
+  {
+    type: "function",
+    name: "getMarketInfo",
+    inputs: [{ type: "address", name: "pairBase" }],
+    outputs: [
+      { type: "address", name: "pairBase" },
+      { type: "uint256", name: "longQty" },
+      { type: "uint256", name: "shortQty" },
+      { type: "uint256", name: "longNotional" },
+      { type: "uint256", name: "shortNotional" },
+      { type: "int256", name: "currentFundingFeePerSec" },
+    ],
+    stateMutability: "view",
+  },
+] as const;
+
 export const PYTH_ABI = [
   {
     name: "getUpdateFee",

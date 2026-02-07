@@ -14,6 +14,7 @@ import {
   LIMIT_ORDER_READER_ABI,
   HOLDING_FEE_ABI,
   ACC_FUNDING_ABI,
+  MARKET_INFO_ABI,
   SUPPORTED_PAIRS,
   LIQUIDATION_LOSS_RATE,
   DEGEN_MODE_LEVERAGE_OPTIONS,
@@ -28,6 +29,7 @@ import type {
   LeverUpQuote,
   LimitOrderQuote,
   PairFundingData,
+  PairMarketInfo,
 } from "./types.js";
 import { fetchPythPriceData } from "./pyth-client.js";
 import { withRetryOrThrow } from "../utils/retry.js";
@@ -360,6 +362,65 @@ function determineFundingDirection(acc: bigint): "longs pay" | "shorts pay" | "n
   return "neutral";
 }
 
+function parseMarketInfo(raw: unknown): PairMarketInfo {
+  const arr = raw as readonly [Address, bigint, bigint, bigint, bigint, bigint];
+  return {
+    longQty: arr[1],
+    shortQty: arr[2],
+    currentFundingFeePerSec: arr[5],
+  };
+}
+
+function formatFundingRate(perSecond: bigint, seconds: bigint): string {
+  const periodRate = perSecond * seconds;
+  const abs = periodRate < 0n ? -periodRate : periodRate;
+  const sign = periodRate < 0n ? "-" : "+";
+  return `${sign}${(Number(abs) / 1e18 * 100).toFixed(4)}%`;
+}
+
+function formatMarketInfo(info: PairMarketInfo): NonNullable<PairFundingData["marketInfo"]> {
+  const { longQty, shortQty, currentFundingFeePerSec } = info;
+
+  const longFormatted = formatUnits(longQty, 10);
+  const shortFormatted = formatUnits(shortQty, 10);
+
+  let oiRatio: string;
+  let dominantSide: "longs" | "shorts" | "balanced";
+
+  if (longQty === 0n && shortQty === 0n) {
+    oiRatio = "0:0";
+    dominantSide = "balanced";
+  } else if (shortQty === 0n) {
+    oiRatio = "100% longs";
+    dominantSide = "longs";
+  } else if (longQty === 0n) {
+    oiRatio = "100% shorts";
+    dominantSide = "shorts";
+  } else {
+    const ratio = Number(longQty) / Number(shortQty);
+    if (ratio > 1.1) {
+      oiRatio = `${ratio.toFixed(2)}:1 long-heavy`;
+      dominantSide = "longs";
+    } else if (ratio < 0.9) {
+      oiRatio = `1:${(1 / ratio).toFixed(2)} short-heavy`;
+      dominantSide = "shorts";
+    } else {
+      oiRatio = `${ratio.toFixed(2)}:1 balanced`;
+      dominantSide = "balanced";
+    }
+  }
+
+  return {
+    longQty: longFormatted,
+    shortQty: shortFormatted,
+    oiRatio,
+    dominantSide,
+    currentFundingRate8h: formatFundingRate(currentFundingFeePerSec, 28800n),
+    currentFundingRate1h: formatFundingRate(currentFundingFeePerSec, 3600n),
+    fundingRateDirection: determineFundingDirection(currentFundingFeePerSec),
+  };
+}
+
 export async function getFundingRates(
   symbol?: string
 ): Promise<PairFundingData[]> {
@@ -391,7 +452,7 @@ export async function getFundingRates(
   const settled = await Promise.all(
     pairs.map(async (pairMetadata): Promise<PairFundingData | null> => {
       try {
-        const [longRate, shortRate, accFunding] = await Promise.all([
+        const [longRate, shortRate, accFunding, marketInfoRaw] = await Promise.all([
           withRetryOrThrow(
             async () =>
               client.readContract({
@@ -422,13 +483,23 @@ export async function getFundingRates(
               }),
             { operationName: `acc-funding-${pairMetadata.pair}` }
           ),
+          withRetryOrThrow(
+            async () =>
+              client.readContract({
+                address: LEVERUP_DIAMOND,
+                abi: MARKET_INFO_ABI,
+                functionName: "getMarketInfo",
+                args: [pairMetadata.pairBase as Address],
+              }),
+            { operationName: `market-info-${pairMetadata.pair}` }
+          ).catch(() => null),
         ]);
 
         const longPerSecond = longRate as bigint;
         const shortPerSecond = shortRate as bigint;
         const accFundingValue = accFunding as bigint;
 
-        return {
+        const result: PairFundingData = {
           symbol: pairMetadata.pair,
           category: pairMetadata.category,
           pairBase: pairMetadata.pairBase,
@@ -447,6 +518,13 @@ export async function getFundingRates(
           accumulatedFunding: accFundingValue,
           fundingDirection: determineFundingDirection(accFundingValue),
         };
+
+        if (marketInfoRaw) {
+          const info = parseMarketInfo(marketInfoRaw);
+          result.marketInfo = formatMarketInfo(info);
+        }
+
+        return result;
       } catch {
         return null;
       }

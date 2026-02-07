@@ -20,6 +20,17 @@ interface FundingRateEntry {
   holdingFeeRate1h: { long: string; short: string };
   fundingDirection: string;
   pairBase: string;
+  openInterest?: {
+    longQty: string;
+    shortQty: string;
+    oiRatio: string;
+    dominantSide: string;
+  };
+  realTimeFundingRate?: {
+    rate8h: string;
+    rate1h: string;
+    direction: string;
+  };
 }
 
 interface LeverUpGetFundingRatesResult {
@@ -36,11 +47,11 @@ interface LeverUpGetFundingRatesResult {
 export function registerLeverUpGetFundingRates(server: McpServer): void {
   server.tool(
     "leverup_get_funding_rates",
-    "Get current holding fee rates (funding rates) for LeverUp perpetual pairs. " +
-      "LeverUp uses a holding fee model instead of traditional funding rates: " +
-      "positions are charged a per-second fee based on direction (long/short). " +
-      "Rates shown as 8-hour and 1-hour percentages. " +
-      "Use this to assess carry costs before opening positions.",
+    "Get funding rates, holding fees, and open interest for LeverUp perpetual pairs. " +
+      "Returns: (1) Holding fee rates — flat per-second carry cost by direction. " +
+      "(2) Real-time funding rate — directional fee based on OI imbalance (dominant side pays). " +
+      "(3) Open interest — long/short quantities and OI ratio for squeeze detection. " +
+      "Use this to assess carry costs, directional crowding, and squeeze risk before opening positions.",
     LeverUpGetFundingRatesSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await leverUpGetFundingRatesHandler(
@@ -72,24 +83,40 @@ async function leverUpGetFundingRatesHandler(
     }
 
     const fundingRates: FundingRateEntry[] = fundingData.map(
-      ({ symbol, category, holdingFeeRate8h, holdingFeeRate1h, fundingDirection, pairBase }) => ({
-        symbol, category, holdingFeeRate8h, holdingFeeRate1h, fundingDirection, pairBase,
-      })
+      ({ symbol, category, holdingFeeRate8h, holdingFeeRate1h, fundingDirection, pairBase, marketInfo }) => {
+        const entry: FundingRateEntry = {
+          symbol, category, holdingFeeRate8h, holdingFeeRate1h, fundingDirection, pairBase,
+        };
+        if (marketInfo) {
+          entry.openInterest = {
+            longQty: marketInfo.longQty,
+            shortQty: marketInfo.shortQty,
+            oiRatio: marketInfo.oiRatio,
+            dominantSide: marketInfo.dominantSide,
+          };
+          entry.realTimeFundingRate = {
+            rate8h: marketInfo.currentFundingRate8h,
+            rate1h: marketInfo.currentFundingRate1h,
+            direction: marketInfo.fundingRateDirection,
+          };
+        }
+        return entry;
+      }
     );
 
     return {
       success: true,
-      message: `Funding rates for ${fundingRates.length} LeverUp pair${fundingRates.length > 1 ? "s" : ""}`,
+      message: `Funding rates and open interest for ${fundingRates.length} LeverUp pair${fundingRates.length > 1 ? "s" : ""}`,
       data: {
         fundingRates,
         model:
-          "LeverUp uses a holding fee model. Positions are charged a per-second fee " +
-          "that varies by asset and direction (long vs short). Rates shown are annualized " +
-          "equivalents for 8h and 1h periods. The fundingDirection indicates which side " +
-          "currently pays more based on accumulated funding.",
+          "LeverUp charges TWO separate fees: (1) Holding fee — flat per-second cost, varies by asset " +
+          "and direction. (2) Funding fee — directional, scales with OI imbalance (dominant side pays minority). " +
+          "The realTimeFundingRate shows the current per-second funding rate. Negative = shorts pay longs. " +
+          "openInterest shows long/short quantities (in asset units) and OI ratio for squeeze detection.",
         note:
           "High-leverage pairs (500BTC/500ETH) use zero-fee model and are excluded. " +
-          "Rates are read directly from on-chain contract state.",
+          "All data read directly from on-chain Diamond Proxy contract.",
       },
     };
   } catch (error) {

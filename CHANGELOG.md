@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.36] - 2026-02-07
+
+### Added
+- **Open interest + real-time funding rates** (#56) — `leverup_get_funding_rates` now returns long/short OI quantities, OI ratio (squeeze detection), and real-time directional funding rate from `getMarketInfo` Diamond Proxy contract. Two fee systems clearly separated: holding fees (flat carry cost) and funding fees (directional, OI-based). Unblocks #31 (squeeze detection)
+- **Market hours awareness** (#57) — New "Market Hours Awareness" section in `kairos.md` with trading hours for all asset classes (crypto 24/7, FX Sun-Fri, commodities, indices, stocks). Includes mandatory pre-weekend close rule for non-crypto positions, oracle staleness warning, delegation expiry check, and market hours kill switch item
+
+### Changed
+- **Kill switch expanded** — 11-point checklist (was 10). New check: market hours for non-crypto pairs
+- **Risk rule #16** — Non-crypto positions must close 1h before Friday market close. Pyth oracles stop updating when underlying market closes — SL/TP unexecutable on stale data
+- **Phase 2 pair selection** — Now includes `leverup_get_funding_rates` for OI analysis. Market hours filter skips non-crypto pairs approaching close
+- **Phase 3 pre-trade validation** — References total carry cost (holding + funding) and OI crowding risk
+- **Phase 5 monitoring** — New step 19: pre-close exit check for non-crypto positions
+- **`leverup_get_market_stats`** — Updated description: removed "Global OI not yet available" (now available via `leverup_get_funding_rates`)
+
 ## [0.8.35] - 2026-02-06
 
 ### Fixed

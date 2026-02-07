@@ -75,6 +75,12 @@ export interface LeverUpQuote {
 
 // MARK: - Funding Rates
 
+export interface PairMarketInfo {
+  longQty: bigint;
+  shortQty: bigint;
+  currentFundingFeePerSec: bigint;
+}
+
 export interface PairFundingData {
   symbol: string;
   category: LeverUpCategory;
@@ -93,6 +99,15 @@ export interface PairFundingData {
   };
   accumulatedFunding: bigint;
   fundingDirection: "longs pay" | "shorts pay" | "neutral";
+  marketInfo?: {
+    longQty: string;
+    shortQty: string;
+    oiRatio: string;
+    dominantSide: "longs" | "shorts" | "balanced";
+    currentFundingRate8h: string;
+    currentFundingRate1h: string;
+    fundingRateDirection: "longs pay" | "shorts pay" | "neutral";
+  };
 }
 
 // MARK: - Limit Orders
