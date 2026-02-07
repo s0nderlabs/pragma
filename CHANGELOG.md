@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.38] - 2026-02-07
+
+### Fixed
+- **`setup_wallet` failing in x402 mode** — viem's `toSmartAccount` internally calls `eth_getCode` via the public client during `getFactoryArgs`, but the x402 proxy returns 402 and the payment handler can't resolve (config not on disk yet, no session key). Setup now uses a free public RPC (`rpc.monad.xyz`) with plain HTTP transport for handle creation, bypassing the x402 proxy chicken-and-egg entirely
+
 ## [0.8.37] - 2026-02-07
 
 ### Changed

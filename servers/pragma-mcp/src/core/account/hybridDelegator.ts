@@ -76,6 +76,8 @@ function buildDeployParams(keyId: string, p256Owner: P256Owner): [Address, Hex[]
 export interface CreateHybridDelegatorOptions {
   /** Custom message shown in Touch ID prompt */
   touchIdMessage?: string;
+  /** Override RPC URL with plain HTTP transport (no x402). Used during setup bootstrap. */
+  rpcOverride?: string;
 }
 
 /**
@@ -90,12 +92,13 @@ export async function createHybridDelegatorHandle(
   config: PragmaConfig,
   options?: CreateHybridDelegatorOptions
 ): Promise<HybridDelegatorHandle> {
-  // Get RPC URL based on mode (x402 = proxy, BYOK = Keychain)
-  const rpcUrl = await getRpcUrl(config);
+  // rpcOverride: plain HTTP to a free RPC (setup bootstrap, no x402 proxy)
+  // Normal path: mode-based URL with x402 transport when applicable
+  const rpcUrl = options?.rpcOverride ?? await getRpcUrl(config);
   const chain = buildViemChain(config.network.chainId, rpcUrl);
   const publicClient = createPublicClient({
     chain,
-    transport: http(rpcUrl, x402HttpOptions(config)),
+    transport: http(rpcUrl, options?.rpcOverride ? {} : x402HttpOptions(config)),
   });
 
   const keyId = await getOrCreateKeyId();

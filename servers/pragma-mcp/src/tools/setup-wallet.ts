@@ -162,7 +162,13 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
     console.log(`  X: 0x${coords.x.toString(16).slice(0, 16)}...`);
     console.log(`  Y: 0x${coords.y.toString(16).slice(0, 16)}...`);
 
-    const handle = await createHybridDelegatorHandle(config);
+    // During x402 setup, use a free public RPC to avoid the x402 proxy chicken-and-egg:
+    // viem's toSmartAccount internally calls getCode via the public client, but the
+    // x402 proxy returns 402 and x402Fetch can't pay (no config on disk, no session key).
+    const setupRpcOverride = rpc ? undefined : chainConfig.publicRpc;
+    const handle = await createHybridDelegatorHandle(config, {
+      rpcOverride: setupRpcOverride,
+    });
 
     // Session key must exist before deployment for bootstrap registration
     let sessionKey = await getSessionKey();

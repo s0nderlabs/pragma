@@ -19,6 +19,8 @@ export interface ChainConfig {
     decimals: number;
   };
   blockExplorer?: string;
+  /** Free public RPC for setup bootstrap (avoids x402 proxy chicken-and-egg) */
+  publicRpc?: string;
   // Token addresses (chain-specific)
   tokens: {
     wmon?: Address; // Wrapped native token
@@ -65,6 +67,7 @@ export const SUPPORTED_CHAINS: Record<number, ChainConfig> = {
       decimals: 18,
     },
     blockExplorer: "https://monadvision.com",
+    publicRpc: "https://rpc.monad.xyz",
     tokens: {
       wmon: "0x3bd359c1119da7da1d913d1c4d2b7c461115433a" as Address,
       weth: "0xee8c0e9f1bffb4eb878d8f15f368a02a35481242" as Address,
