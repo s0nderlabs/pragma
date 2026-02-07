@@ -85,11 +85,11 @@ This will resume setup with MCP tools available for wallet creation.
 
 When the user returns via `claude --continue`, proceed with wallet setup.
 
-## Step 3.1: Load pragma-core Skill
+## Step 3.1: Load Skills
 
-**IMPORTANT:** Before using any MCP tools, load the pragma-core skill first.
+**IMPORTANT:** Before using any MCP tools, load these skills in order:
 
-Use the Skill tool to load `pragma:pragma-core`:
+1. Load pragma-core skill first:
 ```
 Skill(pragma:pragma-core)
 ```
@@ -99,7 +99,14 @@ This activates the `allowed-tools` restriction which:
 - Blocks Bash access to prevent private key exposure
 - Ensures secure operation throughout setup
 
-**Do not proceed until the skill is loaded.**
+2. Load autonomous mode skill:
+```
+Skill(pragma:autonomous-mode)
+```
+
+This enables autonomous trading agent capabilities (sub-agent delegation, background monitoring).
+
+**Do not proceed until both skills are loaded.**
 
 ## Step 3.2: Check Existing Wallet
 
@@ -108,16 +115,8 @@ MCP tools are now available. Check if a wallet already exists.
 Use the `has_wallet` MCP tool to check wallet status.
 
 If `has_wallet` returns `initialized: true`:
-- **Use `AskUserQuestion`:**
-  - Header: "Wallet"
-  - Question: "Existing pragma wallet found. Keep existing or create new?"
-  - Options:
-    - Label: "Keep existing wallet"
-      Description: "Continue with current wallet and keys"
-    - Label: "Reset and create new"
-      Description: "Delete existing keys and create fresh wallet"
-- If **"Keep existing wallet"** - Skip Step 4, go to Step 5 (wallet already exists)
-- If **"Reset and create new"** - Continue to Step 4 (will create new wallet)
+- Tell the user their wallet is already set up
+- Skip Step 4, go to Step 5 (verify setup)
 
 If `has_wallet` returns `initialized: false`:
 - Continue to Step 4 (create new wallet)
