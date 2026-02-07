@@ -1,10 +1,10 @@
-// Setup Wallet Tool
-// Creates passkey + smart account for the user
-// Uses native P-256 signing - private keys NEVER leave the Keychain
+// Setup Wallet — creates passkey + smart account with P-256 signing
+// Private keys NEVER leave the Keychain
 // Copyright (c) 2026 s0nderlabs
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+
 import {
   createPasskey,
   getPasskeyPublicKey,
@@ -18,24 +18,24 @@ import {
 import { deploySmartAccount } from "../core/account/deployment.js";
 import {
   generateSessionKey,
-  storeSessionKey,
   getSessionKey,
+  storeSessionKey,
 } from "../core/session/keys.js";
 import {
-  loadConfig,
-  saveConfig,
   createInitialConfig,
   isWalletConfigured,
+  loadConfig,
+  saveConfig,
 } from "../config/pragma-config.js";
 import {
-  validateRpcEndpoint,
-  isChainSupported,
   getChainConfig,
   getSupportedChainIds,
+  isChainSupported,
+  validateRpcEndpoint,
 } from "../config/chains.js";
 
 const SetupWalletSchema = z.object({
-  rpc: z.string().url().describe("RPC endpoint URL for your network"),
+  rpc: z.string().url().optional().describe("RPC endpoint URL. Required for BYOK mode. Omit for x402 mode (auto-configured)."),
   chainId: z.number().optional().describe("Chain ID (auto-detected from RPC if not provided)"),
 });
 
@@ -74,15 +74,15 @@ export function registerSetupWallet(server: McpServer): void {
 }
 
 /**
- * Main setup wallet function
- * Orchestrates all onboarding steps with secure P-256 signing
+ * Orchestrates wallet onboarding: passkey creation, smart account deployment,
+ * and session key generation.
  */
 async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<SetupResult> {
   const { rpc } = params;
   let { chainId } = params;
 
   try {
-    // Step 1: Check if already set up
+    // Return early if wallet already exists
     const existingConfig = await loadConfig();
     if (existingConfig && isWalletConfigured(existingConfig)) {
       const chainConfig = getChainConfig(existingConfig.network.chainId);
@@ -100,29 +100,29 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
       };
     }
 
-    // Step 2: Validate RPC endpoint and detect chain ID
-    const validation = await validateRpcEndpoint(rpc, chainId ?? 0);
-    if (!validation.valid) {
-      // When detecting (chainId was undefined), valid is true if connection succeeded
-      // So if not valid, either connection failed or chain mismatch
-      return {
-        success: false,
-        message: chainId ? "RPC validation failed" : "Failed to connect to RPC",
-        error: validation.error || "Could not connect to RPC endpoint",
-      };
+    // Resolve chain ID: BYOK validates RPC, x402 defaults to Monad mainnet
+    if (rpc) {
+      const validation = await validateRpcEndpoint(rpc, chainId ?? 0);
+      if (!validation.valid) {
+        return {
+          success: false,
+          message: chainId ? "RPC validation failed" : "Failed to connect to RPC",
+          error: validation.error || "Could not connect to RPC endpoint",
+        };
+      }
+      const resolvedChainId = validation.actualChainId ?? chainId;
+      if (!resolvedChainId) {
+        return {
+          success: false,
+          message: "Failed to detect chain ID",
+          error: "RPC did not return a valid chain ID",
+        };
+      }
+      chainId = resolvedChainId;
+    } else {
+      chainId = chainId ?? 143;
     }
-    // Use detected chain ID if not provided
-    const resolvedChainId = validation.actualChainId ?? chainId;
-    if (!resolvedChainId) {
-      return {
-        success: false,
-        message: "Failed to detect chain ID",
-        error: "RPC did not return a valid chain ID",
-      };
-    }
-    chainId = resolvedChainId;
 
-    // Step 3: Check chain is supported
     if (!isChainSupported(chainId)) {
       const supported = getSupportedChainIds().join(", ");
       return {
@@ -134,13 +134,13 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
 
     const chainConfig = getChainConfig(chainId);
 
-    // Step 4: Create initial config
-    // Note: RPC is only used for validation. Actual URLs are resolved at runtime based on mode.
-    let config = existingConfig || createInitialConfig(chainId);
+    // RPC is only used for validation above; actual URLs are resolved at runtime based on mode
+    const config = existingConfig || createInitialConfig(chainId);
     config.network.chainId = chainId;
 
-    // Step 5: Create or retrieve passkey
+    // Create or retrieve passkey
     let passkeyPublicKey: `0x${string}`;
+    let isNewPasskey = false;
 
     if (await hasPasskey()) {
       const existingKey = await getPasskeyPublicKey();
@@ -153,33 +153,32 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
       }
       passkeyPublicKey = existingKey;
     } else {
-      // Create new passkey (triggers Touch ID)
       passkeyPublicKey = await createPasskey("Create pragma wallet");
+      isNewPasskey = true;
     }
 
-    // Log public key info (for debugging, no sensitive data)
     const coords = parseP256PublicKey(passkeyPublicKey);
-    console.log("P-256 Public Key created:");
+    console.log(`P-256 Public Key ${isNewPasskey ? "created" : "retrieved"}:`);
     console.log(`  X: 0x${coords.x.toString(16).slice(0, 16)}...`);
     console.log(`  Y: 0x${coords.y.toString(16).slice(0, 16)}...`);
 
-    // Step 6: Create smart account handle with P-256 passkey
-    // This uses native P-256 signing - private key NEVER leaves Keychain
     const handle = await createHybridDelegatorHandle(config);
 
-    // Step 7: Generate or retrieve session key (BEFORE deployment for bootstrap registration)
+    // Session key must exist before deployment for bootstrap registration
     let sessionKey = await getSessionKey();
     if (!sessionKey) {
       sessionKey = generateSessionKey();
       await storeSessionKey(sessionKey);
     }
 
-    // Step 8: Check if smart account is deployed
-    const deployed = await isSmartAccountDeployed(handle);
+    // New passkeys cannot have a deployed account, so skip the RPC check
+    const alreadyDeployed = !isNewPasskey && await isSmartAccountDeployed(handle);
 
-    if (!deployed) {
-      // Step 9: Deploy smart account via bundler (pass session key for bootstrap)
-      const deployResult = await deploySmartAccount(handle, config, sessionKey.address);
+    if (!alreadyDeployed) {
+      const deployOptions = isNewPasskey ? { skipInitialChecks: true } : undefined;
+      const deployResult = await deploySmartAccount(
+        handle, config, sessionKey.address, deployOptions
+      );
 
       if (!deployResult.success) {
         return {
@@ -190,8 +189,7 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
       }
     }
 
-    // Step 10: Save config with wallet addresses and keyId
-    // Note: passkeyPublicKey is stored in Keychain and retrieved via getPasskeyPublicKey() when needed
+    // Passkey public key lives in Keychain; only addresses and keyId are persisted to config
     config.wallet = {
       smartAccountAddress: handle.address,
       sessionKeyAddress: sessionKey.address,
@@ -200,7 +198,6 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
 
     await saveConfig(config);
 
-    // Success!
     return {
       success: true,
       message: `Wallet created on ${chainConfig.displayName}`,
@@ -214,37 +211,43 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
       },
     };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    return mapSetupError(error);
+  }
+}
 
-    // Handle specific error cases
-    if (errorMessage.includes("Touch ID") || errorMessage.includes("biometric")) {
-      return {
-        success: false,
-        message: "Touch ID authentication required",
-        error: "Please authenticate with Touch ID to create your wallet",
-      };
-    }
+/**
+ * Maps known error patterns to user-friendly SetupResult messages.
+ */
+function mapSetupError(error: unknown): SetupResult {
+  const errorMessage = error instanceof Error ? error.message : "Unknown error";
 
-    if (errorMessage.includes("not available")) {
-      return {
-        success: false,
-        message: "Secure Enclave not available",
-        error: "This device does not support Touch ID. macOS with Touch ID is required.",
-      };
-    }
-
-    if (errorMessage.includes("DEPRECATED")) {
-      return {
-        success: false,
-        message: "Using outdated code",
-        error: errorMessage,
-      };
-    }
-
+  if (errorMessage.includes("Touch ID") || errorMessage.includes("biometric")) {
     return {
       success: false,
-      message: "Setup failed",
+      message: "Touch ID authentication required",
+      error: "Please authenticate with Touch ID to create your wallet",
+    };
+  }
+
+  if (errorMessage.includes("not available")) {
+    return {
+      success: false,
+      message: "Secure Enclave not available",
+      error: "This device does not support Touch ID. macOS with Touch ID is required.",
+    };
+  }
+
+  if (errorMessage.includes("DEPRECATED")) {
+    return {
+      success: false,
+      message: "Using outdated code",
       error: errorMessage,
     };
   }
+
+  return {
+    success: false,
+    message: "Setup failed",
+    error: errorMessage,
+  };
 }

@@ -16,9 +16,6 @@ import { getBundlerUrl } from "../../config/pragma-config.js";
 import type { PragmaConfig } from "../../types/index.js";
 import { withRetryOrThrow } from "../utils/retry.js";
 
-/**
- * Result of deployment operation
- */
 export interface DeploymentResult {
   success: boolean;
   userOpHash?: Hex;
@@ -27,25 +24,22 @@ export interface DeploymentResult {
   alreadyDeployed?: boolean;
 }
 
-/**
- * Gas configuration
- * P-256 WebAuthn verification requires higher gas limits than standard EOA
- */
+export interface DeployOptions {
+  /** Skip deployment and nonce checks for fresh passkeys (avoids unnecessary RPC calls) */
+  skipInitialChecks?: boolean;
+}
+
+// P-256 WebAuthn verification requires higher gas limits than standard EOA
 const MIN_VERIFICATION_GAS_LIMIT = 500_000n;
 const MIN_PRE_VERIFICATION_GAS = 200_000n;
 const GAS_BUFFER_MULTIPLIER = 150n; // 1.5x buffer
 
-/**
- * Apply 1.5x buffer to gas estimate and ensure minimum floor
- */
+/** Apply 1.5x buffer to gas estimate and ensure minimum floor. */
 function applyGasFloor(current: bigint, minimum: bigint): bigint {
   const buffered = current > 0n ? (current * GAS_BUFFER_MULTIPLIER) / 100n : 0n;
   return buffered > minimum ? buffered : minimum;
 }
 
-/**
- * Signable UserOp type
- */
 interface SignableUserOp {
   sender: Address;
   nonce: bigint;
@@ -64,9 +58,6 @@ interface SignableUserOp {
   paymasterPostOpGasLimit?: bigint;
 }
 
-/**
- * Sponsorship response from Pimlico
- */
 interface PimlicoSponsorship {
   paymasterAndData: Hex;
   paymaster?: Address;
@@ -78,9 +69,6 @@ interface PimlicoSponsorship {
   paymasterVerificationGasLimit?: bigint;
 }
 
-/**
- * Parse optional gas value from hex string
- */
 function parseGasValue(value?: string | null): bigint | undefined {
   if (!value || value === "0x") return undefined;
   try {
@@ -91,9 +79,7 @@ function parseGasValue(value?: string | null): bigint | undefined {
   }
 }
 
-/**
- * Build sponsorship request (clear paymaster fields)
- */
+/** Build sponsorship request with paymaster fields cleared. */
 function buildSponsorRequest(op: SignableUserOp): Record<string, unknown> {
   return formatUserOperationRequest({
     ...op,
@@ -103,11 +89,8 @@ function buildSponsorRequest(op: SignableUserOp): Record<string, unknown> {
   } as unknown as UserOperationRequest);
 }
 
-/**
- * Apply sponsorship to userOp (from H2 paymasterUtils.ts)
- */
+/** Apply sponsorship fields to userOp (gas limits + paymaster data). */
 function applySponsorshipToUserOp(target: SignableUserOp, update: PimlicoSponsorship): void {
-  // Update gas limits if provided
   if (update.callGasLimit && update.callGasLimit > 0n) {
     target.callGasLimit = update.callGasLimit;
   }
@@ -118,7 +101,6 @@ function applySponsorshipToUserOp(target: SignableUserOp, update: PimlicoSponsor
     target.preVerificationGas = update.preVerificationGas;
   }
 
-  // Add paymaster gas limits
   if (update.paymasterPostOpGasLimit) {
     target.paymasterPostOpGasLimit = update.paymasterPostOpGasLimit;
   }
@@ -126,21 +108,18 @@ function applySponsorshipToUserOp(target: SignableUserOp, update: PimlicoSponsor
     target.paymasterVerificationGasLimit = update.paymasterVerificationGasLimit;
   }
 
-  // Apply paymaster fields (modern or legacy format)
+  // Modern format has separate paymaster/paymasterData fields;
+  // legacy format packs both into paymasterAndData (first 20 bytes = address)
   if (update.paymaster) {
     target.paymaster = update.paymaster;
     target.paymasterData = update.paymasterData ?? ("0x" as Hex);
   } else {
-    // Legacy format: paymasterAndData (first 20 bytes = paymaster, rest = data)
     target.paymaster = `0x${update.paymasterAndData.slice(2, 42)}` as Address;
     target.paymasterData = `0x${update.paymasterAndData.slice(42)}` as Hex;
   }
 }
 
-/**
- * Sponsor a user operation via Pimlico paymaster
- * Includes retry for transient errors (idempotent - just gets paymaster signature)
- */
+/** Sponsor a user operation via Pimlico paymaster (idempotent, retries transient errors). */
 async function sponsorUserOperation(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
@@ -206,10 +185,7 @@ async function sponsorUserOperation(
   );
 }
 
-/**
- * Get gas price recommendations from Pimlico
- * Includes retry for transient errors (idempotent read operation)
- */
+/** Get gas price recommendations from Pimlico (idempotent, retries transient errors). */
 async function getGasPrice(
   bundlerUrl: string,
   sessionKeyAddress?: Address
@@ -263,10 +239,7 @@ async function getGasPrice(
   );
 }
 
-/**
- * Estimate gas via bundler (with paymaster context)
- * Includes retry for transient errors (idempotent read operation)
- */
+/** Estimate gas via bundler with paymaster context (idempotent, retries transient errors). */
 async function estimateUserOpGas(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
@@ -322,9 +295,7 @@ async function estimateUserOpGas(
   );
 }
 
-/**
- * Send user operation to bundler
- */
+/** Send user operation to bundler (NOT idempotent -- do not retry). */
 async function sendUserOperation(
   bundlerUrl: string,
   userOp: Record<string, unknown>,
@@ -365,9 +336,7 @@ async function sendUserOperation(
   return data.result;
 }
 
-/**
- * Wait for user operation receipt
- */
+/** Poll for user operation receipt until timeout. */
 async function waitForUserOperationReceipt(
   bundlerUrl: string,
   userOpHash: Hex,
@@ -408,7 +377,6 @@ async function waitForUserOperationReceipt(
       }
     }
 
-    // Wait before polling again
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 
@@ -416,25 +384,23 @@ async function waitForUserOperationReceipt(
 }
 
 /**
- * Deploy the smart account via bundler
- * Uses paymaster for gasless deployment
- * Follows H2's deployment flow exactly
- * @param sessionKeyAddress - Optional session key address for bootstrap registration
+ * Deploy the smart account via bundler with paymaster-sponsored gas.
+ * Follows H2's deployment flow: sponsor -> estimate -> re-sponsor -> sign -> submit.
  */
 export async function deploySmartAccount(
   handle: HybridDelegatorHandle,
   config: PragmaConfig,
-  sessionKeyAddress?: Address
+  sessionKeyAddress?: Address,
+  options?: DeployOptions
 ): Promise<DeploymentResult> {
-  // Check if already deployed
-  if (await isSmartAccountDeployed(handle)) {
+  // Skip deployment check for fresh passkeys — we know it's not deployed
+  if (!options?.skipInitialChecks && await isSmartAccountDeployed(handle)) {
     return {
       success: true,
       alreadyDeployed: true,
     };
   }
 
-  // Get bundler URL (async - resolves based on mode)
   let bundlerUrl: string;
   try {
     bundlerUrl = await getBundlerUrl(config);
@@ -445,7 +411,6 @@ export async function deploySmartAccount(
     };
   }
 
-  // Get factory args
   const factoryArgs = await getFactoryArgs(handle);
   if (!factoryArgs) {
     return {
@@ -454,14 +419,12 @@ export async function deploySmartAccount(
     };
   }
 
-  // Get entry point and nonce
   const entryPoint = getEntryPointAddress(handle);
-  const nonce = await getAccountNonce(handle);
-
-  // Get gas price from bundler
+  // Fresh setup nonce is always 0; skip RPC call
+  const nonce = options?.skipInitialChecks ? 0n : await getAccountNonce(handle);
   const gasPrices = await getGasPrice(bundlerUrl, sessionKeyAddress);
 
-  // Step 1: Build baseUserOp with 0n gas values (let paymaster estimate)
+  // Build base UserOp with 0n gas values — paymaster will estimate
   const baseUserOp: SignableUserOp = {
     sender: handle.address,
     nonce,
@@ -476,10 +439,9 @@ export async function deploySmartAccount(
     signature: "0x" as Hex,
   };
 
-  // Working copy of userOp
   const userOp: SignableUserOp = { ...baseUserOp };
 
-  // Step 2: First sponsorship - paymaster returns gas estimates
+  // First sponsorship — paymaster returns gas estimates
   let sponsorship = await sponsorUserOperation(
     bundlerUrl,
     buildSponsorRequest(baseUserOp),
@@ -488,7 +450,7 @@ export async function deploySmartAccount(
   );
   applySponsorshipToUserOp(userOp, sponsorship);
 
-  // Step 3: If gas values are still 0n, estimate via bundler
+  // If gas values are still 0n after sponsorship, estimate via bundler
   let gasAdjusted = false;
   const setGasValue = (
     field: "callGasLimit" | "verificationGasLimit" | "preVerificationGas",
@@ -523,7 +485,7 @@ export async function deploySmartAccount(
     }
   }
 
-  // Step 4: Apply minimum floors with buffer (P-256 WebAuthn needs substantial gas)
+  // Apply minimum floors with buffer (P-256 WebAuthn needs substantial gas)
   const adjustedVerificationGas = applyGasFloor(userOp.verificationGasLimit, MIN_VERIFICATION_GAS_LIMIT);
   if (userOp.verificationGasLimit < adjustedVerificationGas) {
     setGasValue("verificationGasLimit", adjustedVerificationGas);
@@ -534,8 +496,8 @@ export async function deploySmartAccount(
     setGasValue("preVerificationGas", adjustedPreVerificationGas);
   }
 
-  // Step 5: Re-sponsor if gas was adjusted (paymaster needs to sign new values)
-  // CRITICAL: DO NOT modify ANY fields after this sponsorship - it will invalidate the signature
+  // CRITICAL: Re-sponsor if gas was adjusted — paymaster signature covers gas values.
+  // DO NOT modify userOp after this sponsorship (except signature field).
   if (gasAdjusted) {
     sponsorship = await sponsorUserOperation(
       bundlerUrl,
@@ -544,15 +506,10 @@ export async function deploySmartAccount(
       sessionKeyAddress
     );
     applySponsorshipToUserOp(userOp, sponsorship);
-
-    // DO NOT modify userOp after this point - paymaster has signed over these exact values
-    // Per Pimlico docs: "make sure you do not modify any fields after the paymaster signs over it (except signature)"
   }
 
-  // Step 6: Sign the user operation
   const signature = await handle.smartAccount.signUserOperation(userOp);
 
-  // Step 7: Format and send
   const rpcUserOperation = formatUserOperationRequest({
     ...userOp,
     signature,
@@ -560,7 +517,6 @@ export async function deploySmartAccount(
 
   const userOpHash = await sendUserOperation(bundlerUrl, rpcUserOperation, entryPoint, sessionKeyAddress);
 
-  // Step 8: Wait for receipt
   try {
     const receipt = await waitForUserOperationReceipt(bundlerUrl, userOpHash, 60000, sessionKeyAddress);
     return {
@@ -569,7 +525,7 @@ export async function deploySmartAccount(
       transactionHash: receipt.transactionHash,
     };
   } catch (error) {
-    // Check if deployed despite timeout
+    // Receipt timed out — verify on-chain before reporting failure
     if (await isSmartAccountDeployed(handle)) {
       return {
         success: true,

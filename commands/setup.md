@@ -122,19 +122,17 @@ If `has_wallet` returns `initialized: true`:
 If `has_wallet` returns `initialized: false`:
 - Continue to Step 4 (create new wallet)
 
-## Step 4: Create Wallet (if needed)
+## Step 4: Create Wallet
 
-Use the `setup_wallet` MCP tool to create the smart account:
+Use the `setup_wallet` MCP tool to create the smart account.
 
-1. Call `setup_wallet` with your RPC URL
-2. This will prompt Touch ID to create a passkey
-3. A smart account will be deployed
-4. Session key will be generated and stored securely
+- **x402 mode (default):** Call `setup_wallet()` with no parameters -- RPC and bundler are auto-configured.
+- **BYOK mode:** Call `setup_wallet({ rpc: "<user's RPC URL>" })` with the user's own RPC endpoint.
 
-Example:
-```
-User provides RPC URL -> Touch ID prompt -> Smart account deployed -> Ready to trade!
-```
+The tool will:
+1. Prompt Touch ID to create a passkey
+2. Deploy a smart account
+3. Generate and store a session key securely
 
 ## Step 5: Verify Setup
 
