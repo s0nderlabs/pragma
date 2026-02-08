@@ -48,5 +48,8 @@ Package.resolved
 bin/*
 !bin/.gitkeep
 
+# Tweet assets (not for repo)
+assets/tweet-*
+
 # pragma config (user-specific)
 ~/.pragma/

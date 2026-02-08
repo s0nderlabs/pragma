@@ -620,20 +620,22 @@ Task({
 
 → Returns taskAgentId
 
-### Step 9: Store Task Agent ID
+### Step 9: Store Task Agent ID + Teammate Name
 
-**CRITICAL:** After spawning, store the Task agent ID:
+**CRITICAL:** After spawning, store the Task agent ID and teammate name:
 
 ```
 get_sub_agent_state(
   subAgentId: agentId,
-  taskAgentId: [taskAgentId from Task response]
+  taskAgentId: [taskAgentId from Task response],
+  teammateName: [name from Task spawn, e.g., "kairos-abc123"]
 )
 ```
 
 This is needed for:
 - `TaskStop(taskId)` during cleanup (both team and non-team)
 - `Task({ resume: taskAgentId })` for gas top-up resume (non-team only)
+- **TeammateIdle hook lookup** — the hook scans state.json for matching `teammateName` to re-inject the mission
 
 With team spawn, gas resume uses `SendMessage` instead of `Task({ resume })` — teammates stay alive and just need a message to wake up.
 
@@ -1271,7 +1273,7 @@ When a sub-agent pauses due to low gas:
 6. `create_sub_agent(kairos, 10 MON, 10 USDC, 10 calls, 1 day)` → agentId: "xyz-123", status: "pending"
 7. `TeamCreate({ team_name: "pragma-1738900000" })` → team created
 8. `Task({ subagent_type: "pragma:kairos", team_name: "pragma-1738900000", name: "kairos-xyz123", mode: "bypassPermissions", prompt: "Monitor BTC..." })` → taskAgentId: "a32dec1"
-9. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1)` → stores for TaskStop
+9. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1, teammateName: "kairos-xyz123")` → stores for TaskStop + TeammateIdle hook
 10. Report: "Kairos agent monitoring BTC for breakout above $95k."
 
 **Agent starts:**

@@ -35,6 +35,13 @@ const GetSubAgentStateSchema = z.object({
       "Optional: Claude Code Task agent ID to store for resume capability. " +
         "Pass this after spawning a Task to enable resume after gas top-up."
     ),
+  teammateName: z
+    .string()
+    .optional()
+    .describe(
+      "Optional: Teammate name for TeammateIdle hook lookup. " +
+        "Pass the 'name' parameter from Task spawn (e.g., 'kairos-abc123')."
+    ),
   includeTrades: z
     .boolean()
     .optional()
@@ -133,7 +140,7 @@ export function registerGetSubAgentState(server: McpServer): void {
   server.tool(
     "get_sub_agent_state",
     "Get detailed state for a specific sub-agent including budget, trades, errors, and loop config. " +
-      "Can store taskAgentId for resume capability. " +
+      "Can store taskAgentId for resume and teammateName for TeammateIdle hook lookup. " +
       "Use report_agent_status to update agent status.",
     GetSubAgentStateSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
@@ -170,10 +177,13 @@ async function getSubAgentStateHandler(
       };
     }
 
-    // Handle taskAgentId update if provided
+    // Store taskAgentId / teammateName if provided (for hook lookup and resume)
     let updated = false;
-    if (params.taskAgentId) {
-      await updateAgentState(params.subAgentId, { taskAgentId: params.taskAgentId });
+    if (params.taskAgentId || params.teammateName) {
+      await updateAgentState(params.subAgentId, {
+        ...(params.taskAgentId && { taskAgentId: params.taskAgentId }),
+        ...(params.teammateName && { teammateName: params.teammateName }),
+      });
       updated = true;
 
       // Reload state to get updated values

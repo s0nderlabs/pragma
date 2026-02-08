@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.42] - 2026-02-09
+
+### Added
+- **TeammateIdle hook** — Loop enforcement now works for teammate agents (not just background subagents). New `teammate-idle-hook.sh` mirrors `subagent-stop-hook.sh` with the TeammateIdle contract (exit code 2 + stderr)
+- **teammateName field** — `get_sub_agent_state` accepts `teammateName` parameter for hook lookup; stored in agent state.json
+
+### Fixed
+- **Autonomous agent loops broken for teammates** — Since v0.8.24, agents spawned as teammates would run one turn and go idle forever because SubagentStop only fires for background subagents. TeammateIdle hook now catches teammate idle events and re-injects the mission
+
 ## [0.8.41] - 2026-02-08
 
 ### Security
