@@ -15,6 +15,9 @@ allowed-tools:
   - mcp__pragma__write_agent_memo
   - mcp__pragma__list_wallet_pool
   - mcp__pragma__leverup_list_positions
+  - mcp__pragma__leverup_list_limit_orders
+  - mcp__pragma__leverup_cancel_limit_order
+  - mcp__pragma__leverup_close_trade
   - mcp__pragma__get_all_balances
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
@@ -482,6 +485,25 @@ Before creating the sub-agent:
    - Minimum recommended: 0.50 USDC for monitoring agents, 0.20 USDC for quick trades
    - If USDC is low, warn user: "Session key has X USDC. Market intelligence tools cost $0.01-0.02 per call (charts are free). Monitoring agents may exhaust this in ~Y hours."
    - Soft warning only, not a blocker -- user decides whether to top up
+4. **Existing on-chain exposure (kairos/pragma only):** Check for open positions or pending limit orders on the smart account. **Skip this check for thymos agents** — they don't use LeverUp.
+   - Call `leverup_list_positions(address: <smart_account>)`
+   - Call `leverup_list_limit_orders(address: <smart_account>)`
+   - IMPORTANT: Query the **smart account** (delegator), not the session key or agent wallet.
+   - If positions or orders exist:
+     - Inform user: "Your smart account has N open position(s) and M pending order(s) that were NOT created by this agent."
+     - Show brief summary: pair, side, entry, current PnL for positions; pair, side, trigger for orders
+     - Ask user what to do:
+       ```
+       Header: "Existing Exposure"
+       Question: "Your account has existing positions/orders. How should the agent handle them?"
+       Options:
+         - Inform agent (Recommended) — Agent will be aware but won't manage them
+         - Ignore — Agent won't know about existing positions
+         - Cancel first — Close/cancel existing exposure before spawning
+       ```
+     - If "Inform agent": Include position/order summary in the agent's TASK text so it has context
+     - If "Cancel first": Help user close positions / cancel orders, then proceed
+   - If no positions or orders exist: proceed silently (no user prompt needed)
 
 ### Step 7: Create Sub-Agent
 
@@ -614,6 +636,76 @@ This is needed for:
 - `Task({ resume: taskAgentId })` for gas top-up resume (non-team only)
 
 With team spawn, gas resume uses `SendMessage` instead of `Task({ resume })` — teammates stay alive and just need a message to wake up.
+
+### Step 10: Hands-Off — Do NOT Nudge the Agent
+
+**CRITICAL:** After the agent confirms it's running (sends "Running — starting initial scan"), the leader MUST NOT message the agent unless:
+
+1. **Agent explicitly requests help** — e.g., status "paused" with "Low gas"
+2. **User asks** to check on, stop, or interact with the agent
+3. **Agent reports completion/failure** — cleanup needed
+
+**Idle notifications are normal.** The SubagentStop hook re-injects the mission automatically each time the agent's turn ends. The agent is NOT stuck — it's actively working in a loop. Sending a message to an idle agent interrupts its loop and wastes context.
+
+**What happens if you nudge:**
+- The agent receives your message as a new prompt, disrupting its current analysis cycle
+- The SubagentStop hook ALSO fires, so the agent gets two prompts (yours + the mission)
+- This wastes tokens, confuses the agent, and can cause duplicate actions
+
+**Correct leader behavior after spawn:**
+- Report to user: "Agent is running. It will operate autonomously."
+- Wait silently for agent messages or user requests
+- Do NOT respond to idle notifications
+- Do NOT send "how's it going?" or "any updates?" messages
+
+### Step 11: Leader Enrichment Protocol
+
+When the agent sends a notification via SendMessage, the leader MUST NOT just echo it back to the user. The agent's messages are intentionally concise (saves agent context). The leader's job is to **pull the full analysis from the agent's journal** and present it to the user in a rich, readable format.
+
+**Enrichment table — what to pull for each notification:**
+
+| Agent Event | Journal Tag | Extra Tools | Present to User |
+|-------------|------------|-------------|-----------------|
+| `phase_1_complete` | `get_agent_log(agentId, tag: "baseline", limit: 1)` | `get_sub_agent_state(agentId)` | Full macro analysis: economic events, calendar, currency strength, central bank tone, narrative. Plus budget/gas/calls status. |
+| `phase_2_complete` | `get_agent_log(agentId, tag: "watchlist", limit: 1)` | — | Full watchlist: each pair analyzed, timeframe breakdown, funding rates, OI data, entry levels, trigger levels. |
+| `phase_2_waiting` (first only) | `get_agent_log(agentId, tag: "watchlist", limit: 1)` | — | What pairs were considered and why none qualified. Skip on repeated re-scans (just acknowledge). |
+| `phase_3_complete` | `get_agent_log(agentId, tag: "trade_plan", limit: 1)` | — | Full trade plan: direction rationale, higher-TF alignment, entry/SL/TP reasoning, R:R, bear case, kill switch result. |
+| `phase_3_failed` | `get_agent_log(agentId, tag: "trade_plan", limit: 1)` | — | What failed the kill switch and why the agent backed off. |
+| `trade_opened` | — | `leverup_list_positions(address: <SA>)`, `get_sub_agent_state(agentId)` | Live position data: actual entry, margin, liq distance, leverage. Plus budget consumed, calls used. |
+| `trade_closed` | — | `get_sub_agent_state(agentId)` | Updated budget, trade count, net PnL, calls remaining. |
+| `budget_warning` / `gas_low` | — | `get_sub_agent_state(agentId)` | Exact budget/gas numbers. Alert user if intervention needed (funding, stopping). |
+| `status_changed` / `shutdown_ready` | `get_agent_log(agentId, tag: "post_trade", limit: 1)` | `get_sub_agent_state(agentId)` | Full session summary: total trades, W/L, net PnL, lessons. Final budget/gas state. |
+
+**Events to skip (agent's message is sufficient):**
+
+`started`, `limit_placed`, `limit_cancelled`, `trade_adjusted`, `next_action`, `watchlist_alert`, `market_alert`, `error`
+
+For these, just acknowledge the agent's message to the user without pulling extra data.
+
+**How to present enriched data:**
+
+After pulling the journal memo, format it for the user. Do NOT dump raw JSON. Extract the key data and present it in a structured, readable summary. Example for Phase 1:
+
+```
+Kairos Phase 1 — Macro Baseline
+
+Economic Calendar:
+  - No high-impact events in next 23h (NFP/CPI next week)
+  - UMich sentiment beat: 57.3 vs 55 expected
+
+Central Banks:
+  - Fed Daly: leaning toward more cuts
+  - Fed Jefferson: sees tariff inflation easing
+
+Currency Strength:
+  - USD strongest (100/100), JPY weakest
+  - Risk-on tilt — favors crypto longs
+
+Agent Bias: Moderately bullish risk assets
+Budget: 15/15 USDC remaining | 20/20 calls | Gas: 1.9 MON | Expires: 22h
+```
+
+**IMPORTANT:** Enrichment is read-only. The leader reads the journal and presents data. The leader does NOT send any message to the agent during enrichment. This is fully compatible with the hands-off rule.
 
 ---
 

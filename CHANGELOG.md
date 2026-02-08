@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.40] - 2026-02-08
+
+### Added
+- **README rewrite** — Complete overhaul with hero GIF, YouTube demo link, version badge, x402 explainer, requirements checklist, support section, and compact production runs summary table
+- **Production runs documentation** — Full trade logs extracted to `docs/production-runs.md` with margin data
+- **Agent leader notifications** — Kairos agents now notify the team lead at every phase boundary via SendMessage; leader enrichment protocol pulls journal data for rich user-facing summaries
+- **Media assets** — Demo GIFs, hero image, and live trading screenshots in `assets/`
+- **Skill loader hook** — Auto-loads `pragma-core` skill on tool calls
+
+### Changed
+- **Autonomous mode skill** — Expanded with leader enrichment protocol, agent status report procedure, and on-chain exposure pre-flight checks
+- **Pragma-core skill** — Refined tool groupings and descriptions
+
+### Removed
+- **Legacy slash commands** — Deleted `commands/balance.md`, `commands/stake.md`, `commands/swap.md`, `commands/transfer.md` (superseded by `pragma-core` skill)
+- **Dead code** — Removed `stake.ts` tool (was never registered in MCP server)
+
 ## [0.8.39] - 2026-02-07
 
 ### Changed

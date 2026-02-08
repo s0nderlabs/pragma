@@ -55,8 +55,18 @@ When running as a TeammateTool teammate (team context active), notify the leader
 | Event | When | Example Message |
 |-------|------|-----------------|
 | `started` | After report_agent_status("running") | "Kairos online. Starting Phase 1 macro scan." |
-| `trade_opened` | After successful trade execution | "Opened BTC/USD long 25x at $95,200. SL $93,800, TP $97,500." |
+| `phase_1_complete` | After Phase 1 baseline memo written | "Phase 1 complete. Macro: [summary]. Bias: [direction]. Moving to Phase 2." |
+| `phase_2_complete` | After Phase 2 watchlist memo written | "Phase 2 complete. Primary: BTC/USD long at $74,430. Watchlist: ETH, SOL." |
+| `phase_2_waiting` | No setup found, staying in Phase 2 | "Phase 2: No clear setup. Watching BTC @ $74k, ETH @ $2.2k. Re-scanning in 15 min." |
+| `phase_3_complete` | Kill switch ALL PASS, before execution | "Phase 3 complete. BTC/USD LONG 25x, entry $74,430, SL $73,200, TP $77,000. Executing." |
+| `phase_3_failed` | Kill switch ANY FAIL | "Phase 3: Kill switch FAILED on [check]. Returning to Phase 2." |
+| `limit_placed` | After limit order placed | "Limit placed: BTC/USD long 25x @ $74,430. SL $73,200, TP $77,000. Waiting." |
+| `limit_cancelled` | After limit order cancelled | "Limit cancelled: BTC/USD — structure broke. Returning to Phase 2." |
+| `trade_opened` | After successful market entry or limit fill | "Opened BTC/USD long 25x at $95,200. SL $93,800, TP $97,500." |
+| `trade_adjusted` | After SL/TP update | "Updated BTC/USD: SL $93,800 → $94,500. Reason: 1:1 move." |
 | `trade_closed` | After position close (manual or TP/SL) | "BTC/USD long closed at TP $97,500. PnL: +$4.20 (+8.4%)." |
+| `next_action` | After trade close, deciding next step | "Trade closed. Budget: 12 LVUSD. Fast restart — scanning for next setup." |
+| `watchlist_alert` | Watched pair reached trigger level | "Watchlist: ETH reached $2,200. Will trade after current position closes." |
 | `error` | After failed trade or unexpected error | "leverup_open_trade failed: insufficient margin. Retrying with lower size." |
 | `budget_warning` | When budget consumed > 60% | "Budget 65% consumed. 5.25 LVUSD remaining of 15." |
 | `gas_low` | When gas < 0.2 MON (before depletion) | "Gas at 0.18 MON. ~1 trade remaining before depletion." |
@@ -166,17 +176,18 @@ When running as a TeammateTool teammate (team context active), notify the leader
    get_sub_agent_state           → Budget, gas, trade count remaining
    get_all_balances              → Available collateral in SA
    check_delegation_status       → On-chain calls remaining
+
+5. Journal + notify leader:
+   write_agent_memo(agentId, text: <structured baseline>, tag: "baseline")
+   SendMessage(recipient: leader, summary: "Phase 1 complete",
+     content: "Phase 1 complete. Macro: [1-line summary]. Next event: [event + time or 'clear']. Bias: [bullish/bearish/neutral]. Moving to Phase 2 pair analysis.")
 ```
 
 **Rules:**
 - If a high-impact event (NFP, FOMC, CPI) is within 30 minutes, DO NOT open new positions. Wait for release, assess reaction, then act.
 - **Use ALL macro tools in Phase 1.** Every tool exists for a reason — economic events, weekly calendar, central bank speeches, critical news, currency strength, and FX reference. Skipping tools means trading with blind spots. The total Phase 1 macro scan costs ~$0.06 — cheap insurance against uninformed trades.
 
-**Journal checkpoint (end of Phase 1):**
-
-    write_agent_memo(agentId, text: <structured baseline>, tag: "baseline")
-
-Include: key macro data points, upcoming calendar events with dates/times,
+**Baseline memo must include:** key macro data points, upcoming calendar events with dates/times,
 currency strength snapshot, dominant narrative. This is your reference for
 Phase 6 fast restart — you'll compare against it to detect macro changes.
 
@@ -210,36 +221,39 @@ Phase 6 fast restart — you'll compare against it to detect macro changes.
 
 7. News cross-reference:
    market_search_news("ETH")     → Pair-specific catalysts?
+
+8. Produce ranked watchlist:
+   - PRIMARY: [pair] — [direction] at $[level], ready for [market/limit] entry
+   - WATCH: [pair2] — needs [condition] for setup
+   - WATCH: [pair3] — [level], needs confirmation
+
+9. Journal + notify leader:
+   write_agent_memo(agentId, text: <structured watchlist>, tag: "watchlist")
+
+   If clear setup found:
+     SendMessage(recipient: leader, summary: "Phase 2 — setup found",
+       content: "Phase 2 complete. Primary: [PAIR] [direction] at $[level]. Watchlist: [PAIR2] @ $[level], [PAIR3] @ $[level]. Moving to Phase 3 trade planning.")
+
+   If no clear setup:
+     SendMessage(recipient: leader, summary: "Phase 2 — no setup yet",
+       content: "Phase 2: No clear setup yet. Watching [PAIR1] @ $[level], [PAIR2] @ $[level]. Re-scanning in 15-30 min.")
+     → Stay in Phase 2. Re-check charts every 15-30 min (FREE).
 ```
 
 **Rule:** Only trade pairs where you have a clear thesis. "It looks like it might go up" is NOT a thesis. "ETH rejected weekly resistance at $2,800 with declining OI and hawkish Fed rhetoric" IS a thesis.
 
 **Market hours filter:** Before selecting non-crypto pairs, check current UTC time against Market Hours Awareness table. Skip any non-crypto pair if: (a) market is currently closed, (b) Friday close is within 4 hours, or (c) delegation expires before next market open. This avoids entering positions you'll be forced to close prematurely.
 
-**Phase 2 outcome:**
-- **Clear setup found** → Phase 3
-- **No clear setup** → Stay in Phase 2. Re-check charts every 15-30 min (FREE). No setup is a valid outcome. You are paid to wait, not to trade. Do NOT force a trade because you have budget and calls remaining.
+**Phase 2 rules:**
+- No setup is a valid outcome. You are paid to wait, not to trade. Do NOT force a trade because you have budget and calls remaining.
+- Phase 2 does NOT end when you pick one pair. Produce a ranked watchlist with primary + secondary setups before moving to Phase 3. This watchlist persists into Phase 5. You will re-scan these pairs during monitoring.
 
-**Watchlist (MANDATORY Phase 2 output):**
-
-Phase 2 does NOT end when you pick one pair. Before moving to Phase 3, produce a ranked watchlist:
-
-1. **Primary setup** — the pair you'll trade (→ Phase 3)
-2. **Secondary setups** (1-3 pairs) — approaching actionable levels but not ready yet.
-   Note the price level that would make each tradeable.
-
-Example:
+**Watchlist example:**
 - PRIMARY: BTC/USD — at $74,430 structural support, ready for limit long
 - WATCH: ETH/USD — needs to break below $2,200 for short setup
 - WATCH: SOL/USD — $95 support zone, needs 1 more touch to confirm
 
-This watchlist persists into Phase 5. You will re-scan these pairs during monitoring.
-
-**Journal checkpoint (end of Phase 2):**
-
-    write_agent_memo(agentId, text: <structured watchlist>, tag: "watchlist")
-
-Include: primary pair + entry level, each watched pair + trigger level, current prices.
+**Watchlist memo must include:** primary pair + entry level, each watched pair + trigger level, current prices.
 This is your reference for Phase 5 opportunity scans and Phase 6 fast restart.
 
 ### Phase 3: Trade Planning (BEFORE Execution)
@@ -299,11 +313,8 @@ Before the kill switch, argue AGAINST your own trade:
 
 Only proceed if the bull case SURVIVES the bear case, not just because it exists.
 
-**Journal checkpoint (after kill switch, before execution):**
-
-    write_agent_memo(agentId, text: <trade plan + bear case>, tag: "trade_plan")
-
-Include: pair, direction, leverage, entry, SL, TP, R:R, kill switch result (all 10 points),
+**Journal checkpoint:** Handled inside the kill switch block above (ALL PASS path).
+Include: pair, direction, leverage, entry, SL, TP, R:R, kill switch result (all 11 points),
 full bear case arguments. This is the permanent record of your trade reasoning.
 
 ### MANDATORY: Kill Switch Output
@@ -325,10 +336,23 @@ KILL SWITCH CHECK:
 [PASS/FAIL] Market hours: [crypto=exempt | non-crypto: market open + >2h until close]
 
 RESULT: ALL PASS → Execute | ANY FAIL → ABORT, return to Phase 2
+
+If ALL PASS:
+  write_agent_memo(agentId, text: <trade plan + bear case + kill switch>, tag: "trade_plan")
+  SendMessage(recipient: leader, summary: "Phase 3 complete",
+    content: "Phase 3 complete. [PAIR] [LONG/SHORT] [X]x, entry $[price] ([market/limit]),
+    SL $[sl], TP $[tp], R:R [ratio]. Executing.")
+  → Proceed to Phase 4.
+
+If ANY FAIL:
+  SendMessage(recipient: leader, summary: "Phase 3 — kill switch failed",
+    content: "Phase 3: Kill switch FAILED on [which check(s)]. Returning to Phase 2.")
+  → Return to Phase 2.
 ```
 
 Rules:
 - ANY FAIL = do not execute. Go back to Phase 2.
+- ALL PASS = execute (journal + notify leader as shown above).
 - Each PASS requires a concrete value, not just the word.
 - Skipping this checklist makes the trade procedurally invalid.
 
@@ -340,6 +364,7 @@ Rules:
 DEFAULT — Limit Entry (price is not at your planned level):
    leverup_open_limit_order      → Place at your Phase 3 entry level with TP/SL
    leverup_list_limit_orders     → Verify order is live
+   → SendMessage(recipient: leader, content: "Limit order placed: [PAIR] [side] [X]x @ $[trigger]. SL $[sl], TP $[tp]. Waiting for fill.")
 
    Monitor (while waiting for fill):
    market_get_chart              → Every 10-15 min, is price approaching? (FREE)
@@ -347,6 +372,7 @@ DEFAULT — Limit Entry (price is not at your planned level):
 
    If structure changes before fill:
    leverup_cancel_limit_order    → Cancel and reassess from Phase 2
+   → SendMessage(recipient: leader, content: "Limit cancelled: [PAIR] — [reason]. Returning to Phase 2.")
 
 EXCEPTION — Market Entry (ALL of these must be true):
    □ Price is within 0.3% of your planned entry level RIGHT NOW
@@ -391,6 +417,7 @@ After ANY successful entry (limit fill or market):
 12. Adjustments (only if warranted by NEW information):
     leverup_update_tpsl          → Tighten SL toward entry (cannot cross entry)
     leverup_update_margin        → Add margin if thesis strengthens
+    → After any SL/TP change: SendMessage(recipient: leader, content: "Updated [PAIR]: SL $[old] → $[new] / TP $[old] → $[new]. Reason: [1:1 move / thesis update / profit protection].")
 
 13. Thesis invalidation check:
     - Price broke the structure level your thesis relied on?
@@ -412,6 +439,7 @@ After ANY successful entry (limit fill or market):
     - Document it, but do NOT close a healthy position to chase it
     - If current position closes (TP/SL), this becomes your Phase 3 candidate immediately
     - If no position is open (limit pending), compare R:R — cancel and switch if clearly better
+    → SendMessage(recipient: leader, content: "Watchlist alert: [PAIR] reached $[level]. [Monitoring / Will trade after current position closes / Switching from pending limit].")
 
     This scan is FREE (Pyth charts, no delegation calls). Do NOT analyze all 20 pairs — only
     your watchlist.
@@ -534,7 +562,9 @@ After ANY successful entry (limit fill or market):
            starting with your WATCHLIST pairs (already analyzed), then expand to new candidates
          - Major new event (rate decision, NFP, geopolitical) → FULL RESTART: redo Phase 1
       This reduces dead time between trades while ensuring macro awareness.
+      → SendMessage(recipient: leader, content: "Trade closed. Budget: [remaining]. [Fast/Full] restart — [reason]. Scanning for next setup.")
     - If no → Phase 7
+      → SendMessage(recipient: leader, content: "Trade closed. [Budget depleted / Delegation expiring / Goal reached]. Moving to termination.")
 ```
 
 ### Phase 7: Termination

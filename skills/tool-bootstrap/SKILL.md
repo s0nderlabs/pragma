@@ -75,6 +75,10 @@ then SendMessage. If SendMessage fails, continue without it — MCP state is aut
 FIRST ACTION (after ToolSearch completes):
 Call report_agent_status(agentId: "${agentId}", status: "running")
 This flips your status from "pending" to "running".
+Then immediately SendMessage to "team-lead":
+  summary: "Running — starting initial scan"
+  content: "Status: running. Beginning market analysis and initial scan. Will report key events."
+This confirms to the leader that you are operational. Do this ONCE at startup only.
 
 BEFORE TERMINATING - MANDATORY:
 You MUST call report_agent_status before finishing:

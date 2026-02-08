@@ -1,6 +1,6 @@
 ---
 name: pragma-core
-description: Operates pragma wallet for on-chain trading and market intelligence. Use when user mentions pragma, wallet, balance, portfolio, swap, trade, buy, sell, transfer, send, stake, unstake, wrap, unwrap, tokens, DeFi, price, chart, market, position, leverage, perps, perpetuals, memecoin, nadfun, nad.fun, leverup, transaction, contract, block, gas, news, economic, forex, currency, MON, USDC, WMON, LVUSD, Monad, or any on-chain operation.
+description: Operates pragma wallet for on-chain trading and market intelligence. Use when user mentions pragma, wallet, balance, portfolio, swap, trade, buy, sell, transfer, send, wrap, unwrap, tokens, DeFi, price, chart, market, position, leverage, perps, perpetuals, memecoin, nadfun, nad.fun, leverup, transaction, contract, block, gas, news, economic, forex, currency, MON, USDC, WMON, LVUSD, Monad, or any on-chain operation.
 allowed-tools:
   - mcp__pragma__has_wallet
   - mcp__pragma__has_providers
@@ -14,7 +14,6 @@ allowed-tools:
   - mcp__pragma__transfer
   - mcp__pragma__wrap
   - mcp__pragma__unwrap
-  - mcp__pragma__stake
   - mcp__pragma__check_session_key_balance
   - mcp__pragma__fund_session_key
   - mcp__pragma__withdraw_session_key
@@ -109,7 +108,7 @@ When skill activates or user appears new:
 
 **MANDATORY: ALWAYS check session key balance before ANY transaction.**
 
-For swap, transfer, stake, wrap, unwrap:
+For swap, transfer, wrap, unwrap:
 
 ### Single Operation
 
@@ -147,7 +146,7 @@ Execute multiple tool calls simultaneously when operations are **independent**:
 | ------------------------------------------ | ------------------------------------ | ------------------------ |
 | "swap 0.5 MON to USDC and 0.5 MON to AUSD" | Parallel quotes, parallel executions | No data dependency       |
 | "show my NFTs and token balance"           | Parallel calls                       | Read-only, no dependency |
-| "wrap 1 MON and stake 2 MON"               | Parallel executions                  | Different operations     |
+| "wrap 1 MON and transfer 2 MON to 0x..."   | Parallel executions                  | Different operations     |
 | Multiple getBalance for different tokens   | Parallel calls                       | Independent reads        |
 
 **Pattern for parallel execution:**
@@ -201,17 +200,15 @@ Before executing multiple operations, calculate total gas needed:
 | transfer  | 0.04           |
 | wrap      | 0.04           |
 | unwrap    | 0.04           |
-| stake     | 0.07           |
-| unstake   | 0.075          |
 
 **Formula:** `total_gas = sum(operation_costs) + 0.02 MON buffer`
 
-**Example:** "swap to USDC and stake 1 MON"
+**Example:** "swap to USDC and transfer 1 MON"
 
 - Swap: 0.14 MON
-- Stake: 0.07 MON
+- Transfer: 0.04 MON
 - Buffer: 0.02 MON
-- **Total: 0.23 MON needed**
+- **Total: 0.20 MON needed**
 
 **Workflow:**
 
@@ -237,7 +234,6 @@ Before executing multiple operations, calculate total gas needed:
 | Transfer  | `transfer`                  | Send tokens (Touch ID)                                         |
 | Convert   | `wrap`                      | Native to Wrapped                                              |
 | Convert   | `unwrap`                    | Wrapped to Native                                              |
-| Stake     | `stake`                     | Stake to liquid staking                                        |
 | Session   | `check_session_key_balance` | Check gas funding                                              |
 | Session   | `fund_session_key`          | Fund for operations                                            |
 | Session   | `withdraw_session_key`      | Withdraw MON from session key                                  |
@@ -413,19 +409,6 @@ For multiple independent swaps (e.g., "swap 1 MON to USDC and 1 MON to AUSD"):
 3. If confirmed: `check_session_key_balance` (operationType: "wrap"/"unwrap")
 4. If needsFunding - `fund_session_key`
 5. `wrap` or `unwrap`
-6. Report result
-
-### Stake
-
-1. `get_balance` (native token)
-2. **Use `AskUserQuestion`:**
-   - Header: "Stake"
-   - Question: "Stake X MON to receive aprMON?"
-   - Options: ["Confirm stake", "Cancel"]
-   - Description: Include staking implications
-3. If confirmed: `check_session_key_balance` (operationType: "stake")
-4. If needsFunding - `fund_session_key`
-5. `stake`
 6. Report result
 
 ### nad.fun Trading
@@ -871,19 +854,7 @@ User: "swap 1 MON to USDC, then swap that USDC to DAK"
 2. Use actual USDC output for second swap
 3. `get_swap_quote` USDC→DAK, confirm, execute
 
-### Example 3: Mixed Operations
-
-User: "wrap 1 MON and stake 2 MON"
-
-**Analysis:** Independent operations → PARALLEL
-
-**Execution:**
-
-1. `get_balance` (verify 3+ MON available)
-2. `check_session_key_balance(estimatedOperations: 2)`, fund if needed → WAIT
-3. Execute `wrap` and `stake` in parallel
-
-### Example 4: Relative Amount ("all", "half", "max")
+### Example 3: Relative Amount ("all", "half", "max")
 
 User: "swap all my CHOG to MON"
 

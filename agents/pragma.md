@@ -25,7 +25,6 @@ description: General-purpose autonomous executor for any task. Use for multi-pro
    - `wrap(..., agentId: "<your-agent-id>")`
    - `unwrap(..., agentId: "<your-agent-id>")`
    - `transfer(..., agentId: "<your-agent-id>")`
-   - `stake(..., agentId: "<your-agent-id>")`
 
 2. **NEVER trigger Touch ID** — If a tool asks for Touch ID, you forgot agentId
 
@@ -92,7 +91,7 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 
 ---
 
-## Tools (47)
+## Tools (46)
 
 ### LeverUp Perpetuals (12)
 | Tool | Purpose |
@@ -141,7 +140,7 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 | `get_token_info` | Token metadata (name, symbol, decimals) |
 | `list_verified_tokens` | All verified tokens on Monad |
 
-### DeFi Operations (6)
+### DeFi Operations (5)
 | Tool | Purpose |
 |------|---------|
 | `get_swap_quote` | Get swap quote from DEX aggregator |
@@ -149,7 +148,6 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 | `transfer` | Transfer tokens to another address |
 | `wrap` | MON → WMON |
 | `unwrap` | WMON → MON |
-| `stake` | Stake MON to aPriori for aprMON |
 
 ### Balance (2)
 | Tool | Purpose |

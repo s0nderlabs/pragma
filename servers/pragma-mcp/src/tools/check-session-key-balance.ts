@@ -27,11 +27,11 @@ import { isX402Mode } from "../core/x402/client.js";
 
 const CheckSessionKeyBalanceSchema = z.object({
   operationType: z
-    .enum(["swap", "transfer", "wrap", "unwrap", "stake", "unstake"])
+    .enum(["swap", "transfer", "wrap", "unwrap"])
     .optional()
     .describe(
       "Type of operation to check balance for. Each operation has different gas costs: " +
-        "swap=0.14 MON, transfer/wrap/unwrap=0.04 MON, stake=0.07 MON, unstake=0.075 MON"
+        "swap=0.14 MON, transfer/wrap/unwrap=0.04 MON"
     ),
   estimatedOperations: z
     .number()

@@ -8,7 +8,6 @@ import { registerGetSwapQuote } from "./get-swap-quote.js";
 import { registerExecuteSwap } from "./execute-swap.js";
 import { registerTransfer } from "./transfer.js";
 import { registerWrap, registerUnwrap } from "./wrap.js";
-import { registerStake } from "./stake.js";
 import { registerCheckSessionKeyBalance } from "./check-session-key-balance.js";
 import { registerFundSessionKey } from "./fund-session-key.js";
 import { registerListVerifiedTokens } from "./list-verified-tokens.js";
@@ -81,7 +80,6 @@ export function registerTools(server: McpServer): void {
   registerTransfer(server);
   registerWrap(server);
   registerUnwrap(server);
-  registerStake(server);
   registerGetBlock(server);
   registerGetGasPrice(server);
   registerExplainTransaction(server);
