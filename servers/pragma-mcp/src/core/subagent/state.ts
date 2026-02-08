@@ -301,10 +301,24 @@ function getAgentsDir(): string {
 }
 
 /**
+ * Validate agentId format (UUID only) to prevent path traversal
+ */
+const AGENT_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+
+/**
  * Get the directory path for a specific agent
+ * @throws if agentId contains path traversal or invalid characters
  */
 function getAgentDir(agentId: string): string {
-  return path.join(getAgentsDir(), agentId);
+  if (!AGENT_ID_PATTERN.test(agentId)) {
+    throw new Error(`Invalid agent ID format: must be a UUID`);
+  }
+  const agentsDir = getAgentsDir();
+  const resolved = path.resolve(agentsDir, agentId);
+  if (!resolved.startsWith(agentsDir)) {
+    throw new Error(`Invalid agent ID: path traversal detected`);
+  }
+  return resolved;
 }
 
 /**

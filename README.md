@@ -5,7 +5,7 @@
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://support.apple.com/macos)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-cc785c?logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
 [![Monad](https://img.shields.io/badge/Monad-live-836EF9)](https://monad.xyz)
-[![Version](https://img.shields.io/badge/version-0.8.40-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.41-green.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![pragma demo](assets/hero.gif)
@@ -238,16 +238,16 @@ pragma uses a **passkey-secured smart account** with a **delegated session key**
 
 ```mermaid
 graph LR
-    A["🔐 You\n(Touch ID)"]
-    B["🔑 Passkey (P-256)\nmacOS Keychain"]
-    C["🏦 Smart Account\nHybridDeleGator"]
-    D["⚡ Session Key\n(Claude's EOA)"]
-    E["📝 Trade Execution\nredeemDelegations()"]
+    A["🔐 You<br/>(Touch ID)"]
+    B["🔑 Passkey (P-256)<br/>macOS Keychain"]
+    C["🏦 Smart Account<br/>HybridDeleGator"]
+    D["⚡ Session Key<br/>(Claude's EOA)"]
+    E["📝 Trade Execution<br/>redeemDelegations()"]
 
-    A -->|"biometric\nauth"| B
-    B -->|"authorized\nsigner"| C
-    C -->|"signs\ndelegation"| D
-    D -->|"executes\non-chain"| E
+    A -->|"biometric<br/>auth"| B
+    B -->|"authorized<br/>signer"| C
+    C -->|"signs<br/>delegation"| D
+    D -->|"executes<br/>on-chain"| E
 
     style A fill:#7c3aed,stroke:#a78bfa,color:#fff,stroke-width:2px
     style B fill:#6d28d9,stroke:#8b5cf6,color:#fff,stroke-width:2px
@@ -389,12 +389,12 @@ Each agent gets its own wallet from a pool and a sub-delegation from the root de
 ```mermaid
 graph TD
     A["🔐 You (Touch ID once)"]
-    B["⚡ Session Key\n(main Claude)"]
-    C["📈 Kairos\n$50 perps budget"]
-    D["🎯 Thymos\n$25 memecoin budget"]
-    E["🔧 Pragma\n$25 general budget"]
+    B["⚡ Session Key<br/>(main Claude)"]
+    C["📈 Kairos<br/>$50 perps budget"]
+    D["🎯 Thymos<br/>$25 memecoin budget"]
+    E["🔧 Pragma<br/>$25 general budget"]
 
-    A -->|"Root delegation\n$100 · 7 days · 100 calls"| B
+    A -->|"Root delegation<br/>$100 · 7 days · 100 calls"| B
     B -->|"Sub-delegation"| C
     B -->|"Sub-delegation"| D
     B -->|"Sub-delegation"| E

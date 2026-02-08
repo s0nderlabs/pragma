@@ -6,6 +6,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { Address } from "viem";
 import { z } from "zod";
 import { stat } from "fs/promises";
+import * as path from "node:path";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
 import {
@@ -169,7 +170,18 @@ async function nadFunCreateHandler(
       };
     }
 
-    // Check 2: Image file exists
+    // Check 2: Image file extension (prevent arbitrary file exfiltration)
+    const ALLOWED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp"];
+    const ext = path.extname(params.imagePath).toLowerCase();
+    if (!ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
+      return {
+        success: false,
+        message: "Invalid image format",
+        error: `Image must be PNG, JPEG, or WebP (got: ${ext || "no extension"})`,
+      };
+    }
+
+    // Check 3: Image file exists
     const imageExists = await fileExists(params.imagePath);
     if (!imageExists) {
       return {

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.41] - 2026-02-08
+
+### Security
+- **agentId path traversal fix** — Added UUID format validation and path containment check to prevent directory traversal via crafted agent IDs
+- **imagePath file exfiltration fix** — Token creation now validates image file extension (PNG/JPEG/WebP only) before upload
+
+### Fixed
+- **Mermaid diagrams rendering `\n` literally** — Replaced `\n` with `<br/>` in README diagrams for proper GitHub rendering
+
 ## [0.8.40] - 2026-02-08
 
 ### Added
