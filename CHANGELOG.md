@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.43] - 2026-02-09
+
+### Added
+- **Time accuracy rule** — All agent definitions (kairos, thymos, pragma) now require `Bash('date -u')` before time-sensitive decisions. Spawn prompt includes `CURRENT TIME:` field
+- **Long-wait sleep pattern** — Background sleep + TaskOutput pattern documented in all agent definitions for waits >10 min (Bash tool has a 10-min timeout cap)
+- **Sleep enforcement for thymos/pragma** — Thymos gains `sleep 120` between monitoring cycles, Pragma gains condition-dependent sleep enforcement (previously only kairos had `sleep 600`)
+
 ## [0.8.42] - 2026-02-09
 
 ### Added

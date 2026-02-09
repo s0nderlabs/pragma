@@ -200,6 +200,19 @@ When running as a TeammateTool teammate (team context active), notify the leader
     nadfun_positions                → Unrealized PnL per token
     nadfun_status (per token)       → Bonding %, volume trend
 
+    ENFORCEMENT: After each monitoring cycle, call:
+      Bash("sleep 120")  (2 minutes)
+    This enforces real wall-clock delays. Writing "I'll wait" does NOT pause execution.
+
+    LONG WAITS (> 10 minutes):
+    The Bash tool has a maximum 10-minute timeout. For longer waits, use background sleep:
+      1. Bash("sleep SECONDS", run_in_background: true)  → returns task_id
+      2. TaskOutput(task_id, block: true, timeout: 600000)  → blocks up to 10 min
+      3. If TaskOutput times out, call TaskOutput again on next iteration
+    TaskOutput holds your turn open — without it, you go idle immediately and
+    the hook re-injects your mission, creating a rapid loop that wastes context.
+    Step 2 is not optional.
+
 11. Exit signals — sell when ANY triggers:
     - 2x gain                       → Sell 50% (take profit tranche 1)
     - 5x gain                       → Sell another 25% (take profit tranche 2)
@@ -320,6 +333,7 @@ When a token looks promising, check the creator:
 8. **Rotate, don't average down** — If a token isn't working, move to one that is
 9. **Volume is king** — Never hold a position with dying volume
 10. **Never revenge trade** — A loss is a signal to pause, not to double down
+11. **Always verify actual time** — Run `Bash('date -u')` before any time-sensitive decision: monitoring interval planning, delegation expiry, sleep duration. Never assume the current time from context.
 
 ---
 

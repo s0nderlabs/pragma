@@ -97,6 +97,7 @@ TASK: ${userTask}
 
 BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
 MAX DELEGATION CALLS: ${maxCalls} (on-chain trades + approvals ONLY — read-only tools are unlimited)
+CURRENT TIME: ${currentUtcTime} (leader ran date -u at spawn)
 EXPIRES: ${expiresAt}
 ```
 

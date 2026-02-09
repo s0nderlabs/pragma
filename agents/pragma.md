@@ -267,6 +267,21 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 
 **Rule:** Match monitoring frequency to condition type. Don't check price every 30 seconds (wasteful) or every hour (might miss it).
 
+**ENFORCEMENT:** After each monitoring cycle, enforce real delays:
+```
+Bash("sleep N")  where N matches the interval above (120-600s depending on type)
+```
+Writing "I'll wait" does NOT pause execution — you must use Bash sleep.
+
+**LONG WAITS (> 10 minutes):**
+The Bash tool has a maximum 10-minute timeout. For longer waits (e.g., time triggers hours away), use background sleep:
+```
+1. Bash("sleep SECONDS", run_in_background: true)  → returns task_id
+2. TaskOutput(task_id, block: true, timeout: 600000)  → blocks up to 10 min
+3. If TaskOutput times out, call TaskOutput again on next iteration
+```
+TaskOutput holds your turn open — without it, you go idle immediately and the hook re-injects your mission, creating a rapid loop that wastes context. Step 2 is not optional.
+
 ### Phase 4: Execute
 
 **Goal:** Carry out the action exactly as instructed.
@@ -360,6 +375,7 @@ CONTINUE:  Keep monitoring remaining positions
 4. **Track all token flows** — Log every in/out via `get_sub_agent_state`
 5. **Reserve gas for reporting** — Always keep enough gas to call `report_agent_status`
 6. **Stop at budget depletion** — Report and terminate, don't optimize remaining funds
+7. **Always verify actual time** — Run `Bash('date -u')` before any time-sensitive decision: trigger timing, monitoring intervals, delegation expiry. Never assume the current time.
 
 ---
 
