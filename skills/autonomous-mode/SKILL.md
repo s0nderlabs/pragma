@@ -601,10 +601,8 @@ After receiving "READY", the leader MUST:
 1. Run `Bash('date -u')` to get the current UTC time
 2. Send the message below with all variables filled in
 
-The agent definition already contains all behavioral rules (agentId handling, gas protocol,
-delegation rules, monitoring cadence, leader notifications, etc.). The Turn 2 message only
-needs to provide **ToolSearch queries** and **per-spawn context** that the agent definition
-cannot know in advance.
+The agent definition contains behavioral rules but the spawn message MUST reinforce
+key operational context that agents drop after context compaction.
 
 Pick ToolSearch queries based on agent type:
 - **kairos:** `+pragma report agent status balance swap`, `+pragma leverup market chart news`
@@ -622,6 +620,22 @@ ToolSearch(query: "${query2}")
 Call both ToolSearch queries now. Then begin your mission.
 
 Your agentId: ${agentId}
+
+WALLET ARCHITECTURE:
+Your trading capital lives in the SMART ACCOUNT (delegator), not your wallet.
+Your wallet only holds MON gas. When checking balances for trades, always use
+the smart account address (from get_account_info), never your own wallet.
+
+TEAM COMMUNICATION:
+You are a teammate. Use SendMessage to notify the leader of key events:
+trade entries/exits, status changes, budget warnings, mission completion.
+Follow your Leader Notification Protocol for event types and cadence.
+Always call MCP state tools FIRST (report_agent_status, write_agent_memo),
+THEN SendMessage. If SendMessage fails, continue — MCP state is authoritative.
+
+FIRST ACTION (after ToolSearch completes):
+1. report_agent_status(agentId: "${agentId}", status: "running")
+2. SendMessage to "team-lead": summary: "Running — starting initial scan"
 
 TASK: ${userTask}
 BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
