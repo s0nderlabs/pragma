@@ -167,7 +167,7 @@ export async function buildNadFunQuote(
   // Log if router differs from expected (informational only)
   const contracts = getNadFunContracts(chainId);
   if (router.toLowerCase() !== contracts.router.toLowerCase()) {
-    console.log(`[nadfun] Using Lens-returned router: ${router} (expected ${contracts.router})`);
+    console.error(`[nadfun] Using Lens-returned router: ${router} (expected ${contracts.router})`);
   }
 
   // Calculate minimum output with slippage (only applies to output)

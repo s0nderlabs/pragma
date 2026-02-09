@@ -136,7 +136,7 @@ export async function loadConfig(): Promise<PragmaConfig | null> {
     if (originalStr !== migratedStr) {
       // Save migrated config
       await saveConfig(config);
-      console.log("[config] Migrated config to new format");
+      console.error("[config] Migrated config to new format");
     }
 
     return config;

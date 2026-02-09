@@ -328,7 +328,7 @@ export async function executeQuoteRequest(
     const url = await buildUrl(adapter.endpoint, providerParams, adapter);
     const headers = await buildHeaders(adapter);
 
-    console.log(`[adapters] Fetching quote from ${adapter.name}: ${url}`);
+    console.error(`[adapters] Fetching quote from ${adapter.name}: ${url}`);
 
     // Make request with retry for transient errors
     const fetchResult = await withRetry(
@@ -415,7 +415,7 @@ export async function executeQuoteWithFallback(
   const errors: string[] = [];
 
   for (const adapter of adapterResult.adapters) {
-    console.log(`[adapters] Trying quote adapter: ${adapter.name}`);
+    console.error(`[adapters] Trying quote adapter: ${adapter.name}`);
     const result = await executeQuoteRequest(request, adapter);
 
     if (result.success) {
@@ -423,7 +423,7 @@ export async function executeQuoteWithFallback(
     }
 
     errors.push(`${adapter.name}: ${result.error}`);
-    console.log(`[adapters] Adapter ${adapter.name} failed: ${result.error}`);
+    console.error(`[adapters] Adapter ${adapter.name} failed: ${result.error}`);
   }
 
   return failResult(`All quote adapters failed: ${errors.join("; ")}`, "none", Date.now());
@@ -489,7 +489,7 @@ export async function executeDataRequest<T>(
       const url = `${adapter.endpoint}${path}`;
       const headers = await buildHeaders(adapter);
 
-      console.log(`[adapters] Fetching data from ${adapter.name}: ${url}`);
+      console.error(`[adapters] Fetching data from ${adapter.name}: ${url}`);
 
       // Fetch with retry for transient errors
       const fetchResult = await withRetry(

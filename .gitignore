@@ -53,3 +53,7 @@ assets/tweet-*
 
 # pragma config (user-specific)
 ~/.pragma/
+
+# DXT build artifacts
+dxt/build/
+dxt/*.mcpb

@@ -5,7 +5,7 @@
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://support.apple.com/macos)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-cc785c?logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
 [![Monad](https://img.shields.io/badge/Monad-live-836EF9)](https://monad.xyz)
-[![Version](https://img.shields.io/badge/version-0.8.47-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.48-green.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![pragma demo](assets/hero.gif)
@@ -18,7 +18,7 @@ pragma is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that t
 
 **Currently live on [Monad](https://monad.xyz).** Built with [MetaMask Smart Accounts Kit](https://docs.metamask.io/smart-accounts-kit/) and [x402](https://www.x402.org/) (pay-per-API-call with USDC — no keys to configure).
 
-> **Currently macOS only.** pragma uses Touch ID and macOS Keychain for key security — your passkey never leaves your device. This is a deliberate design choice: no server, no cloud, no browser extension. Everything runs locally on your Mac.
+> **Currently macOS only.** Works in Claude Code CLI (full experience) and Claude Desktop / Cowork (experimental). pragma uses Touch ID and macOS Keychain for key security — your passkey never leaves your device. This is a deliberate design choice: no server, no cloud, no browser extension. Everything runs locally on your Mac.
 
 ### Not another AI wallet
 
@@ -41,6 +41,7 @@ Everything runs on your machine. Keys never leave your device. Your funds never 
 
 - [Features](#features)
 - [Installation](#installation)
+- [Claude Desktop & Cowork](#claude-desktop--cowork)
 - [Quick Start](#quick-start)
 - [Commands](#commands)
 - [Modes](#modes)
@@ -138,6 +139,45 @@ Add the following to your `~/.claude/settings.json` to enable deferred tool load
 ```
 
 Without `ENABLE_TOOL_SEARCH`, all 62 tools load at session start and consume context. With it enabled, only core tools load immediately — the rest are loaded on-demand via tool search.
+
+---
+
+## Claude Desktop & Cowork
+
+> **Experimental.** Cowork support is new and under active testing.
+
+pragma works in Claude Desktop and Cowork through a [Desktop Extension](https://www.anthropic.com/engineering/desktop-extensions) (DXT) that runs on the macOS host — same wallet, same Touch ID, same tools.
+
+### What Works
+
+| Feature | Claude Code CLI | Claude Desktop / Cowork |
+|---------|:-:|:-:|
+| MCP tools (62) | Yes | Yes |
+| Skills & commands | Yes | Yes (Cowork only) |
+| Assistant mode (Touch ID per action) | Yes | Yes |
+| Autonomous agents | Yes (persistent loops) | Partial (runs then exits) |
+| x402 and BYOK modes | Yes | Yes |
+
+**Autonomous agent limitation:** In Claude Code, hooks keep agents alive between monitoring cycles (SubagentStop, TeammateIdle). These hooks aren't available in Cowork — agents can spawn and trade, but they complete their turns and exit rather than looping indefinitely. For persistent autonomous trading, use Claude Code CLI.
+
+### Install (Claude Desktop)
+
+Download `pragma.mcpb` from [Releases](https://github.com/s0nderlabs/pragma/releases) and double-click to install. No plugin needed — you get all 62 MCP tools with Touch ID.
+
+### Install (Cowork)
+
+For the full experience in Cowork (tools + skills + agents), install both in any order:
+
+1. **Desktop Extension** (MCP tools on macOS host):
+   Download `pragma.mcpb` from [Releases](https://github.com/s0nderlabs/pragma/releases) and double-click.
+
+2. **Plugin** (skills, agents, commands, hooks):
+   ```
+   /plugin marketplace add s0nderlabs/pragma
+   /plugin install pragma@pragma-marketplace
+   ```
+
+Both use the same wallet and config (`~/.pragma/config.json`). Run `/pragma:setup` from Cowork after installing both, or set up from Claude Code CLI first.
 
 ---
 
@@ -603,6 +643,12 @@ Check agent status with `list_sub_agents`. If an agent is stuck, `revoke_sub_age
 
 **Signer binary outdated after update**
 Re-run `/pragma:setup` to rebuild the Swift binary.
+
+**DXT tools not working in Claude Desktop**
+Claude Desktop may pick an old Node.js version from nvm. It scans `~/.nvm/versions/node/` and can select the lowest version (e.g., v16) instead of your default. Fix: remove Node versions below v20 from `~/.nvm/versions/node/`. Verify with `ls ~/.nvm/versions/node/` — only v20+ should remain.
+
+**DXT balances return empty / tools silently fail**
+Usually caused by the Node version issue above. Claude Desktop running Node < 20 causes `crypto.subtle` to be unavailable, which silently breaks x402 payment signing. The tool reports success with empty results instead of an error.
 
 ---
 
