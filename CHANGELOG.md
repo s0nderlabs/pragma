@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.45] - 2026-02-09
+
+### Fixed
+- Clarify Pyth oracle fee is 1 wei per trade in budget configuration guidance
+- Update MON budget AskUserQuestion to recommend 1 MON as safety floor for ERC20 strategies
+
 ## [0.8.44] - 2026-02-09
 
 ### Changed

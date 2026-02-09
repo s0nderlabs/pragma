@@ -62,8 +62,8 @@ const CreateSubAgentSchema = z.object({
     .max(100)
     .describe(
       "MON trading capital for this sub-agent. Must fit within root budgetMon. " +
-        "Minimum 1 MON required for kairos/pragma agents (LeverUp needs native MON for Pyth oracle fees). " +
-        "thymos agents can use 0 for ERC20-only strategies."
+        "kairos/pragma require >= 1 (LeverUp's 1 wei Pyth fee needs ValueLteEnforcer > 0). " +
+        "For ERC20 strategies, 1 MON is a safety floor, not actual spend. thymos can use 0."
     ),
   budgetUsd: z
     .number()
@@ -370,15 +370,15 @@ async function createSubAgentHandler(
         }
       }
 
-      // LeverUp-capable agents (kairos, pragma) require budgetMon >= 1 for Pyth oracle fees
-      // Pyth fees are sent as execution.value even for ERC20 collateral trades
+      // LeverUp-capable agents require budgetMon >= 1:
+      // Pyth fee (1 wei) is blocked when ValueLteEnforcer = 0 (i.e. budgetMon: 0)
       const isLeverUpCapable = params.agentType === "kairos" || params.agentType === "pragma";
       if (isLeverUpCapable && params.budgetMon < 1) {
         await releaseWallet(poolWallet.id);
         return {
           success: false,
           message: "Insufficient MON budget for LeverUp agent",
-          error: `${params.agentType} agents require budgetMon >= 1. LeverUp trades need native MON for Pyth oracle fees even with ERC20 collateral (LVUSD/USDC). Use budgetMon >= 1 or switch to thymos agent type for ERC20-only strategies.`,
+          error: `${params.agentType} agents require budgetMon >= 1. LeverUp's Pyth oracle fee (1 wei) is sent as execution.value — budgetMon: 0 sets ValueLteEnforcer to 0, blocking it. For ERC20 strategies this is a safety floor, not actual spend. Use budgetMon >= 1 or thymos agent type.`,
         };
       }
 

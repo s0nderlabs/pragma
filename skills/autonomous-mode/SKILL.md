@@ -262,7 +262,7 @@ Two levels of token restriction (more specific wins):
 3. **Delegation has expiry** - Sub-agent stops working when delegation expires
 4. **Max calls enforced** - `limitedCalls` caveat limits total delegation calls (trades + approvals)
 5. **Decimal normalization** - USD group budget uses 6-decimal canonical; LVUSD (18 dec) is normalized before comparison
-6. **LeverUp requires budgetMon >= 1** - All LeverUp trades (even with ERC20 collateral like LVUSD/USDC) send a Pyth oracle fee as `execution.value`. With `budgetMon: 0`, both the off-chain budget check and on-chain `ValueLteEnforcer` block the trade. Only thymos agents (no LeverUp) can use `budgetMon: 0`
+6. **LeverUp requires budgetMon >= 1** - LeverUp sends a 1 wei Pyth oracle fee as `execution.value`. With `budgetMon: 0`, the on-chain `ValueLteEnforcer` blocks it. For ERC20 strategies, 1 MON is a safety floor (not actual spend). Only thymos agents can use `budgetMon: 0`
 
 ## When to Use Which Mode
 
@@ -374,17 +374,23 @@ Use `AskUserQuestion` to get budget (user must specify). These become the root d
 Header: "MON Budget"
 Question: "How much MON should this agent trade with?"
 Options:
-  - 0 MON (USD-only strategy)
+  - 1 MON (Recommended for ERC20 strategies)
   - 5 MON
   - 10 MON
   - Custom amount
 Description: |
   Your balance: X MON
 
-  This is the max MON trading capital. 0 = block all native MON trades.
-  ⚠ 0 MON cannot be used with LeverUp (kairos/pragma agents) —
-  LeverUp requires native MON for Pyth oracle fees even with
-  ERC20 collateral (LVUSD/USDC). Use at least 1 MON for LeverUp.
+  budgetMon sets both the native MON trading capital and the
+  on-chain per-tx cap (budgetMon / maxCalls via ValueLteEnforcer).
+
+  For ERC20 strategies (LVUSD/USDC collateral): 1 MON is the
+  minimum — it unlocks the 1 wei Pyth oracle fee that LeverUp
+  requires. This is a safety floor, not actual MON spend. Your
+  real trading capital comes from the USD budget below.
+
+  0 MON blocks all native value transfers on-chain, so
+  kairos/pragma agents require >= 1.
 ```
 
 If the user's task involves USD-denominated collateral (e.g., LeverUp with LVUSD/USDC), also ask for USDC budget:
