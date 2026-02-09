@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.47] - 2026-02-09
+
+### Fixed
+- Ship correct esbuild distribution bundle (1.8MB) — previous commits shipped tsc output (659 bytes) causing plugin load failure
+
 ## [0.8.46] - 2026-02-09
 
 ### Fixed
