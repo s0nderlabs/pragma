@@ -185,7 +185,7 @@ export async function loadVerifiedTokens(chainId: number): Promise<TokenInfo[]> 
       tokensByAddress.set(token.address.toLowerCase(), token);
     }
 
-    console.log(`[tokens] Loaded ${tokens.length} verified tokens from Data API`);
+    console.error(`[tokens] Loaded ${tokens.length} verified tokens from Data API`);
     return tokens;
   } catch (error) {
     console.warn(

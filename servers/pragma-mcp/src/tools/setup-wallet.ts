@@ -158,9 +158,9 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
     }
 
     const coords = parseP256PublicKey(passkeyPublicKey);
-    console.log(`P-256 Public Key ${isNewPasskey ? "created" : "retrieved"}:`);
-    console.log(`  X: 0x${coords.x.toString(16).slice(0, 16)}...`);
-    console.log(`  Y: 0x${coords.y.toString(16).slice(0, 16)}...`);
+    console.error(`P-256 Public Key ${isNewPasskey ? "created" : "retrieved"}:`);
+    console.error(`  X: 0x${coords.x.toString(16).slice(0, 16)}...`);
+    console.error(`  Y: 0x${coords.y.toString(16).slice(0, 16)}...`);
 
     // During x402 setup, use a free public RPC to avoid the x402 proxy chicken-and-egg:
     // viem's toSmartAccount internally calls getCode via the public client, but the

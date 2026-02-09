@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.48] - 2026-02-09
+
+### Added
+- Desktop Extension (DXT) packaging for Claude Desktop and Cowork — `dxt/manifest.json` manifest + `scripts/build-mcpb.sh` build script
+- Cowork detection — plugin MCP server skips tool registration inside Cowork VM so DXT handles tools on the macOS host
+- TeammateIdle hook for autonomous agent loop enforcement with teammate agents
+
+### Fixed
+- `console.log` corrupting MCP stdio protocol — 18 statements wrote to stdout (JSON-RPC channel), causing server restarts and quote cache loss; all changed to `console.error`
+
 ## [0.8.47] - 2026-02-09
 
 ### Fixed

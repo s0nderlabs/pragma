@@ -212,7 +212,7 @@ export async function fetchQuote(request: QuoteRequest): Promise<SwapQuote | nul
   }
 
   if (!data.liquidityAvailable) {
-    console.log("[quote] No liquidity available for this swap");
+    console.error("[quote] No liquidity available for this swap");
     return null;
   }
 
@@ -261,7 +261,7 @@ async function fetchQuoteByok(request: QuoteRequest): Promise<SwapQuote | null> 
   const data = result.data;
 
   if (!data.liquidityAvailable) {
-    console.log("[quote] No liquidity available for this swap");
+    console.error("[quote] No liquidity available for this swap");
     return null;
   }
 

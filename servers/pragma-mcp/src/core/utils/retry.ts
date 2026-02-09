@@ -154,7 +154,7 @@ export async function withRetry<T>(
       if (attempt < maxRetries && isTransient(lastError)) {
         retryCount++;
         const delay = calculateDelay(attempt, baseDelayMs, exponentialBackoff);
-        console.log(
+        console.error(
           `[retry] ${operationName} failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError.message}. Retrying in ${delay}ms...`
         );
         await sleep(delay);

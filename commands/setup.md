@@ -11,7 +11,32 @@ This command builds pragma from source and creates your wallet.
 
 Pragma requires macOS with Touch ID for secure key storage.
 
-## Important: Two-Phase Setup
+## Step 0: Detect Environment
+
+Check if running inside Cowork (Linux VM):
+```bash
+echo $HOME
+```
+
+**If `$HOME` starts with `/sessions/`:** This is Cowork. The signer binary is pre-bundled in the Desktop Extension (DXT) — no Swift build needed. **Skip directly to Step 3.1** (Load Skills → Check Wallet → Create Wallet).
+
+**CRITICAL Cowork rules:**
+- Do NOT check for `~/.pragma/` or any local files to determine tool availability. In Cowork, config lives on the macOS host, not inside the VM. The VM filesystem tells you nothing about pragma's state.
+- Just call the MCP tools directly (e.g., `has_wallet`). They are provided by the DXT running on the macOS host.
+- If a tool call fails with an error, THAT means tools aren't available. A missing directory does NOT mean tools are unavailable.
+
+If MCP tools genuinely fail (tool not found error, not just empty results), tell the user:
+```
+Cowork detected but MCP tools are not responding.
+Make sure the Desktop Extension is installed:
+  Download pragma.mcpb from https://github.com/s0nderlabs/pragma/releases and double-click to install.
+If already installed, close this Cowork session and open a new one (sessions cache MCP config at start).
+Then re-run /pragma:setup.
+```
+
+**If `$HOME` is a normal macOS path** (e.g., `/Users/...`): This is Claude Code CLI. Continue with the full two-phase setup below.
+
+## Important: Two-Phase Setup (Claude Code CLI only)
 
 Setup requires a session restart midway because MCP tools are only discovered at session start.
 

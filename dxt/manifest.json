@@ -1,0 +1,43 @@
+{
+  "manifest_version": "0.3",
+  "name": "pragma",
+  "version": "0.8.47",
+  "display_name": "Pragma",
+  "description": "Vibetrading for Claude — on-chain trading and market intelligence on Monad",
+  "long_description": "Trade, analyze, and execute transactions on Monad blockchain. Includes swaps, transfers, leveraged perpetuals (LeverUp), memecoins (nad.fun), market intelligence, and autonomous trading agents.",
+  "author": {
+    "name": "s0nderlabs",
+    "email": "s0nderlabs.hq@gmail.com",
+    "url": "https://github.com/s0nderlabs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/s0nderlabs/pragma"
+  },
+  "homepage": "https://github.com/s0nderlabs/pragma",
+  "support": "https://github.com/s0nderlabs/pragma/issues",
+  "license": "MIT",
+  "keywords": ["trading", "crypto", "blockchain", "monad", "defi", "wallet", "swap", "perps"],
+  "tools_generated": true,
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {
+        "PRAGMA_CONFIG_PATH": "${HOME}/.pragma/config.json",
+        "PRAGMA_SIGNER_PATH": "${__dirname}/bin/pragma-signer"
+      }
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "privacy_policies": [
+    "https://github.com/s0nderlabs/pragma/blob/main/PRIVACY.md"
+  ]
+}

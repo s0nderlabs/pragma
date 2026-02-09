@@ -125,7 +125,7 @@ export async function getTokenStatus(
       status.requiredMon = formatUnits(requiredMonWei, 18);
     } catch (error) {
       // Non-critical, continue without availability info
-      console.log("[nadfun] Could not fetch availability:", error);
+      console.error("[nadfun] Could not fetch availability:", error);
     }
   }
 

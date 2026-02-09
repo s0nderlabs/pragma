@@ -52,12 +52,12 @@ async function fetchWithRetry(
         const errorMsg = `Server error ${response.status}`;
         if (attempt < MAX_RETRIES) {
           const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-          console.log(`[x402] ${operationName}: ${errorMsg}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+          console.error(`[x402] ${operationName}: ${errorMsg}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
           await sleep(delay);
           continue;
         }
         // Final attempt failed, return the response anyway
-        console.log(`[x402] ${operationName}: ${errorMsg} after ${MAX_RETRIES} retries`);
+        console.error(`[x402] ${operationName}: ${errorMsg} after ${MAX_RETRIES} retries`);
         return response;
       }
 
@@ -69,7 +69,7 @@ async function fetchWithRetry(
       // Check if transient error
       if (isTransientError(lastError) && attempt < MAX_RETRIES) {
         const delay = BASE_DELAY_MS * Math.pow(2, attempt);
-        console.log(`[x402] ${operationName}: ${lastError.message}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        console.error(`[x402] ${operationName}: ${lastError.message}, retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await sleep(delay);
         continue;
       }
