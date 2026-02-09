@@ -571,7 +571,7 @@ For multi-agent spawns, create the team ONCE and reuse the same `team_name` for 
 
 If `TeamCreate` is NOT available (older Claude Code version), skip this step and spawn without a team in 8b.
 
-**8b. Spawn agent (see @tool-bootstrap):**
+**8b. Spawn agent:**
 
 Deferred MCP tools aren't registered for teammate agents until after the first leader message
 ([claude-code#23625](https://github.com/anthropics/claude-code/issues/23625)).
@@ -589,21 +589,39 @@ Task({
 })
 ```
 
-**Turn 2 — Send ToolSearch + mission via SendMessage:**
+**Turn 2 — Send ToolSearch + spawn context via SendMessage:**
 
-After receiving "READY", send the full mission. See `@tool-bootstrap` for the complete template
-with CRITICAL RULES, TASK, BUDGET, and ToolSearch queries.
+After receiving "READY", the leader MUST:
+1. Run `Bash('date -u')` to get the current UTC time
+2. Send the message below with all variables filled in
+
+The agent definition already contains all behavioral rules (agentId handling, gas protocol,
+delegation rules, monitoring cadence, leader notifications, etc.). The Turn 2 message only
+needs to provide **ToolSearch queries** and **per-spawn context** that the agent definition
+cannot know in advance.
+
+Pick ToolSearch queries based on agent type:
+- **kairos:** `+pragma report agent status balance swap`, `+pragma leverup market chart news`
+- **thymos:** `+pragma report agent status balance swap`, `+pragma nadfun market discover news`
+- **pragma:** `+pragma report agent status balance swap`, `+pragma leverup nadfun market chart`
 
 ```typescript
 SendMessage({
   type: "message",
-  recipient: "kairos-{shortId}",
+  recipient: "{agentType}-{shortId}",
   summary: "ToolSearch + mission",
-  content: `ToolSearch(query: "+pragma report agent status balance swap")
-ToolSearch(query: "+pragma leverup market chart news")
+  content: `ToolSearch(query: "${query1}")
+ToolSearch(query: "${query2}")
 
-Call both now. Then begin your mission:
-[... CRITICAL RULES, FIRST ACTION, TASK, BUDGET — see @tool-bootstrap ...]`
+Call both ToolSearch queries now. Then begin your mission.
+
+Your agentId: ${agentId}
+
+TASK: ${userTask}
+BUDGET: ${budgetMon} MON (gas/oracle) + ${budgetUsd} USD (trading capital)
+MAX DELEGATION CALLS: ${maxCalls} (on-chain trades + approvals ONLY)
+CURRENT TIME: ${currentUtcTime} (run date -u for fresh checks)
+EXPIRES: ${expiresAt}`
 })
 ```
 
@@ -614,7 +632,13 @@ Task({
   subagent_type: "pragma:kairos", // or pragma:thymos, pragma:pragma
   mode: "bypassPermissions",
   run_in_background: true,
-  prompt: `... (use full inline prompt — agent must self-bootstrap without nudge)`
+  prompt: `Your agentId: ${agentId}
+
+TASK: ${userTask}
+BUDGET: ${budgetMon} MON + ${budgetUsd} USD
+MAX DELEGATION CALLS: ${maxCalls}
+CURRENT TIME: ${currentUtcTime}
+EXPIRES: ${expiresAt}`
 })
 ```
 

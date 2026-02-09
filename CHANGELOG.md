@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.44] - 2026-02-09
+
+### Changed
+- **Inline spawn template** — Deleted `tool-bootstrap/SKILL.md`. Turn 2 template now lives directly in autonomous-mode Step 8b with only per-spawn variables (agentId, TASK, BUDGET, MAX CALLS, CURRENT TIME, EXPIRES). All behavioral rules were redundant with agent definitions — agents figure out call counting from `get_sub_agent_state` response.
+
 ## [0.8.43] - 2026-02-09
 
 ### Added
