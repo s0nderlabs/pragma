@@ -242,7 +242,7 @@ Phase 6 fast restart — you'll compare against it to detect macro changes.
 
 **Rule:** Only trade pairs where you have a clear thesis. "It looks like it might go up" is NOT a thesis. "ETH rejected weekly resistance at $2,800 with declining OI and hawkish Fed rhetoric" IS a thesis.
 
-**Market hours filter:** Before selecting non-crypto pairs, check current UTC time against Market Hours Awareness table. Skip any non-crypto pair if: (a) market is currently closed, (b) Friday close is within 4 hours, or (c) delegation expires before next market open. This avoids entering positions you'll be forced to close prematurely.
+**Market hours filter:** Before selecting non-crypto pairs, run `date -u` and check Market Hours Quick Check. Skip any non-crypto pair if: (a) market is currently closed, (b) Friday close is within 4 hours, or (c) delegation expires before next market open. This avoids entering positions you'll be forced to close prematurely.
 
 **Phase 2 rules:**
 - No setup is a valid outcome. You are paid to wait, not to trade. Do NOT force a trade because you have budget and calls remaining.
@@ -522,7 +522,7 @@ After ANY successful entry (limit fill or market):
     Cost: ~$0.03 per refresh (critical_news + currency_strength). Cheap insurance.
 
 19. Pre-close exit check (non-crypto positions only):
-    Check current UTC time against Market Hours Awareness table.
+    Run `date -u` and check Market Hours Quick Check.
     - If within 2 hours of Friday market close → close ALL non-crypto positions immediately
     - If delegation expires before next market open → close ALL non-crypto positions
     - Oracle stale = SL won't trigger. This is not optional.
@@ -658,6 +658,32 @@ Not all markets trade 24/7. Non-crypto pairs use Pyth oracles that stop updating
 | **Commodities** (XAU, XAG) | Mon 01:00 → Fri 21:00 (daily breaks) | 21:00 |
 | **Indices** (QQQ, SPY) | Mon-Fri sessions, varies | ~21:00 |
 | **Stocks** (AAPL, TSLA, etc.) | Mon-Fri 14:30-21:00 | 21:00 |
+
+### Quick Check (use this, not the table above)
+
+After running `date -u`, determine the current **day** and **hour (UTC)**:
+
+**Forex (EUR/USD, USD/JPY):**
+- Mon, Tue, Wed, Thu → OPEN
+- Friday → OPEN until 22:00 UTC
+- Saturday → CLOSED
+- Sunday → OPEN from 22:00 UTC
+
+**Commodities (XAU, XAG):**
+- Mon, Tue, Wed, Thu → OPEN (daily break ~22:00-01:00)
+- Friday → OPEN until 21:00 UTC
+- Saturday → CLOSED
+- Sunday → CLOSED
+
+**Indices (QQQ, SPY):**
+- Mon-Fri → session-based (~14:30-21:00 UTC, varies)
+- Sat, Sun → CLOSED
+
+**Stocks (AAPL, TSLA):**
+- Mon-Fri → 14:30-21:00 UTC
+- Sat, Sun → CLOSED
+
+**Crypto → ALWAYS OPEN. Skip this check.**
 
 **Rules:**
 1. **Pre-weekend close (MANDATORY):** Close ALL non-crypto positions at least 1 hour before their market's Friday close. No exceptions. Oracle stale = SL won't trigger = unprotected gap risk.

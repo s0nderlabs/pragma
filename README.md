@@ -5,7 +5,7 @@
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://support.apple.com/macos)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-cc785c?logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
 [![Monad](https://img.shields.io/badge/Monad-live-836EF9)](https://monad.xyz)
-[![Version](https://img.shields.io/badge/version-0.8.48-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.49-green.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![pragma demo](assets/hero.gif)
