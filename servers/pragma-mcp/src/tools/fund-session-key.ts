@@ -9,6 +9,7 @@ import {
   http,
   formatEther,
   createPublicClient,
+  encodeFunctionData,
   type Address,
   parseUnits,
 } from "viem";
@@ -17,18 +18,21 @@ import {
   getBundlerUrl,
   getRpcUrl,
 } from "../config/pragma-config.js";
-import { buildViemChain } from "../config/chains.js";
+import { buildViemChain, getChainConfig } from "../config/chains.js";
 import { createHybridDelegatorHandle } from "../core/account/hybridDelegator.js";
 import {
   fundSessionKeyViaUserOp,
   fundSessionKeyViaDelegation,
   fundUsdcViaDelegation,
 } from "../core/execution/sessionKeyFunding.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import {
   checkSessionKeyBalanceForOperation,
   type OperationType,
 } from "../core/session/manager.js";
 import { x402HttpOptions } from "../core/x402/client.js";
+import { USDC_ADDRESS, USDC_DECIMALS } from "../core/x402/usdc.js";
 
 const FundSessionKeySchema = z.object({
   operationType: z
@@ -73,7 +77,7 @@ export function registerFundSessionKey(server: McpServer): void {
     "Fund session key with MON (for gas) or USDC (for x402 payments) from smart account. " +
       "Supports UserOp (when session key has < 0.02 MON) and Delegation methods. " +
       "Pass operationType for MON, token='USDC' with amount for x402. " +
-      "Requires Touch ID confirmation.",
+      "On macOS: requires Touch ID. On headless/OpenClaw: uses root delegation automatically.",
     FundSessionKeySchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
       const result = await fundSessionKeyHandler(
@@ -106,6 +110,11 @@ async function fundSessionKeyHandler(
 
     const sessionKeyAddress = config.wallet.sessionKeyAddress as Address;
     const chainId = config.network.chainId;
+
+    // HEADLESS: OpenClaw path — use root delegation, no Touch ID
+    if (isFileMode()) {
+      return fundSessionKeyHeadless(params, config, sessionKeyAddress, chainId);
+    }
 
     const rpcUrl = await getRpcUrl(config);
     const chain = buildViemChain(chainId, rpcUrl);
@@ -227,6 +236,147 @@ async function fundSessionKeyHandler(
     return {
       success: false,
       message: "Session key funding failed",
+      error: errorMessage,
+    };
+  }
+}
+
+// ============================================================================
+// Headless Funding (OpenClaw / Linux)
+// ============================================================================
+
+/**
+ * Fund session key using root delegation (headless mode).
+ * Uses Group 3 (NATIVE_TRANSFER) for MON and Group 2 (ERC20_TRANSFER) for USDC.
+ * Requires session key to already have some gas to submit the transaction.
+ */
+async function fundSessionKeyHeadless(
+  params: z.infer<typeof FundSessionKeySchema>,
+  config: Awaited<ReturnType<typeof loadConfig>>,
+  sessionKeyAddress: Address,
+  chainId: number,
+): Promise<ToolResponse> {
+  try {
+    const chainConfig = getChainConfig(chainId);
+    const rpcUrl = await getRpcUrl(config!);
+    const chain = buildViemChain(chainId, rpcUrl);
+    const publicClient = createPublicClient({
+      chain,
+      transport: http(rpcUrl, x402HttpOptions(config!)),
+    });
+
+    // USDC funding path
+    if (params.token === "USDC") {
+      if (!params.amount) {
+        return {
+          success: false,
+          message: "Amount required for USDC funding",
+          error: "Please specify the amount of USDC to fund (e.g., amount: '1.0')",
+        };
+      }
+
+      const usdcAddress = USDC_ADDRESS[chainId];
+      if (!usdcAddress) {
+        return { success: false, message: "USDC not configured", error: `USDC not found for chain ${chainId}` };
+      }
+
+      const fundingAmountUnits = parseUnits(params.amount, USDC_DECIMALS);
+      const callData = encodeFunctionData({
+        abi: [{
+          type: "function", name: "transfer", stateMutability: "nonpayable",
+          inputs: [{ name: "to", type: "address" }, { name: "amount", type: "uint256" }],
+          outputs: [{ name: "", type: "bool" }],
+        }],
+        functionName: "transfer",
+        args: [sessionKeyAddress, fundingAmountUnits],
+      });
+
+      const result = await executeHeadless(
+        { target: usdcAddress as Address, value: 0n, callData: callData as `0x${string}` },
+        config!,
+      );
+
+      if (!result.success) {
+        return { success: false, message: "USDC funding failed", error: result.error };
+      }
+
+      return {
+        success: true,
+        message: `Session key funded with ${params.amount} USDC via delegation (headless)`,
+        funding: {
+          token: "USDC",
+          method: "delegation",
+          fundedAmount: `${params.amount} USDC`,
+          fundedAmountWei: fundingAmountUnits.toString(),
+          newBalance: "unknown",
+          newBalanceWei: "0",
+          txHash: result.txHash || "0x",
+        },
+      };
+    }
+
+    // MON funding path
+    const balanceCheck = await checkSessionKeyBalanceForOperation(
+      sessionKeyAddress,
+      publicClient,
+      params.operationType as OperationType,
+      params.estimatedOperations,
+    );
+
+    const hasCustomAmount = params.amount && params.amount.trim() !== "";
+
+    if (!hasCustomAmount && !balanceCheck.needsFunding) {
+      return {
+        success: true,
+        message: "Session key already has sufficient balance",
+        funding: {
+          token: "MON",
+          method: "delegation",
+          fundedAmount: "0 MON",
+          fundedAmountWei: "0",
+          newBalance: balanceCheck.balanceFormatted,
+          newBalanceWei: balanceCheck.balance.toString(),
+          txHash: "0x",
+        },
+      };
+    }
+
+    const fundingAmount = hasCustomAmount
+      ? parseUnits(params.amount!, 18)
+      : balanceCheck.recommendedFundingAmount;
+
+    // Native MON transfer: SA → session key via delegation Group 3
+    const result = await executeHeadless(
+      { target: sessionKeyAddress, value: fundingAmount, callData: "0x" as `0x${string}` },
+      config!,
+    );
+
+    if (!result.success) {
+      return { success: false, message: "MON funding failed", error: result.error };
+    }
+
+    // Get updated balance
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const newBalance = await publicClient.getBalance({ address: sessionKeyAddress });
+
+    return {
+      success: true,
+      message: `Session key funded with ${formatEther(fundingAmount)} MON via delegation (headless)`,
+      funding: {
+        token: "MON",
+        method: "delegation",
+        fundedAmount: `${formatEther(fundingAmount)} MON`,
+        fundedAmountWei: fundingAmount.toString(),
+        newBalance: `${formatEther(newBalance)} MON`,
+        newBalanceWei: newBalance.toString(),
+        txHash: result.txHash || "0x",
+      },
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    return {
+      success: false,
+      message: "Session key funding failed (headless)",
       error: errorMessage,
     };
   }

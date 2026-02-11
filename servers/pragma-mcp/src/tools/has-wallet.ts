@@ -8,7 +8,7 @@ import { z } from "zod";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
-import { hasPasskey, hasSessionKey } from "../core/signer/index.js";
+import { hasPasskey, hasSessionKey, isFileMode } from "../core/signer/index.js";
 
 const HasWalletSchema = z.object({});
 
@@ -69,12 +69,16 @@ async function hasWalletHandler(): Promise<HasWalletResult> {
     // Signer not available or error - treat as no session key
   }
 
-  const initialized = hasConfig && passkey && sessionKey;
+  // In file mode (OpenClaw/headless), passkey is not needed — file-based signer replaces it
+  const fileMode = isFileMode();
+  const initialized = fileMode
+    ? hasConfig && sessionKey
+    : hasConfig && passkey && sessionKey;
 
   return {
     initialized,
     details: {
-      hasPasskey: passkey,
+      hasPasskey: fileMode ? true : passkey,
       hasSessionKey: sessionKey,
       hasConfig,
     },

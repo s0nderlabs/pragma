@@ -10,7 +10,10 @@ import {
   http,
   createPublicClient,
   createWalletClient,
+  decodeAbiParameters,
+  fromHex,
   type Address,
+  type Hex,
 } from "viem";
 import { randomUUID } from "node:crypto";
 import { loadConfig, getRpcUrl } from "../config/pragma-config.js";
@@ -38,14 +41,103 @@ import {
   validateSubDelegationParams,
   getSelectorsForAgentType,
 } from "../core/delegation/subagent.js";
-import { loadRootDelegation } from "../core/delegation/root.js";
+import { loadRootDelegation, type StoredRootDelegation } from "../core/delegation/root.js";
 import { hashDelegation } from "@metamask/delegation-core";
 import { formatTimeRemaining } from "../core/utils/index.js";
 import { startCaffeinate } from "../core/utils/caffeinate.js";
+import { loadHeadlessDelegation } from "../core/execution/headless.js";
+import { DELEGATION_FRAMEWORK, VALUE_LTE_ENFORCER } from "../config/constants.js";
 
 // Contract addresses for agent scopes
 import { LEVERUP_DIAMOND, WMON_ADDRESS, USDC_ADDRESS, LVUSD_ADDRESS, LVMON_ADDRESS } from "../core/leverup/constants.js";
 import { NADFUN_CONTRACTS } from "../core/nadfun/constants.js";
+
+// ============================================================================
+// OpenClaw delegation fallback
+// ============================================================================
+
+/**
+ * Attempt to load root delegation from OpenClaw's web-based delegation path.
+ * Falls back to ~/.pragma/delegations/root/delegation.json when
+ * ~/.pragma/root-delegation.json (Touch ID flow) doesn't exist.
+ *
+ * Decodes caveat terms to reconstruct StoredRootDelegation fields.
+ */
+function loadRootDelegationFromHeadless(): StoredRootDelegation | null {
+  const signed = loadHeadlessDelegation();
+  if (!signed) return null;
+
+  try {
+    // Compute delegation hash
+    const delegationForHash = {
+      ...signed,
+      salt: typeof signed.salt === "bigint" ? signed.salt : BigInt(signed.salt as string),
+    };
+    const delegationHash = hashDelegation(delegationForHash);
+
+    // Decode caveat terms
+    const expiresAt = decodeTimestampExpiry(signed.caveats as Array<{ enforcer: string; terms: string }>);
+    const valueLtePerTx = decodeValueLte(signed.caveats as Array<{ enforcer: string; terms: string }>);
+    const maxCalls = decodeLimitedCalls(signed.caveats as Array<{ enforcer: string; terms: string }>);
+
+    return {
+      delegationHash,
+      delegation: signed,
+      allowedTargets: [], // Sub-delegation builds its own scope per agent type
+      sessionKey: signed.delegate as Address,
+      delegator: signed.delegator as Address,
+      chainId: 143,
+      createdAt: Date.now(),
+      expiresAt: expiresAt * 1000, // Convert seconds to ms
+      valueLtePerTx: valueLtePerTx.toString(),
+      maxCalls,
+      approximateBudget: (valueLtePerTx * BigInt(maxCalls)).toString(),
+      budgetMon: formatEther(valueLtePerTx * BigInt(maxCalls)),
+      budgetUsd: "0",
+      maxValuePerTx: formatEther(valueLtePerTx),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Decode TimestampEnforcer caveat → expiry timestamp (seconds) */
+function decodeTimestampExpiry(caveats: Array<{ enforcer: string; terms: string }>): number {
+  const caveat = caveats.find(
+    (c) => c.enforcer.toLowerCase() === DELEGATION_FRAMEWORK.enforcers.timestamp.toLowerCase()
+  );
+  if (!caveat?.terms || caveat.terms === "0x") return 0;
+
+  // Packed format: 16 bytes afterThreshold + 16 bytes beforeThreshold = 32 bytes
+  const termsHex = caveat.terms as Hex;
+  // beforeThreshold is bytes 16-31 (the expiry)
+  const beforeThreshold = fromHex(`0x${termsHex.slice(34)}` as Hex, "bigint");
+  return Number(beforeThreshold);
+}
+
+/** Decode ValueLteEnforcer caveat → max value per tx (wei as bigint) */
+function decodeValueLte(caveats: Array<{ enforcer: string; terms: string }>): bigint {
+  const caveat = caveats.find(
+    (c) => c.enforcer.toLowerCase() === VALUE_LTE_ENFORCER.toLowerCase()
+  );
+  if (!caveat?.terms || caveat.terms === "0x") return 0n;
+
+  // ABI-encoded uint256
+  const [value] = decodeAbiParameters([{ type: "uint256" }], caveat.terms as Hex);
+  return value;
+}
+
+/** Decode LimitedCallsEnforcer caveat → max call count */
+function decodeLimitedCalls(caveats: Array<{ enforcer: string; terms: string }>): number {
+  const caveat = caveats.find(
+    (c) => c.enforcer.toLowerCase() === DELEGATION_FRAMEWORK.enforcers.limitedCalls.toLowerCase()
+  );
+  if (!caveat?.terms || caveat.terms === "0x") return 0;
+
+  // ABI-encoded uint256
+  const [value] = decodeAbiParameters([{ type: "uint256" }], caveat.terms as Hex);
+  return Number(value);
+}
 
 const CreateSubAgentSchema = z.object({
   agentType: z
@@ -282,12 +374,13 @@ async function createSubAgentHandler(
     const chainId = config.network.chainId;
 
     // Load and validate root delegation
-    const rootDelegation = loadRootDelegation();
+    // Try macOS path first, then OpenClaw headless path as fallback
+    const rootDelegation = loadRootDelegation() ?? loadRootDelegationFromHeadless();
     if (!rootDelegation) {
       return {
         success: false,
         message: "No root delegation found",
-        error: "Please run create_root_delegation first to enable autonomous mode",
+        error: "No delegation found. Use the delegation flow (request → approve → retrieve) to create one.",
       };
     }
 
@@ -296,7 +389,7 @@ async function createSubAgentHandler(
       return {
         success: false,
         message: "Root delegation has expired",
-        error: "Please run create_root_delegation to create a new root delegation",
+        error: "Delegation has expired. Please create a new one via the delegation flow.",
       };
     }
 
@@ -305,7 +398,7 @@ async function createSubAgentHandler(
       return {
         success: false,
         message: "Session key mismatch",
-        error: "Root delegation was created with a different session key. Please run create_root_delegation again.",
+        error: "Delegation was created with a different session key. Please create a new delegation.",
       };
     }
 

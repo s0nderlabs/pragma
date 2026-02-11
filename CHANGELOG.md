@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.50] - 2026-02-11
+
+### Added
+- Headless execution module (`src/core/execution/headless.ts`) for OpenClaw/Linux where Touch ID is unavailable
+- Headless execution path in all 12 write tools: wrap, unwrap, transfer, execute-swap, nadfun-buy, nadfun-sell, leverup-open-trade, leverup-close-trade, leverup-update-tpsl, leverup-update-margin, leverup-cancel-limit-order, leverup-open-limit-order
+- ERC20 approval handling in headless mode with MaxUint256 + spender whitelist
+- OpenClaw section in README with platform comparison table and install instructions
+
 ## [0.8.49] - 2026-02-10
 
 ### Fixed

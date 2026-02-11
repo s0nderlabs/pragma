@@ -104,6 +104,10 @@ export const DELEGATION_GROUPS = {
   APPROVE: 0,
   /** Group 1: trading calls to whitelisted protocols */
   TRADING: 1,
+  /** Group 2: ERC20 transfer() to whitelisted recipients (headless/OpenClaw only) */
+  ERC20_TRANSFER: 2,
+  /** Group 3: native MON transfer to whitelisted recipients (headless/OpenClaw only) */
+  NATIVE_TRANSFER: 3,
 } as const;
 
 // ============================================================================
@@ -115,6 +119,18 @@ export const DELEGATION_GROUPS = {
  * Used for autonomous mode approval delegations
  */
 export const ERC20_APPROVE_SELECTOR = "0x095ea7b3" as `0x${string}`;
+
+/**
+ * ERC20 transfer(address,uint256) function selector
+ * Used for headless mode transfer group selection
+ */
+export const ERC20_TRANSFER_SELECTOR = "0xa9059cbb" as `0x${string}`;
+
+/**
+ * NativeTokenTransferAmountEnforcer address
+ * Validates execution.value <= maxAmount for native transfers
+ */
+export const NATIVE_TOKEN_TRANSFER_AMOUNT_ENFORCER = "0xF71af580b9c3078fbc2BBF16FbB8EEd82b330320" as Address;
 
 /**
  * Whitelisted spender addresses for autonomous approvals

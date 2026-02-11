@@ -4,6 +4,8 @@ import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-conf
 import { getCollateralDecimals } from "../core/leverup/client.js";
 import { executeAddMargin, type CollateralToken } from "../core/leverup/execution.js";
 import { executeAutonomousLeverUpUpdateMargin } from "../core/execution/autonomous.js";
+import { executeHeadless, executeHeadlessWithApproval } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -102,6 +104,51 @@ export function registerLeverUpUpdateMargin(server: McpServer): void {
             content: [{
               type: "text",
               text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // HEADLESS: OpenClaw path — root delegation, no Touch ID
+        if (isFileMode()) {
+          const collateralToken = (params.collateralToken || "MON") as CollateralToken;
+          const tokenAddress = getCollateralTokenAddress(collateralToken);
+          const isNativeMon = collateralToken === "MON";
+          const amountWei = parseUnits(params.amount, getCollateralDecimals(collateralToken));
+
+          const execution = executeAddMargin(
+            params.tradeHash as Hex,
+            tokenAddress,
+            amountWei,
+            isNativeMon
+          );
+
+          let result;
+          if (isNativeMon) {
+            result = await executeHeadless(
+              { target: execution.to, value: execution.value, callData: execution.data as Hex },
+              config
+            );
+          } else {
+            result = await executeHeadlessWithApproval(
+              tokenAddress,
+              LEVERUP_DIAMOND,
+              amountWei,
+              { target: execution.to, value: execution.value, callData: execution.data as Hex },
+              config
+            );
+          }
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: result.success,
+                message: result.success
+                  ? `Successfully added ${params.amount} ${collateralToken} margin`
+                  : result.message,
+                txHash: result.txHash,
+                explorerUrl: result.explorerUrl,
+                error: result.error,
+              }, null, 2)
             }]
           };
         }

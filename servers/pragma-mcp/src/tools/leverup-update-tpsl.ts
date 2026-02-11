@@ -3,6 +3,8 @@ import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { executeUpdateTpSl } from "../core/leverup/execution.js";
 import { executeAutonomousLeverUpUpdateTpSl } from "../core/execution/autonomous.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -108,6 +110,32 @@ export function registerLeverUpUpdateTpSl(server: McpServer): void {
             content: [{
               type: "text",
               text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // HEADLESS: OpenClaw path — root delegation, no Touch ID
+        if (isFileMode()) {
+          const tpWei = params.takeProfit ? parseUnits(params.takeProfit, 18) : 0n;
+          const slWei = params.stopLoss ? parseUnits(params.stopLoss, 18) : 0n;
+          const execution = executeUpdateTpSl(params.tradeHash as Hex, tpWei, slWei);
+          const result = await executeHeadless(
+            { target: execution.to, value: execution.value, callData: execution.data as Hex },
+            config
+          );
+          const updates: string[] = [];
+          if (params.takeProfit) updates.push(params.takeProfit === "0" ? "TP disabled" : `TP=$${params.takeProfit}`);
+          if (params.stopLoss) updates.push(params.stopLoss === "0" ? "SL disabled" : `SL=$${params.stopLoss}`);
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: result.success,
+                message: result.success ? `Successfully updated ${updates.join(", ")}` : result.message,
+                txHash: result.txHash,
+                explorerUrl: result.explorerUrl,
+                error: result.error,
+              }, null, 2)
             }]
           };
         }

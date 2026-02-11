@@ -1,5 +1,6 @@
 // Setup Wallet — creates passkey + smart account with P-256 signing
-// Private keys NEVER leave the Keychain
+// File-mode fallback for headless environments (OpenClaw, Linux, Docker)
+// Private keys NEVER leave the Keychain (macOS) or secure file storage (headless)
 // Copyright (c) 2026 s0nderlabs
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -33,6 +34,11 @@ import {
   isChainSupported,
   validateRpcEndpoint,
 } from "../config/chains.js";
+
+/** Check if running in headless/file-based signer mode */
+function isFileMode(): boolean {
+  return process.env.PRAGMA_SIGNER_TYPE === "file";
+}
 
 const SetupWalletSchema = z.object({
   rpc: z.string().url().optional().describe("RPC endpoint URL. Required for BYOK mode. Omit for x402 mode (auto-configured)."),
@@ -74,10 +80,89 @@ export function registerSetupWallet(server: McpServer): void {
 }
 
 /**
+ * Headless setup for file-based signer mode (OpenClaw, Linux, Docker).
+ *
+ * Unlike the passkey flow, this does NOT create a Smart Account or passkey.
+ * The user already has a SA (via pragma-wallet on their phone/laptop).
+ * We only need a session key + minimal config. The user then provides their
+ * SA address during the delegation flow.
+ */
+async function setupWalletHeadless(params: z.infer<typeof SetupWalletSchema>): Promise<SetupResult> {
+  let { chainId } = params;
+
+  try {
+    // Check if already configured
+    const existingConfig = await loadConfig();
+    if (existingConfig) {
+      const sessionKey = await getSessionKey();
+      if (sessionKey) {
+        const chainConfig = getChainConfig(existingConfig.network.chainId);
+        return {
+          success: true,
+          message: "Session key already configured",
+          wallet: {
+            smartAccountAddress: existingConfig.wallet?.smartAccountAddress ?? "not set — provide via delegation",
+            sessionKeyAddress: sessionKey.address,
+            keyId: "file-based",
+            signingMethod: "secp256k1 (file-based)",
+            chainId: existingConfig.network.chainId,
+            chainName: chainConfig.displayName,
+          },
+        };
+      }
+    }
+
+    // Resolve chain ID (default to Monad mainnet)
+    chainId = chainId ?? 143;
+    if (!isChainSupported(chainId)) {
+      const supported = getSupportedChainIds().join(", ");
+      return {
+        success: false,
+        message: "Chain not supported",
+        error: `Chain ${chainId} is not supported. Supported chains: ${supported}`,
+      };
+    }
+    const chainConfig = getChainConfig(chainId);
+
+    // Create config (mode: x402, no wallet section yet — SA comes from delegation)
+    const config = existingConfig || createInitialConfig(chainId);
+    config.network.chainId = chainId;
+    await saveConfig(config);
+
+    // Generate and store session key (file-based via signer module)
+    let sessionKey = await getSessionKey();
+    if (!sessionKey) {
+      sessionKey = generateSessionKey();
+      await storeSessionKey(sessionKey);
+    }
+
+    return {
+      success: true,
+      message: `Session key created on ${chainConfig.displayName}. Provide your Smart Account address to continue setup via delegation.`,
+      wallet: {
+        smartAccountAddress: "not set — provide via delegation",
+        sessionKeyAddress: sessionKey.address,
+        keyId: "file-based",
+        signingMethod: "secp256k1 (file-based)",
+        chainId,
+        chainName: chainConfig.displayName,
+      },
+    };
+  } catch (error) {
+    return mapSetupError(error);
+  }
+}
+
+/**
  * Orchestrates wallet onboarding: passkey creation, smart account deployment,
  * and session key generation.
  */
 async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<SetupResult> {
+  // Headless mode: skip passkey/SA, just create session key + config
+  if (isFileMode()) {
+    return setupWalletHeadless(params);
+  }
+
   const { rpc } = params;
   let { chainId } = params;
 

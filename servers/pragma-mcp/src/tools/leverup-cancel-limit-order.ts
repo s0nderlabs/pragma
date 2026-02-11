@@ -3,6 +3,8 @@ import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { executeCancelLimitOrder, executeBatchCancelLimitOrders } from "../core/leverup/execution.js";
 import { executeAutonomousLeverUpCancelLimitOrder } from "../core/execution/autonomous.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -98,6 +100,32 @@ async function leverUpCancelLimitOrderHandler(
         message: result.message,
         data: result.txHash ? {
           cancelledOrders: params.orderHashes,
+          txHash: result.txHash,
+          explorerUrl: result.explorerUrl!,
+        } : undefined,
+        error: result.error,
+      };
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const orderHashes = params.orderHashes as Hex[];
+      const execution = orderHashes.length === 1
+        ? executeCancelLimitOrder(orderHashes[0])
+        : executeBatchCancelLimitOrders(orderHashes);
+      const result = await executeHeadless(
+        { target: execution.to, value: execution.value, callData: execution.data as Hex },
+        config
+      );
+      return {
+        success: result.success,
+        message: result.success
+          ? (orderHashes.length === 1
+            ? `Successfully cancelled limit order ${orderHashes[0]}`
+            : `Successfully cancelled ${orderHashes.length} limit orders`)
+          : result.message,
+        data: result.txHash ? {
+          cancelledOrders: orderHashes,
           txHash: result.txHash,
           explorerUrl: result.explorerUrl!,
         } : undefined,

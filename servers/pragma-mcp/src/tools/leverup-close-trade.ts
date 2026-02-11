@@ -3,6 +3,8 @@ import { z } from "zod";
 import { loadConfig, isWalletConfigured, getRpcUrl } from "../config/pragma-config.js";
 import { executeCloseTrade } from "../core/leverup/execution.js";
 import { executeAutonomousLeverUpClose } from "../core/execution/autonomous.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { signDelegationWithP256 } from "../core/signer/p256SignerConfig.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -56,6 +58,29 @@ export function registerLeverUpCloseTrade(server: McpServer): void {
             content: [{
               type: "text",
               text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // HEADLESS: OpenClaw path — root delegation, no Touch ID
+        if (isFileMode()) {
+          const execution = await executeCloseTrade(params.tradeHash as Hex);
+          const result = await executeHeadless(
+            { target: execution.to, value: execution.value, callData: execution.data as Hex },
+            config
+          );
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: result.success,
+                message: result.success
+                  ? `Successfully closed position ${params.tradeHash}`
+                  : result.message,
+                txHash: result.txHash,
+                explorerUrl: result.explorerUrl,
+                error: result.error,
+              }, null, 2)
             }]
           };
         }

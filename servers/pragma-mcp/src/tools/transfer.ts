@@ -5,12 +5,15 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { Address } from "viem";
-import { getAddress, isAddress } from "viem";
+import { getAddress, isAddress, parseUnits, encodeFunctionData, erc20Abi, type Address, type Hex } from "viem";
 import { executeTransfer } from "../core/execution/transfer.js";
 import { executeAutonomousTransfer } from "../core/execution/autonomous.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
+import { resolveToken } from "../core/data/client.js";
+import { NATIVE_TOKEN_ADDRESS } from "../config/constants.js";
 
 const TransferSchema = z.object({
   token: z
@@ -120,6 +123,51 @@ async function transferHandler(
           recipient: result.transfer.recipient,
           amount: result.transfer.amount,
         } : undefined,
+        error: result.error,
+      };
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      if (!params.to || !isAddress(params.to)) {
+        return { success: false, message: "Invalid recipient address", error: "Please provide a valid recipient address (0x...)" };
+      }
+      const recipientAddress = getAddress(params.to) as Address;
+      const chainId = config.network.chainId;
+
+      const isNativeTransfer = params.token.toUpperCase() === "MON" ||
+        params.token.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
+
+      let target: Address;
+      let value: bigint;
+      let callData: Hex;
+      let tokenSymbol: string;
+
+      if (isNativeTransfer) {
+        const amountWei = parseUnits(params.amount, 18);
+        target = recipientAddress;
+        value = amountWei;
+        callData = "0x" as Hex;
+        tokenSymbol = "MON";
+      } else {
+        const tokenInfo = await resolveToken(params.token, chainId);
+        if (!tokenInfo) {
+          return { success: false, message: "Token not found", error: `Token not found: ${params.token}` };
+        }
+        const amountWei = parseUnits(params.amount, tokenInfo.decimals);
+        target = tokenInfo.address;
+        value = 0n;
+        callData = encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [recipientAddress, amountWei] });
+        tokenSymbol = tokenInfo.symbol;
+      }
+
+      const result = await executeHeadless({ target, value, callData }, config);
+      const chainConfig = getChainConfig(chainId);
+      return {
+        success: result.success,
+        message: result.success ? `Transferred ${params.amount} ${tokenSymbol} to ${recipientAddress}` : result.message,
+        transaction: result.txHash ? { hash: result.txHash, explorerUrl: result.explorerUrl || `${chainConfig.blockExplorer}/tx/${result.txHash}`, status: "success" } : undefined,
+        transfer: result.success ? { token: tokenSymbol, tokenAddress: isNativeTransfer ? "native" : target, isNative: isNativeTransfer, recipient: recipientAddress, amount: params.amount } : undefined,
         error: result.error,
       };
     }

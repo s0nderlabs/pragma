@@ -7,9 +7,12 @@ import { z } from "zod";
 import type { Address } from "viem";
 import { executeBatchSwap } from "../core/execution/swap.js";
 import { executeAutonomousSwap } from "../core/execution/autonomous.js";
-import { getCachedQuote, isQuoteExpired, getQuoteTimeRemaining } from "../core/aggregator/index.js";
+import { executeHeadless, executeHeadlessWithApproval } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
+import { getCachedQuote, getQuoteExecutionData, isQuoteExpired, getQuoteTimeRemaining } from "../core/aggregator/index.js";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
+import { NATIVE_TOKEN_ADDRESS } from "../config/constants.js";
 
 const DEFAULT_SLIPPAGE_BPS = 500;
 const MAX_SLIPPAGE_BPS = 5000;
@@ -106,6 +109,63 @@ async function executeSwapHandler(
         slippageBps
       );
       return result;
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const swapResults: ExecuteSwapResult["results"] = [];
+      for (const quoteId of params.quoteIds) {
+        const quote = await getCachedQuote(quoteId);
+        if (!quote) {
+          swapResults.push({ quoteId, success: false, error: "Quote not found or expired. Get a fresh quote." });
+          continue;
+        }
+        if (isQuoteExpired(quote)) {
+          swapResults.push({ quoteId, success: false, error: "Quote expired. Get a fresh quote." });
+          continue;
+        }
+        const executionData = getQuoteExecutionData(quoteId);
+        if (!executionData) {
+          swapResults.push({ quoteId, success: false, error: "Execution data missing. Get a fresh quote." });
+          continue;
+        }
+        const isNativeSwap = quote.fromToken.address.toLowerCase() === NATIVE_TOKEN_ADDRESS.toLowerCase();
+        let result;
+        if (isNativeSwap) {
+          result = await executeHeadless(
+            { target: executionData.router, value: executionData.value, callData: executionData.calldata },
+            config
+          );
+        } else {
+          result = await executeHeadlessWithApproval(
+            quote.fromToken.address as Address,
+            executionData.router,
+            quote.amountInWei,
+            { target: executionData.router, value: executionData.value, callData: executionData.calldata },
+            config
+          );
+        }
+        swapResults.push({
+          quoteId,
+          success: result.success,
+          txHash: result.txHash,
+          explorerUrl: result.explorerUrl,
+          error: result.error,
+          swap: {
+            fromToken: quote.fromToken.symbol,
+            toToken: quote.toToken.symbol,
+            amountIn: `${quote.amountIn} ${quote.fromToken.symbol}`,
+            amountOut: `${quote.expectedOutput} ${quote.toToken.symbol}`,
+          },
+        });
+      }
+      const successful = swapResults.filter(r => r.success).length;
+      return {
+        success: successful > 0,
+        message: `Executed ${successful}/${params.quoteIds.length} swaps`,
+        results: swapResults,
+        summary: { total: params.quoteIds.length, successful, failed: params.quoteIds.length - successful },
+      };
     }
 
     // Assistant path: existing implementation with Touch ID

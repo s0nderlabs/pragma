@@ -6,8 +6,12 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { executeWrap, executeUnwrap } from "../core/execution/wrap.js";
 import { executeAutonomousWrap, executeAutonomousUnwrap } from "../core/execution/autonomous.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { getChainConfig } from "../config/chains.js";
+import { parseEther, encodeFunctionData, type Hex } from "viem";
+import { WMON_ADDRESS } from "../core/leverup/constants.js";
 
 const WrapSchema = z.object({
   amount: z
@@ -134,6 +138,31 @@ async function wrapHandler(params: z.infer<typeof WrapSchema>): Promise<WrapResu
       };
     }
 
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const amountWei = parseEther(params.amount);
+      const depositCalldata = encodeFunctionData({
+        abi: [{ type: "function", name: "deposit", inputs: [], outputs: [], stateMutability: "payable" }] as const,
+        functionName: "deposit",
+      });
+      const result = await executeHeadless(
+        { target: WMON_ADDRESS, value: amountWei, callData: depositCalldata as Hex },
+        config
+      );
+      const chainConfig = getChainConfig(config.network.chainId);
+      return {
+        success: result.success,
+        message: result.success ? `Wrapped ${params.amount} MON → WMON` : result.message,
+        transaction: result.txHash ? {
+          hash: result.txHash,
+          explorerUrl: result.explorerUrl || `${chainConfig.blockExplorer}/tx/${result.txHash}`,
+          status: "success",
+        } : undefined,
+        wrap: result.success ? { direction: "wrap" as const, amount: params.amount, from: "MON", to: "WMON" } : undefined,
+        error: result.error,
+      };
+    }
+
     // Assistant path: existing implementation with Touch ID
     // Step 2: Validate amount
     const amount = parseFloat(params.amount);
@@ -248,6 +277,32 @@ async function unwrapHandler(params: z.infer<typeof UnwrapSchema>): Promise<Wrap
           from: "WMON",
           to: "MON",
         } : undefined,
+        error: result.error,
+      };
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const amountWei = parseEther(params.amount);
+      const withdrawCalldata = encodeFunctionData({
+        abi: [{ type: "function", name: "withdraw", inputs: [{ name: "wad", type: "uint256" }], outputs: [], stateMutability: "nonpayable" }] as const,
+        functionName: "withdraw",
+        args: [amountWei],
+      });
+      const result = await executeHeadless(
+        { target: WMON_ADDRESS, value: 0n, callData: withdrawCalldata as Hex },
+        config
+      );
+      const chainConfig = getChainConfig(config.network.chainId);
+      return {
+        success: result.success,
+        message: result.success ? `Unwrapped ${params.amount} WMON → MON` : result.message,
+        transaction: result.txHash ? {
+          hash: result.txHash,
+          explorerUrl: result.explorerUrl || `${chainConfig.blockExplorer}/tx/${result.txHash}`,
+          status: "success",
+        } : undefined,
+        wrap: result.success ? { direction: "unwrap" as const, amount: params.amount, from: "WMON", to: "MON" } : undefined,
         error: result.error,
       };
     }

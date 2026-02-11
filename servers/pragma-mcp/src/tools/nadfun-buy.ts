@@ -7,7 +7,9 @@ import { z } from "zod";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { executeNadFunBuy } from "../core/nadfun/execution.js";
 import { executeAutonomousNadFunBuy } from "../core/execution/autonomous.js";
-import { getCachedNadFunQuote } from "../core/nadfun/quote.js";
+import { executeHeadless } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
+import { getCachedNadFunQuote, getNadFunQuoteExecutionData, isNadFunQuoteExpired } from "../core/nadfun/quote.js";
 import { getTokenStatus } from "../core/nadfun/client.js";
 import type { NadFunExecuteResponse } from "../core/nadfun/types.js";
 
@@ -70,6 +72,37 @@ async function nadFunBuyHandler(
     if (params.agentId) {
       // Autonomous path: use pre-signed delegation chain, no Touch ID
       return await executeAutonomousNadFunBuy(params.agentId, params.quoteId);
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const quote = getCachedNadFunQuote(params.quoteId);
+      if (!quote) {
+        return { success: false, message: "Quote not found", error: "Quote not found or expired. Please get a fresh quote with nadfun_quote." };
+      }
+      if (isNadFunQuoteExpired(quote)) {
+        return { success: false, message: "Quote expired", error: "Quote has expired. Please get a fresh quote with nadfun_quote." };
+      }
+      if (quote.direction !== "BUY") {
+        return { success: false, message: "Wrong quote type", error: "This quote is for selling, not buying. Use nadfun_sell instead." };
+      }
+      const executionData = getNadFunQuoteExecutionData(params.quoteId);
+      if (!executionData) {
+        return { success: false, message: "Execution data missing", error: "Execution data missing. Please get a fresh quote." };
+      }
+      const result = await executeHeadless(
+        { target: executionData.router, value: executionData.value, callData: executionData.calldata },
+        config
+      );
+      if (!result.success) {
+        return { success: false, message: "Buy failed", error: result.error };
+      }
+      return {
+        success: true,
+        message: `Successfully bought ${quote.expectedOutput} ${quote.tokenSymbol} for ${quote.amountIn} MON`,
+        transaction: { hash: result.txHash!, explorerUrl: result.explorerUrl! },
+        trade: { tokenSymbol: quote.tokenSymbol, monSpent: quote.amountIn, tokensReceived: quote.expectedOutput, progress: quote.progressPercent },
+      };
     }
 
     // Assistant path: existing implementation with Touch ID

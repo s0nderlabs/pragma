@@ -5,7 +5,7 @@
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://support.apple.com/macos)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-cc785c?logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
 [![Monad](https://img.shields.io/badge/Monad-live-836EF9)](https://monad.xyz)
-[![Version](https://img.shields.io/badge/version-0.8.49-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.50-green.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![pragma demo](assets/hero.gif)
@@ -42,6 +42,7 @@ Everything runs on your machine. Keys never leave your device. Your funds never 
 - [Features](#features)
 - [Installation](#installation)
 - [Claude Desktop & Cowork](#claude-desktop--cowork)
+- [OpenClaw](#openclaw)
 - [Quick Start](#quick-start)
 - [Commands](#commands)
 - [Modes](#modes)
@@ -178,6 +179,30 @@ For the full experience in Cowork (tools + skills + agents), install both in any
    ```
 
 Both use the same wallet and config (`~/.pragma/config.json`). Run `/pragma:setup` from Cowork after installing both, or set up from Claude Code CLI first.
+
+---
+
+## OpenClaw
+
+pragma is also available as an [OpenClaw](https://openclaw.ai) plugin for running trading agents on Linux servers without macOS, Touch ID, or Keychain.
+
+|                        | pragma (Claude Code)               | pragma-openclaw (OpenClaw)                |
+| ---------------------- | ---------------------------------- | ----------------------------------------- |
+| **Runtime**            | Claude Code CLI / Desktop / Cowork | OpenClaw                                  |
+| **Platform**           | macOS only                         | Linux servers (headless)                  |
+| **Key storage**        | macOS Keychain + Touch ID          | File-based (`~/.pragma/session-key.json`) |
+| **Delegation signing** | Touch ID (local biometric)         | Web approval at [pr4gma.xyz](https://pr4gma.xyz) |
+| **Autonomous agents**  | Claude Code agent teams            | OpenClaw `sessions_spawn`                 |
+
+### Install
+
+```
+openclaw plugins install pragma-openclaw
+```
+
+Delegations are approved through a web flow — the agent generates a URL at [pr4gma.xyz](https://pr4gma.xyz), you sign with your passkey in the browser, and the agent picks up the signed delegation automatically.
+
+Same wallet, same smart account, same tools. See [pragma-openclaw](https://github.com/s0nderlabs/pragma-openclaw) for full documentation.
 
 ---
 

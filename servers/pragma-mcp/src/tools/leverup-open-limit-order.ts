@@ -9,6 +9,8 @@ import {
 } from "../core/leverup/client.js";
 import { executeOpenLimitOrder, type CollateralToken } from "../core/leverup/execution.js";
 import { executeAutonomousLeverUpLimitOrder } from "../core/execution/autonomous.js";
+import { executeHeadless, executeHeadlessWithApproval } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { SUPPORTED_PAIRS, DEGEN_MODE_LEVERAGE_OPTIONS } from "../core/leverup/constants.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -175,6 +177,95 @@ async function leverUpOpenLimitOrderHandler(
         } : undefined,
         error: result.error,
       };
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const collateral = params.collateralToken ?? "MON";
+
+      const quote = await getLimitOrderQuote(
+        params.symbol,
+        params.isLong,
+        params.marginAmount,
+        params.leverage,
+        params.triggerPrice,
+        collateral
+      );
+
+      if (!quote.isTriggerValid) {
+        return { success: false, message: quote.triggerValidationMessage, error: "Invalid trigger price" };
+      }
+      if (!quote.meetsMinimums) {
+        return { success: false, message: quote.warnings.join(" "), error: "Quote validation failed" };
+      }
+
+      // Validate leverage for Zero-Fee pairs
+      const pairMeta = SUPPORTED_PAIRS.find(
+        p => p.pair === `${params.symbol}/USD` || p.pair === params.symbol
+      );
+      if (pairMeta?.isHighLeverage && !isDegenModeLeverage(params.leverage)) {
+        return {
+          success: false,
+          message: `${pairMeta.pair} is a Zero-Fee pair that ONLY supports ${DEGEN_MODE_LEVERAGE_OPTIONS.join(', ')}x leverage.`,
+          error: "Invalid leverage for Zero-Fee pair"
+        };
+      }
+
+      const triggerPriceWei = parseUnits(params.triggerPrice, 18);
+      const marginWei = parseUnits(params.marginAmount, getCollateralDecimals(collateral));
+      const qtyWei = parseUnits(quote.positionSize, 10);
+
+      const execution = await executeOpenLimitOrder({
+        symbol: params.symbol,
+        isLong: params.isLong,
+        amountIn: marginWei,
+        leverage: params.leverage,
+        qty: qtyWei,
+        triggerPrice: triggerPriceWei,
+        collateralToken: collateral as any,
+        stopLoss: params.stopLoss ? parseUnits(params.stopLoss, 18) : 0n,
+        takeProfit: params.takeProfit ? parseUnits(params.takeProfit, 18) : 0n,
+      }, config);
+
+      let result;
+      if (collateral === "MON") {
+        result = await executeHeadless(
+          { target: execution.to, value: execution.value, callData: execution.data as Hex },
+          config
+        );
+      } else {
+        result = await executeHeadlessWithApproval(
+          execution.tokenIn,
+          execution.to,
+          execution.amountIn,
+          { target: execution.to, value: execution.value, callData: execution.data as Hex },
+          config
+        );
+      }
+
+      if (result.success) {
+        return {
+          success: true,
+          message: `Successfully placed ${params.leverage}x ${params.isLong ? 'Long' : 'Short'} limit order on ${params.symbol} at $${params.triggerPrice}`,
+          data: {
+            quote: {
+              symbol: quote.symbol,
+              side: params.isLong ? "LONG" : "SHORT",
+              leverage: params.leverage,
+              triggerPrice: `$${params.triggerPrice}`,
+              currentPrice: `$${quote.currentPrice}`,
+              marginAmount: quote.marginAmount,
+              positionSize: `$${quote.positionValueUsd}`,
+              stopLoss: params.stopLoss ? `$${params.stopLoss}` : undefined,
+              takeProfit: params.takeProfit ? `$${params.takeProfit}` : undefined,
+            },
+            txHash: result.txHash!,
+            explorerUrl: result.explorerUrl!,
+          },
+        };
+      } else {
+        return { success: false, message: result.message, error: result.error };
+      }
     }
 
     // Assistant path: existing implementation with Touch ID

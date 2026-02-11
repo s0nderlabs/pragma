@@ -4,10 +4,13 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import type { Address } from "viem";
 import { loadConfig, isWalletConfigured } from "../config/pragma-config.js";
 import { executeNadFunSell } from "../core/nadfun/execution.js";
 import { executeAutonomousNadFunSell } from "../core/execution/autonomous.js";
-import { getCachedNadFunQuote } from "../core/nadfun/quote.js";
+import { executeHeadlessWithApproval } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
+import { getCachedNadFunQuote, getNadFunQuoteExecutionData, isNadFunQuoteExpired } from "../core/nadfun/quote.js";
 import { getTokenStatus } from "../core/nadfun/client.js";
 import type { NadFunExecuteResponse } from "../core/nadfun/types.js";
 
@@ -71,6 +74,41 @@ async function nadFunSellHandler(
       // Autonomous path: use pre-signed delegation chain, no Touch ID
       // Note: Requires pre-existing approval for the token
       return await executeAutonomousNadFunSell(params.agentId, params.quoteId);
+    }
+
+    // HEADLESS: OpenClaw path — root delegation, no Touch ID
+    if (isFileMode()) {
+      const quote = getCachedNadFunQuote(params.quoteId);
+      if (!quote) {
+        return { success: false, message: "Quote not found", error: "Quote not found or expired. Please get a fresh quote with nadfun_quote." };
+      }
+      if (isNadFunQuoteExpired(quote)) {
+        return { success: false, message: "Quote expired", error: "Quote has expired. Please get a fresh quote with nadfun_quote." };
+      }
+      if (quote.direction !== "SELL") {
+        return { success: false, message: "Wrong quote type", error: "This quote is for buying, not selling. Use nadfun_buy instead." };
+      }
+      const executionData = getNadFunQuoteExecutionData(params.quoteId);
+      if (!executionData) {
+        return { success: false, message: "Execution data missing", error: "Execution data missing. Please get a fresh quote." };
+      }
+      // Selling tokens requires approval
+      const result = await executeHeadlessWithApproval(
+        quote.token as Address,
+        executionData.router,
+        quote.amountInWei,
+        { target: executionData.router, value: executionData.value, callData: executionData.calldata },
+        config
+      );
+      if (!result.success) {
+        return { success: false, message: "Sell failed", error: result.error };
+      }
+      return {
+        success: true,
+        message: `Successfully sold ${quote.amountIn} ${quote.tokenSymbol} for ${quote.expectedOutput} MON`,
+        transaction: { hash: result.txHash!, explorerUrl: result.explorerUrl! },
+        trade: { tokenSymbol: quote.tokenSymbol, tokensSold: quote.amountIn, monReceived: quote.expectedOutput, progress: quote.progressPercent },
+      };
     }
 
     // Assistant path: existing implementation with Touch ID

@@ -1,9 +1,10 @@
 // pragma Signer Wrapper
 // Calls the pragma-signer binary for secure key operations
+// File-based fallback for environments without macOS Keychain (OpenClaw, Linux, Docker)
 // Copyright (c) 2026 s0nderlabs
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,150 @@ import type { Hex } from "viem";
 // ESM does not provide __dirname — derive from import.meta.url
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// ============================================================================
+// File-based storage (PRAGMA_SIGNER_TYPE=file)
+// Used by OpenClaw and other non-macOS environments
+// ============================================================================
+
+/**
+ * Check if file-based signer mode is enabled.
+ * When true, session keys, subagent keys, and providers use file storage
+ * instead of the macOS Keychain via the Swift binary.
+ *
+ * Passkey operations (P-256 Secure Enclave) ALWAYS require the Swift binary
+ * regardless of this setting — they cannot be file-based.
+ */
+export function isFileMode(): boolean {
+  return process.env.PRAGMA_SIGNER_TYPE === "file";
+}
+
+/** Base directory for file-based key storage */
+function getFileStorageDir(): string {
+  const sessionKeyPath = process.env.PRAGMA_SESSION_KEY_PATH;
+  if (sessionKeyPath) {
+    return path.dirname(sessionKeyPath);
+  }
+  return path.join(homedir(), ".pragma");
+}
+
+function ensureDir(dir: string): void {
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function readJsonFile<T>(filePath: string): T | null {
+  if (!existsSync(filePath)) return null;
+  return JSON.parse(readFileSync(filePath, "utf-8")) as T;
+}
+
+function writeJsonFile(filePath: string, data: unknown): void {
+  ensureDir(path.dirname(filePath));
+  writeFileSync(filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+// --- File-based session key ---
+
+function getSessionKeyFilePath(): string {
+  return process.env.PRAGMA_SESSION_KEY_PATH
+    ?? path.join(getFileStorageDir(), "session-key.json");
+}
+
+function fileStoreSessionKey(privateKey: Hex): void {
+  writeJsonFile(getSessionKeyFilePath(), { privateKey, storedAt: Date.now() });
+}
+
+function fileGetSessionKey(): Hex | null {
+  const data = readJsonFile<{ privateKey: string }>(getSessionKeyFilePath());
+  return data?.privateKey ? (data.privateKey as Hex) : null;
+}
+
+function fileDeleteSessionKey(): void {
+  const p = getSessionKeyFilePath();
+  if (existsSync(p)) unlinkSync(p);
+}
+
+function fileHasSessionKey(): boolean {
+  return existsSync(getSessionKeyFilePath());
+}
+
+// --- File-based subagent keys ---
+
+function getSubagentKeysDir(): string {
+  return process.env.PRAGMA_SUBAGENT_KEYS_DIR
+    ?? path.join(getFileStorageDir(), "subagent-keys");
+}
+
+function fileStoreSubagentKey(uuid: string, privateKey: Hex): void {
+  const dir = getSubagentKeysDir();
+  writeJsonFile(path.join(dir, `${uuid}.json`), { privateKey, storedAt: Date.now() });
+}
+
+function fileGetSubagentKey(uuid: string): Hex | null {
+  const data = readJsonFile<{ privateKey: string }>(path.join(getSubagentKeysDir(), `${uuid}.json`));
+  return data?.privateKey ? (data.privateKey as Hex) : null;
+}
+
+function fileDeleteSubagentKey(uuid: string): void {
+  const p = path.join(getSubagentKeysDir(), `${uuid}.json`);
+  if (existsSync(p)) unlinkSync(p);
+}
+
+function fileHasSubagentKey(uuid: string): boolean {
+  return existsSync(path.join(getSubagentKeysDir(), `${uuid}.json`));
+}
+
+function fileListSubagentKeys(): string[] {
+  const dir = getSubagentKeysDir();
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => f.replace(".json", ""));
+}
+
+// --- File-based providers ---
+
+function getProvidersFilePath(): string {
+  return process.env.PRAGMA_PROVIDERS_PATH
+    ?? path.join(getFileStorageDir(), "providers.json");
+}
+
+function fileLoadProviders(): Record<string, string> {
+  return readJsonFile<Record<string, string>>(getProvidersFilePath()) ?? {};
+}
+
+function fileSaveProviders(providers: Record<string, string>): void {
+  writeJsonFile(getProvidersFilePath(), providers);
+}
+
+function fileStoreProvider(name: string, value: string): void {
+  const providers = fileLoadProviders();
+  providers[name] = value;
+  fileSaveProviders(providers);
+}
+
+function fileGetProvider(name: string): string | null {
+  return fileLoadProviders()[name] ?? null;
+}
+
+function fileDeleteProvider(name: string): void {
+  const providers = fileLoadProviders();
+  delete providers[name];
+  fileSaveProviders(providers);
+}
+
+function fileHasProvider(name: string): boolean {
+  return name in fileLoadProviders();
+}
+
+function fileListProviders(): string[] {
+  return Object.keys(fileLoadProviders());
+}
+
+// ============================================================================
+// Swift binary signer (PRAGMA_SIGNER_TYPE=keychain, default)
+// ============================================================================
 
 /**
  * Response from pragma-signer binary
@@ -229,19 +374,26 @@ export async function getPasskeyPrivateKey(_message?: string): Promise<Hex> {
 // ============================================================================
 
 /**
- * Store a session key in Keychain
+ * Store a session key in Keychain (or file in file mode)
  * @param privateKey - Private key as hex string (with or without 0x prefix)
  */
 export async function storeSessionKeyInKeychain(privateKey: Hex): Promise<void> {
+  if (isFileMode()) {
+    fileStoreSessionKey(privateKey);
+    return;
+  }
   const response = await execSigner(["store-session", privateKey]);
   handleResponse(response);
 }
 
 /**
- * Get session key from Keychain
+ * Get session key from Keychain (or file in file mode)
  * @returns Private key as hex string (with 0x prefix) or null if not found
  */
 export async function getSessionKeyFromKeychain(): Promise<Hex | null> {
+  if (isFileMode()) {
+    return fileGetSessionKey();
+  }
   try {
     const response = await execSigner(["get-session"]);
     const data = handleResponse<{ privateKey: string }>(response, ["privateKey"]);
@@ -256,17 +408,24 @@ export async function getSessionKeyFromKeychain(): Promise<Hex | null> {
 }
 
 /**
- * Delete session key from Keychain
+ * Delete session key from Keychain (or file in file mode)
  */
 export async function deleteSessionKeyFromKeychain(): Promise<void> {
+  if (isFileMode()) {
+    fileDeleteSessionKey();
+    return;
+  }
   const response = await execSigner(["delete-session"]);
   handleResponse(response);
 }
 
 /**
- * Check if session key exists in Keychain
+ * Check if session key exists in Keychain (or file in file mode)
  */
 export async function hasSessionKey(): Promise<boolean> {
+  if (isFileMode()) {
+    return fileHasSessionKey();
+  }
   const response = await execSigner(["has-session"]);
   const data = handleResponse<{ exists: string }>(response, ["exists"]);
   return data.exists === "true";
@@ -323,28 +482,31 @@ export function deriveAddressFromP256(publicKey: Hex): Hex {
 // ============================================================================
 
 /**
- * Store a provider value (API key or URL) in Keychain
+ * Store a provider value (API key or URL) in Keychain (or file in file mode)
  * Used in BYOK mode when user provides their own API keys
  *
- * Provider names are user-defined (no restrictions).
- * Example names: "my-quote-api", "backup-rpc", "custom-bundler"
- *
- * @param name - User-defined provider name (Keychain key identifier)
+ * @param name - User-defined provider name
  * @param value - The value to store (URL or API key)
  */
 export async function storeProvider(name: string, value: string): Promise<void> {
+  if (isFileMode()) {
+    fileStoreProvider(name, value);
+    return;
+  }
   const response = await execSigner(["store-provider", name, value]);
   handleResponse(response);
 }
 
 /**
- * Get a provider value from Keychain
- * Used in BYOK mode when user provides their own API keys
+ * Get a provider value from Keychain (or file in file mode)
  *
  * @param name - User-defined provider name
  * @returns The stored value or null if not found
  */
 export async function getProvider(name: string): Promise<string | null> {
+  if (isFileMode()) {
+    return fileGetProvider(name);
+  }
   try {
     const response = await execSigner(["get-provider", name]);
     const data = handleResponse<{ value: string }>(response, ["value"]);
@@ -364,20 +526,27 @@ export async function getProvider(name: string): Promise<string | null> {
 }
 
 /**
- * Delete a provider from Keychain
+ * Delete a provider from Keychain (or file in file mode)
  * @param name - User-defined provider name to delete
  */
 export async function deleteProvider(name: string): Promise<void> {
+  if (isFileMode()) {
+    fileDeleteProvider(name);
+    return;
+  }
   const response = await execSigner(["delete-provider", name]);
   handleResponse(response);
 }
 
 /**
- * Check if a provider exists in Keychain
+ * Check if a provider exists in Keychain (or file in file mode)
  * @param name - User-defined provider name to check
  * @returns true if provider exists
  */
 export async function hasProvider(name: string): Promise<boolean> {
+  if (isFileMode()) {
+    return fileHasProvider(name);
+  }
   const response = await execSigner(["has-provider", name]);
   const data = handleResponse<{ exists: string }>(response, ["exists"]);
   return data.exists === "true";
@@ -388,6 +557,9 @@ export async function hasProvider(name: string): Promise<boolean> {
  * @returns Array of provider names that are configured
  */
 export async function listProviders(): Promise<string[]> {
+  if (isFileMode()) {
+    return fileListProviders();
+  }
   const response = await execSigner(["list-providers"]);
   const data = handleResponse<{ providers: string }>(response, ["providers"]);
 
@@ -403,21 +575,28 @@ export async function listProviders(): Promise<string[]> {
 // ============================================================================
 
 /**
- * Store a sub-agent key in Keychain
+ * Store a sub-agent key in Keychain (or file in file mode)
  * @param uuid - Unique identifier for the sub-agent wallet
  * @param privateKey - Private key as hex string (with or without 0x prefix)
  */
 export async function storeSubagentKeyInKeychain(uuid: string, privateKey: Hex): Promise<void> {
+  if (isFileMode()) {
+    fileStoreSubagentKey(uuid, privateKey);
+    return;
+  }
   const response = await execSigner(["store-subagent", uuid, privateKey]);
   handleResponse(response);
 }
 
 /**
- * Get sub-agent key from Keychain
+ * Get sub-agent key from Keychain (or file in file mode)
  * @param uuid - Unique identifier for the sub-agent wallet
  * @returns Private key as hex string (with 0x prefix) or null if not found
  */
 export async function getSubagentKeyFromKeychain(uuid: string): Promise<Hex | null> {
+  if (isFileMode()) {
+    return fileGetSubagentKey(uuid);
+  }
   try {
     const response = await execSigner(["get-subagent", uuid]);
     const data = handleResponse<{ privateKey: string }>(response, ["privateKey"]);
@@ -432,29 +611,39 @@ export async function getSubagentKeyFromKeychain(uuid: string): Promise<Hex | nu
 }
 
 /**
- * Delete sub-agent key from Keychain
+ * Delete sub-agent key from Keychain (or file in file mode)
  * @param uuid - Unique identifier for the sub-agent wallet
  */
 export async function deleteSubagentKeyFromKeychain(uuid: string): Promise<void> {
+  if (isFileMode()) {
+    fileDeleteSubagentKey(uuid);
+    return;
+  }
   const response = await execSigner(["delete-subagent", uuid]);
   handleResponse(response);
 }
 
 /**
- * Check if sub-agent key exists in Keychain
+ * Check if sub-agent key exists in Keychain (or file in file mode)
  * @param uuid - Unique identifier to check
  */
 export async function hasSubagentKey(uuid: string): Promise<boolean> {
+  if (isFileMode()) {
+    return fileHasSubagentKey(uuid);
+  }
   const response = await execSigner(["has-subagent", uuid]);
   const data = handleResponse<{ exists: string }>(response, ["exists"]);
   return data.exists === "true";
 }
 
 /**
- * List all sub-agent UUIDs stored in Keychain
+ * List all sub-agent UUIDs stored in Keychain (or file directory in file mode)
  * @returns Array of UUID strings for all stored sub-agent keys
  */
 export async function listSubagentKeysFromKeychain(): Promise<string[]> {
+  if (isFileMode()) {
+    return fileListSubagentKeys();
+  }
   const response = await execSigner(["list-subagents"]);
   const data = handleResponse<{ subagents: string }>(response, ["subagents"]);
 

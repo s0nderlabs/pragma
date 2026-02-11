@@ -272,4 +272,6 @@ export function setLogicalOrArgs(
 export const GROUP_CAVEAT_COUNTS = {
   APPROVE: 1, // AllowedMethods only
   TRADING: 2, // AllowedTargets + AllowedMethods
+  ERC20_TRANSFER: 2, // AllowedMethods + AllowedCalldata (headless/OpenClaw only)
+  NATIVE_TRANSFER: 2, // AllowedTargets + NativeTokenTransferAmount (headless/OpenClaw only)
 } as const;

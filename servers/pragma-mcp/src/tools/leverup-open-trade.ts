@@ -9,6 +9,8 @@ import {
 } from "../core/leverup/client.js";
 import { executeOpenTrade, type CollateralToken } from "../core/leverup/execution.js";
 import { executeAutonomousLeverUpOpen } from "../core/execution/autonomous.js";
+import { executeHeadless, executeHeadlessWithApproval } from "../core/execution/headless.js";
+import { isFileMode } from "../core/signer/index.js";
 import { SUPPORTED_PAIRS, DEGEN_MODE_LEVERAGE_OPTIONS } from "../core/leverup/constants.js";
 import { getSessionKey, getSessionAccount } from "../core/session/keys.js";
 import { buildViemChain } from "../config/chains.js";
@@ -107,6 +109,79 @@ export function registerLeverUpOpenTrade(server: McpServer): void {
             content: [{
               type: "text",
               text: JSON.stringify(result, null, 2)
+            }]
+          };
+        }
+
+        // HEADLESS: OpenClaw path — root delegation, no Touch ID
+        if (isFileMode()) {
+          const quote = await getLeverUpQuote(
+            params.symbol,
+            params.isLong,
+            params.marginAmount,
+            params.leverage,
+            params.collateralToken || "MON"
+          );
+
+          // Validate leverage for Zero-Fee pairs
+          const pairMeta = SUPPORTED_PAIRS.find(
+            p => p.pair === `${params.symbol}/USD` || p.pair === params.symbol
+          );
+          if (pairMeta?.isHighLeverage && !isDegenModeLeverage(params.leverage)) {
+            throw new Error(
+              `${pairMeta.pair} is a Zero-Fee pair that ONLY supports ${DEGEN_MODE_LEVERAGE_OPTIONS.join(', ')}x leverage.`
+            );
+          }
+
+          const slippage = BigInt(params.slippageBps ?? 100);
+          const entryPriceWei = parseUnits(quote.entryPrice, 18);
+          const slippagePrice = params.isLong
+            ? (entryPriceWei * (10000n + slippage)) / 10000n
+            : (entryPriceWei * (10000n - slippage)) / 10000n;
+
+          const collateral = params.collateralToken ?? "MON";
+          const marginWei = parseUnits(params.marginAmount, getCollateralDecimals(collateral));
+          const qtyWei = parseUnits(quote.positionSize, 10);
+
+          const execution = await executeOpenTrade({
+            symbol: params.symbol,
+            isLong: params.isLong,
+            amountIn: marginWei,
+            leverage: params.leverage,
+            qty: qtyWei,
+            price: slippagePrice,
+            collateralToken: (params.collateralToken as any) || "MON",
+            stopLoss: params.stopLoss ? parseUnits(params.stopLoss, 18) : 0n,
+            takeProfit: params.takeProfit ? parseUnits(params.takeProfit, 18) : 0n,
+          }, config);
+
+          let result;
+          if (collateral === "MON") {
+            result = await executeHeadless(
+              { target: execution.to, value: execution.value, callData: execution.data as Hex },
+              config
+            );
+          } else {
+            result = await executeHeadlessWithApproval(
+              execution.tokenIn,
+              execution.to,
+              execution.amountIn,
+              { target: execution.to, value: execution.value, callData: execution.data as Hex },
+              config
+            );
+          }
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: result.success,
+                message: result.success
+                  ? `Successfully opened ${params.leverage}x ${params.isLong ? 'Long' : 'Short'} on ${params.symbol}`
+                  : result.message,
+                txHash: result.txHash,
+                explorerUrl: result.explorerUrl,
+                error: result.error,
+              }, null, 2)
             }]
           };
         }
