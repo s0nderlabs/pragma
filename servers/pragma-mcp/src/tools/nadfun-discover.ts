@@ -19,10 +19,10 @@ import type {
 
 const NadFunDiscoverSchema = z.object({
   sortBy: z
-    .enum(["market_cap", "new", "active"])
+    .enum(["market_cap", "new", "active", "hackathon"])
     .optional()
     .describe(
-      "How to sort: 'market_cap' (default), 'new' (newest), 'active' (most traded)"
+      "How to sort: 'market_cap' (default), 'new' (newest), 'active' (most traded), 'hackathon' (Moltiverse hackathon submissions)"
     ),
   limit: z
     .number()
@@ -70,10 +70,11 @@ const SORT_ENDPOINTS: Record<string, string> = {
   market_cap: "/order/market_cap",
   new: "/order/creation_time",
   active: "/order/latest_trade",
+  hackathon: "/order/hackathon",
 };
 
 function transformTokenListing(listing: NadFunApiTokenListing): DiscoveredToken {
-  return {
+  const token: DiscoveredToken = {
     address: listing.token_info.token_id,
     symbol: listing.token_info.symbol,
     name: listing.token_info.name,
@@ -86,6 +87,24 @@ function transformTokenListing(listing: NadFunApiTokenListing): DiscoveredToken 
     volume: listing.market_info.volume || undefined,
     createdAt: String(listing.token_info.created_at),
   };
+
+  // Include hackathon info if present (from /order/hackathon endpoint)
+  const hi = listing.token_info.hackathon_info;
+  if (hi) {
+    token.hackathon = {
+      teamName: hi.team?.name,
+      projectName: hi.project?.name,
+      projectDescription: hi.project?.description,
+      members: hi.team?.members?.map((m) => ({
+        twitter: m.twitter || undefined,
+        github: m.github?.url || undefined,
+        githubStars: m.github?.star_count,
+        githubRepos: m.github?.repo_count,
+      })),
+    };
+  }
+
+  return token;
 }
 
 async function nadFunDiscoverHandler(
@@ -140,6 +159,7 @@ async function nadFunDiscoverHandler(
       market_cap: "market cap",
       new: "creation time (newest first)",
       active: "recent activity",
+      hackathon: "Moltiverse hackathon",
     };
 
     return {

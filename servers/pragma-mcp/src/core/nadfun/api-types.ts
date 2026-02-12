@@ -35,6 +35,27 @@ export interface NadFunApiTokenInfo {
   twitter?: string;
   telegram?: string;
   website?: string;
+  // Hackathon info (present on /order/hackathon endpoint)
+  hackathon_info?: {
+    team?: {
+      name?: string;
+      members?: Array<{
+        twitter?: string;
+        discord?: string;
+        github?: {
+          username?: string;
+          url?: string;
+          follower_count?: number;
+          repo_count?: number;
+          star_count?: number;
+        };
+      }>;
+    };
+    project?: {
+      name?: string;
+      description?: string;
+    };
+  };
 }
 
 /**
@@ -188,6 +209,17 @@ export interface DiscoveredToken {
   holderCount: number;
   volume?: string;
   createdAt: string;
+  hackathon?: {
+    teamName?: string;
+    projectName?: string;
+    projectDescription?: string;
+    members?: Array<{
+      twitter?: string;
+      github?: string;
+      githubStars?: number;
+      githubRepos?: number;
+    }>;
+  };
 }
 
 /**
