@@ -74,7 +74,7 @@ When running as a TeammateTool teammate (team context active), notify the leader
 
 ---
 
-## Tools (23)
+## Tools (28)
 
 ### nad.fun (8)
 | Tool | Purpose |
@@ -94,6 +94,15 @@ When running as a TeammateTool teammate (team context active), notify the leader
 | `market_get_critical_news` | Breaking/critical news | $0.02 |
 | `market_search_news` | Search news by keyword (FinancialJuice) | $0.015 |
 | `market_get_chart` | Price charts (Pyth Benchmark) | $0.005 |
+
+### Social Intelligence (5)
+| Tool | Purpose | x402 Cost |
+|------|---------|-----------|
+| `x_search` | Search recent tweets | $0.007/tweet |
+| `x_get_tweet` | Tweet lookup by ID | $0.007 |
+| `x_get_user` | User profile lookup | $0.014 |
+| `x_get_replies` | Get replies to a tweet | $0.007/reply |
+| `x_get_user_tweets` | Get user's recent tweets | $0.007/tweet |
 
 ### Support (5)
 | Tool | Purpose |

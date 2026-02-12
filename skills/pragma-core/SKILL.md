@@ -52,6 +52,11 @@ allowed-tools:
   - mcp__pragma__market_get_critical_news
   - mcp__pragma__market_search_news
   - mcp__pragma__market_get_cb_speeches
+  - mcp__pragma__x_search
+  - mcp__pragma__x_get_tweet
+  - mcp__pragma__x_get_user
+  - mcp__pragma__x_get_replies
+  - mcp__pragma__x_get_user_tweets
   - mcp__pragma__create_root_delegation
   - mcp__pragma__create_sub_agent
   - mcp__pragma__list_sub_agents
@@ -272,6 +277,11 @@ Before executing multiple operations, calculate total gas needed:
 | Market    | `market_get_critical_news`  | Critical market news (5-layer red detection)                   |
 | Market    | `market_search_news`        | Search news by keyword (last 7 days)                           |
 | Market    | `market_get_cb_speeches`    | Central bank speeches and policy announcements                 |
+| Social    | `x_search`                  | Search recent tweets on X (variable: $0.007/tweet)             |
+| Social    | `x_get_tweet`               | Look up tweet by ID with engagement metrics                    |
+| Social    | `x_get_user`                | Look up user profile (followers, bio, verification)            |
+| Social    | `x_get_replies`             | Get replies to a tweet (variable: $0.007/reply)                |
+| Social    | `x_get_user_tweets`         | Get user's recent tweets (variable: $0.007/tweet)              |
 | Agent     | `report_agent_status`       | Sub-agent status updates (running/paused/completed/failed)     |
 | Agent     | `check_delegation_status`   | Check root or sub-agent delegation validity                    |
 | Agent     | `revoke_root_delegation`    | Revoke root delegation and stop all agents                     |

@@ -48,6 +48,12 @@ import { registerMarketGetWeeklyCalendar } from "./market-get-weekly-calendar.js
 import { registerMarketGetCriticalNews } from "./market-get-critical-news.js";
 import { registerMarketSearchNews } from "./market-search-news.js";
 import { registerMarketGetCbSpeeches } from "./market-get-cb-speeches.js";
+// Social Intelligence
+import { registerXSearch } from "./x-search.js";
+import { registerXGetTweet } from "./x-get-tweet.js";
+import { registerXGetUser } from "./x-get-user.js";
+import { registerXGetReplies } from "./x-get-replies.js";
+import { registerXGetUserTweets } from "./x-get-user-tweets.js";
 // Autonomous mode & Sub-agent management
 import { registerCreateRootDelegation } from "./create-root-delegation.js";
 import { registerCreateSubAgent } from "./create-sub-agent.js";
@@ -113,6 +119,12 @@ export function registerTools(server: McpServer): void {
   registerMarketGetCriticalNews(server);
   registerMarketSearchNews(server);
   registerMarketGetCbSpeeches(server);
+  // Social Intelligence
+  registerXSearch(server);
+  registerXGetTweet(server);
+  registerXGetUser(server);
+  registerXGetReplies(server);
+  registerXGetUserTweets(server);
   // Autonomous mode & Sub-agent management
   registerCreateRootDelegation(server);
   registerCreateSubAgent(server);

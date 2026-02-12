@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.51] - 2026-02-12
+
+### Added
+- Social Intelligence tools — 5 new x402 MCP tools for X/Twitter data:
+  - `x_search` — search recent tweets with sort by recency or relevancy ($0.007/tweet)
+  - `x_get_tweet` — tweet lookup by ID with conversation context and referenced tweets ($0.007)
+  - `x_get_user` — user profile lookup with pinned tweet ($0.014)
+  - `x_get_replies` — get replies to any tweet with referenced tweet context ($0.007/reply)
+  - `x_get_user_tweets` — get a user's timeline, exclude replies or retweets ($0.007/tweet)
+
 ## [0.8.50] - 2026-02-11
 
 ### Added

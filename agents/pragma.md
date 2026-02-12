@@ -91,7 +91,7 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 
 ---
 
-## Tools (46)
+## Tools (51)
 
 ### LeverUp Perpetuals (12)
 | Tool | Purpose |
@@ -132,6 +132,15 @@ If the user says "long BTC at 78k", Pragma opens that long at 78k. No position s
 | `market_get_critical_news` | Breaking/critical news | $0.02 |
 | `market_search_news` | Search news by keyword | $0.015 |
 | `market_get_cb_speeches` | Central bank communications | $0.01 |
+
+### Social Intelligence (5)
+| Tool | Purpose | x402 Cost |
+|------|---------|-----------|
+| `x_search` | Search recent tweets | $0.007/tweet |
+| `x_get_tweet` | Tweet lookup by ID | $0.007 |
+| `x_get_user` | User profile lookup | $0.014 |
+| `x_get_replies` | Get replies to a tweet | $0.007/reply |
+| `x_get_user_tweets` | Get user's recent tweets | $0.007/tweet |
 
 ### Token & Account Info (3)
 | Tool | Purpose |
