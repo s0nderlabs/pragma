@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.53] - 2026-02-13
+## [0.8.54] - 2026-02-13
 
 ### Fixed
 - Remove all arbitrary caps on delegation budget and parameter fields — schema-level (`budgetMon`, `budgetUsd`, `maxValuePerTx`, `maxCalls`, `fundAmount`, `amountMon`) and handler-level validation (`valueLtePerTx` 100 MON safety limit, `maxCalls` ceiling). On-chain caveats and Touch ID approval are the real guardrails.
