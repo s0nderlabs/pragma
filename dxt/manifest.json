@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "pragma",
-  "version": "0.8.52",
+  "version": "0.8.53",
   "display_name": "Pragma",
   "description": "Vibetrading for Claude — on-chain trading and market intelligence on Monad",
   "long_description": "Trade, analyze, and execute transactions on Monad blockchain. Includes swaps, transfers, leveraged perpetuals (LeverUp), memecoins (nad.fun), market intelligence, and autonomous trading agents.",
