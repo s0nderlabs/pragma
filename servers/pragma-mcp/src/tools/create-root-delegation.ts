@@ -25,7 +25,6 @@ const CreateRootDelegationSchema = z.object({
   budgetMon: z
     .number()
     .min(0)
-    .max(1000)
     .default(50)
     .describe(
       "Total MON budget authorized for all agents. " +
@@ -35,7 +34,6 @@ const CreateRootDelegationSchema = z.object({
   budgetUsd: z
     .number()
     .min(0)
-    .max(10000)
     .default(0)
     .describe(
       "Total USD-group budget (USDC + LVUSD) authorized for all agents. " +
@@ -44,7 +42,6 @@ const CreateRootDelegationSchema = z.object({
   maxValuePerTx: z
     .number()
     .min(0)
-    .max(100)
     .default(10)
     .describe(
       "Maximum native MON per single transaction. " +

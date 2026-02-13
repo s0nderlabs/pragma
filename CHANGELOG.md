@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.53] - 2026-02-13
+
+### Fixed
+- Remove arbitrary `.max()` caps on delegation budget fields (`budgetMon`, `budgetUsd`, `maxValuePerTx`) — on-chain caveats and Touch ID approval are the real guardrails, not schema limits
+
 ## [0.8.52] - 2026-02-12
 
 ### Added

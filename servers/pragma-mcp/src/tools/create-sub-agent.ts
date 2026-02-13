@@ -151,7 +151,6 @@ const CreateSubAgentSchema = z.object({
   budgetMon: z
     .number()
     .min(0)
-    .max(100)
     .describe(
       "MON trading capital for this sub-agent. Must fit within root budgetMon. " +
         "kairos/pragma require >= 1 (LeverUp's 1 wei Pyth fee needs ValueLteEnforcer > 0). " +
