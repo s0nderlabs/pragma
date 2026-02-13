@@ -53,7 +53,6 @@ const CreateRootDelegationSchema = z.object({
   maxCalls: z
     .number()
     .min(1)
-    .max(500)
     .default(100)
     .describe(
       "Maximum delegation calls (trades + approvals combined). " +

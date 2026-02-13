@@ -593,19 +593,14 @@ export function validateRootDelegationParams(params: {
     errors.push("expiryDays must be between 1 and 30");
   }
 
-  if (params.maxCalls < 1 || params.maxCalls > 500) {
-    errors.push("maxCalls must be between 1 and 500");
+  if (params.maxCalls < 1) {
+    errors.push("maxCalls must be at least 1");
   }
 
   if (params.valueLtePerTx < 0n) {
     errors.push("valueLtePerTx cannot be negative");
   }
 
-  // Check per-tx value safety limit
-  const maxPerTx = parseEther("100"); // 100 MON max per tx
-  if (params.valueLtePerTx > maxPerTx) {
-    errors.push("valueLtePerTx exceeds 100 MON per-tx safety limit");
-  }
 
   return {
     valid: errors.length === 0,

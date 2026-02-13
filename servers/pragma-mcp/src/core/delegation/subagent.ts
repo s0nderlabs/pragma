@@ -475,8 +475,8 @@ export function validateSubDelegationParams(params: Omit<SubDelegationParams, 'p
     errors.push("expiryDays must be between 1 and 30");
   }
 
-  if (params.maxCalls < 1 || params.maxCalls > 1000) {
-    errors.push("maxCalls must be between 1 and 1000");
+  if (params.maxCalls < 1) {
+    errors.push("maxCalls must be at least 1");
   }
 
   if (params.valueLtePerTx < 0n) {

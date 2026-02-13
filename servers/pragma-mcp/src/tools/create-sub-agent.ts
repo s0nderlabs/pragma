@@ -189,7 +189,6 @@ const CreateSubAgentSchema = z.object({
   maxCalls: z
     .number()
     .min(1)
-    .max(100)
     .default(20)
     .describe(
       "Maximum delegation calls (trades + approvals). " +
@@ -198,10 +197,9 @@ const CreateSubAgentSchema = z.object({
   fundAmount: z
     .number()
     .min(0)
-    .max(10)
     .default(1)
     .describe(
-      "Initial gas funding in MON. Set to 0 to skip funding. Default: 1 MON. Max: 10 MON"
+      "Initial gas funding in MON. Set to 0 to skip funding. Default: 1 MON"
     ),
   taskId: z
     .string()

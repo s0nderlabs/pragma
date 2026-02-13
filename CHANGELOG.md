@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.53] - 2026-02-13
 
 ### Fixed
-- Remove arbitrary `.max()` caps on delegation budget fields (`budgetMon`, `budgetUsd`, `maxValuePerTx`) — on-chain caveats and Touch ID approval are the real guardrails, not schema limits
+- Remove all arbitrary caps on delegation budget and parameter fields — schema-level (`budgetMon`, `budgetUsd`, `maxValuePerTx`, `maxCalls`, `fundAmount`, `amountMon`) and handler-level validation (`valueLtePerTx` 100 MON safety limit, `maxCalls` ceiling). On-chain caveats and Touch ID approval are the real guardrails.
 
 ## [0.8.52] - 2026-02-12
 

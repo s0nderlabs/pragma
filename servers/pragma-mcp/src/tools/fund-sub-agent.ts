@@ -24,10 +24,9 @@ const FundSubAgentSchema = z.object({
   amountMon: z
     .number()
     .min(0.001)
-    .max(10)
     .default(1)
     .describe(
-      "Amount of MON to transfer for gas. Default: 1 MON. Max: 10 MON"
+      "Amount of MON to transfer for gas. Default: 1 MON"
     ),
 });
 
