@@ -168,7 +168,7 @@ The root delegation captures what the user authorized via Touch ID. It is the ce
 |-----------|----------------|-----------|
 | `budgetMon` | Total MON authorized (ceiling) | This agent's MON allocation |
 | `budgetUsd` | Total USD authorized (ceiling) | This agent's USD budget |
-| `maxValuePerTx` | User-set per-tx MON cap | Derived: `budgetMon / maxCalls` |
+| `maxValuePerTx` | User-set per-tx MON cap | Optional param (defaults to budgetMon) |
 | `maxCalls` | Total calls for ALL agents | This agent's call limit |
 
 Sub-agent creation validates allocations against root:
@@ -184,7 +184,7 @@ These caveats are embedded in the delegation and enforced by smart contracts:
 |----------|------|----------------|
 | `TimestampEnforcer` | `expiryDays` | `expiryDays` |
 | `LimitedCallsEnforcer` | `maxCalls` (all agents) | `maxCalls` (this agent) |
-| `ValueLteEnforcer` | `maxValuePerTx` (user-specified) | `budgetMon / maxCalls` (derived) |
+| `ValueLteEnforcer` | `maxValuePerTx` (user-specified) | `maxValuePerTx` (optional, defaults to budgetMon) |
 | `LogicalOrWrapperEnforcer` | All protocols | Agent-specific protocols |
 
 `ValueLteEnforcer` checks `execution.value <= limit` per `redeemDelegations()` call — it validates the value field inside the delegation's Execution struct, not the outer tx's `msg.value`. It only affects native MON sends, not ERC-20 transfers. Setting it to 0 blocks ALL native MON transactions, including Pyth oracle fees required by LeverUp (even with ERC20 collateral like LVUSD/USDC). **Important:** `budgetMon` must be >= 1 for any sub-agent that may use LeverUp, and root `maxValuePerTx` must be > 0.
@@ -538,6 +538,7 @@ create_sub_agent(
   allowedGroups: [user specified, optional — e.g. ["MON"] or ["MON", "USD"]],
   allowedTokens: [user specified, optional — e.g. ["LVUSD"] or ["USDC", "WMON"]],
   maxCalls: [inferred],
+  maxValuePerTx: [optional — per-tx MON cap, defaults to budgetMon if omitted],
   expiryDays: [calculated],
   fundAmount: 1,
   loopType: [inferred from intent — "none" for one-shot],

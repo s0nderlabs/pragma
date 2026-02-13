@@ -194,6 +194,16 @@ const CreateSubAgentSchema = z.object({
       "Maximum delegation calls (trades + approvals). " +
         "Each trade may need 1-2 calls (approve + execute). Default: 20"
     ),
+  maxValuePerTx: z
+    .number()
+    .min(0)
+    .optional()
+    .describe(
+      "Maximum native MON per single transaction. On-chain enforced via ValueLteEnforcer. " +
+        "If not specified, defaults to full budgetMon (each tx can spend up to the entire budget; " +
+        "total budget is enforced separately via LimitedCallsEnforcer). " +
+        "Set this lower to limit per-trade risk."
+    ),
   fundAmount: z
     .number()
     .min(0)
@@ -424,10 +434,12 @@ async function createSubAgentHandler(
     // Wrap all operations in try-catch to release wallet on failure
     try {
       // Calculate valueLtePerTx for on-chain ValueLteEnforcer
-      // Per-tx native MON cap = budgetMon / maxCalls
-      // 0 budgetMon → 0 valueLtePerTx → blocks all native MON on-chain
+      // If user specified maxValuePerTx, use that directly.
+      // Otherwise default to full budget (total budget enforced by LimitedCalls separately).
       const totalBudgetWei = parseEther(params.budgetMon.toString());
-      const valueLtePerTx = params.maxCalls > 0 ? totalBudgetWei / BigInt(params.maxCalls) : 0n;
+      const valueLtePerTx = params.maxValuePerTx !== undefined
+        ? parseEther(params.maxValuePerTx.toString())
+        : totalBudgetWei;
 
       // Validate against root delegation budget (user's consent boundary)
       if (rootDelegation.budgetMon !== undefined) {

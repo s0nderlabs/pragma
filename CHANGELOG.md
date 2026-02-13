@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.55] - 2026-02-13
+
+### Fixed
+- Add explicit `maxValuePerTx` parameter to `create_sub_agent` — previously auto-derived as `budgetMon / maxCalls` which produced per-tx caps too low for real trading (e.g., 1000 MON / 30 calls = 33 MON/tx cap). Now defaults to full `budgetMon` when not specified; total spend enforced separately by `LimitedCallsEnforcer`.
+
 ## [0.8.54] - 2026-02-13
 
 ### Fixed
