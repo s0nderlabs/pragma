@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.56] - 2026-02-17
+
+### Fixed
+- Agent log (`get_agent_log`) now returns newest entries first with correct pagination -- previously returned oldest entries, causing agents to read stale data
+- Native MON budget check uses net-aware `checkGroupBudget` instead of legacy `monSpent` accumulator -- agents can now reinvest MON recovered from sells instead of being blocked by outflow-only tracking
+- DEX swap direction detection from token addresses -- sells now correctly labeled `trade_sell` in journal and `action: "sell"` in trades instead of hardcoded `"buy"` for all swaps
+
 ## [0.8.55] - 2026-02-13
 
 ### Fixed

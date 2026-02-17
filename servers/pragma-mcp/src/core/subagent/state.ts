@@ -1296,6 +1296,7 @@ export function loadJournal(
       allEntries = allEntries.filter((e) => e.tag === filter.tag);
     }
 
+    allEntries.reverse();
     const entries = allEntries.slice(offset, offset + limit);
     return { entries, total: allEntries.length };
   } catch {

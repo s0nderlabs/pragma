@@ -351,14 +351,11 @@ export async function executeWithDelegationChain(
   if (!options?.skipBudgetTracking) {
     // 3a. Validate native MON budget and allowlist
     if (execution.value > 0n) {
-      const monAllocated = BigInt(state.budget.monAllocated);
-      const monSpent = BigInt(state.budget.monSpent);
-      if (monSpent + execution.value > monAllocated) {
+      const budgetCheck = checkGroupBudget(state, NATIVE_TOKEN_ADDRESS, execution.value);
+      if (!budgetCheck.allowed) {
         return {
           success: false,
-          error: `Insufficient MON budget. Allocated: ${monAllocated}, Spent: ${monSpent}, Required: ${execution.value}. ` +
-            `Note: LeverUp trades require native MON for Pyth oracle fees even with ERC20 collateral. ` +
-            `Ensure budgetMon >= 1 when creating sub-agents.`,
+          error: `MON budget exceeded: ${budgetCheck.reason}`,
         };
       }
 
@@ -1827,6 +1824,11 @@ export async function executeAutonomousSwap(
       }],
     };
 
+    // Detect swap direction: "buy" = spending MON/WMON, "sell" = selling to get MON/WMON
+    const fromAddr = quote.fromToken.address.toLowerCase();
+    const isFromBase = fromAddr === NATIVE_TOKEN_ADDRESS || fromAddr === WMON_ADDRESS.toLowerCase();
+    const swapAction: "buy" | "sell" = isFromBase ? "buy" : "sell";
+
     let result: AutonomousExecutionResult;
 
     if (isNativeSwap) {
@@ -1839,7 +1841,7 @@ export async function executeAutonomousSwap(
           callData: executionData.calldata,
         },
         {
-          action: "buy",
+          action: swapAction,
           protocol: "dex",
           details: {
             fromToken: quote.fromToken.symbol,
@@ -1863,7 +1865,7 @@ export async function executeAutonomousSwap(
           callData: executionData.calldata,
         },
         {
-          action: "buy",
+          action: swapAction,
           protocol: "dex",
           details: {
             fromToken: quote.fromToken.symbol,
@@ -1889,7 +1891,7 @@ export async function executeAutonomousSwap(
     try {
       await appendJournal(agentId, {
         ts: Date.now(),
-        type: "swap",
+        type: swapAction === "buy" ? "trade_buy" : "trade_sell",
         pair: `${quote.fromToken.symbol}/${quote.toToken.symbol}`,
         margin: quote.amountIn,
         text: `Swapped ${quote.amountIn} ${quote.fromToken.symbol} for ${quote.expectedOutput} ${quote.toToken.symbol}`,

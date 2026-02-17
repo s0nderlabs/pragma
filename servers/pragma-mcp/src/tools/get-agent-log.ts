@@ -93,7 +93,7 @@ async function getAgentLogHandler(
     }
 
     // Format entries as readable one-liners (newest first)
-    const formatted = entries.reverse().map(entry => {
+    const formatted = entries.map(entry => {
       const ts = new Date(entry.ts).toLocaleString();
       const parts: string[] = [];
 
