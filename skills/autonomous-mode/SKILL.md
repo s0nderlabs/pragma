@@ -525,10 +525,10 @@ Before creating the sub-agent:
 **One-shot tasks do NOT get loop enforcement.** Only tasks requiring persistence get a loop.
 
 **Mission Construction:**
-- Mission is re-injected as the agent's next prompt when the SubagentStop hook blocks exit
-- Must be actionable and self-contained (the agent sees ONLY this text when unblocked)
+- Mission is sent by the leader as a wake message via SendMessage after each cycle
+- Must be actionable and self-contained (the agent sees this text as their wake prompt)
 - Include: objective, key conditions, budget context
-- Do NOT include generic instructions — the hook appends agent ID and iteration count automatically
+- The leader appends agent ID and iteration count to the wake message
 
 ```
 create_sub_agent(
@@ -544,8 +544,7 @@ create_sub_agent(
   loopType: [inferred from intent — "none" for one-shot],
   loopCondition: [for condition type],
   loopIntervalMinutes: [for interval type],
-  mission: [actionable task text — fed back by hook on each iteration],
-  maxIterations: [safety limit, 0 = unlimited]
+  mission: [actionable task text — sent by leader as wake message each cycle],
 )
 → Returns agentId (pragma agent ID)
 → Agent status starts as "pending"
@@ -556,7 +555,7 @@ create_sub_agent(
 
 **Note:** The `mission` (in loop.json) and the Task `prompt` serve different purposes:
 - **Task prompt**: Full initial instructions with rules, agent ID, all context (seen once at spawn)
-- **Mission**: Concise re-prompt fed by the SubagentStop hook each time the agent tries to exit (seen repeatedly)
+- **Mission**: Concise wake message sent by the leader via SendMessage between cycles (seen repeatedly)
 
 The mission should be a subset of the prompt — just the core objective and key constraints.
 
@@ -634,6 +633,13 @@ Follow your Leader Notification Protocol for event types and cadence.
 Always call MCP state tools FIRST (report_agent_status, write_agent_memo),
 THEN SendMessage. If SendMessage fails, continue — MCP state is authoritative.
 
+CYCLE BEHAVIOR:
+After each analysis/monitoring/trading cycle, send a cycle report via SendMessage
+to the leader with a brief status summary. Then STOP — end your turn naturally.
+Do NOT use Bash("sleep") to wait between cycles. The leader will wake you via
+SendMessage when it's time for your next cycle. When you receive a wake message,
+treat it as the start of a new cycle.
+
 FIRST ACTION (after ToolSearch completes):
 1. report_agent_status(agentId: "${agentId}", status: "running")
 2. SendMessage to "team-lead": summary: "Running — starting initial scan"
@@ -680,30 +686,79 @@ get_sub_agent_state(
 This is needed for:
 - `TaskStop(taskId)` during cleanup (both team and non-team)
 - `Task({ resume: taskAgentId })` for gas top-up resume (non-team only)
-- **TeammateIdle hook lookup** — the hook scans state.json for matching `teammateName` to re-inject the mission
+- **Leader wake** — the leader uses teammateName to SendMessage the wake prompt between cycles
 
 With team spawn, gas resume uses `SendMessage` instead of `Task({ resume })` — teammates stay alive and just need a message to wake up.
 
-### Step 10: Hands-Off — Do NOT Nudge the Agent
+### Step 10: Orchestrate Agent Wake Cycles
 
-**CRITICAL:** After the agent confirms it's running (sends "Running — starting initial scan"), the leader MUST NOT message the agent unless:
+After the agent confirms it's running (sends "Running — starting initial scan"), the leader enters the scheduling loop.
 
-1. **Agent explicitly requests help** — e.g., status "paused" with "Low gas"
-2. **User asks** to check on, stop, or interact with the agent
-3. **Agent reports completion/failure** — cleanup needed
+**Leader scheduling loop:**
 
-**Idle notifications are normal.** The SubagentStop hook re-injects the mission automatically each time the agent's turn ends. The agent is NOT stuck — it's actively working in a loop. Sending a message to an idle agent interrupts its loop and wastes context.
+1. **Wait for agent cycle-complete message**
+   The agent sends a cycle report via SendMessage and goes idle.
+   Report to user: "Agent is running. It will operate autonomously."
 
-**What happens if you nudge:**
-- The agent receives your message as a new prompt, disrupting its current analysis cycle
-- The SubagentStop hook ALSO fires, so the agent gets two prompts (yours + the mission)
-- This wastes tokens, confuses the agent, and can cause duplicate actions
+2. **Read state and check termination conditions:**
+   ```
+   get_sub_agent_state(subAgentId)
+   ```
+   ALL must pass to continue (ANY fail → agent stays idle, proceed to cleanup):
+   - status is "running" (not completed/failed/revoked/paused)
+   - loop.active is true and loop.type is not "none"
+   - trades.executed < trades.maxAllowed
+   - expiresAt > current time (check via `date -u`)
 
-**Correct leader behavior after spawn:**
-- Report to user: "Agent is running. It will operate autonomously."
-- Wait silently for agent messages or user requests
-- Do NOT respond to idle notifications
-- Do NOT send "how's it going?" or "any updates?" messages
+3. **Start background timer:**
+   ```
+   Bash(
+     command: "sleep {seconds}",
+     description: "Wake {agentName} ({agentId})",
+     run_in_background: true
+   )
+   ```
+   The `description` appears in the task notification summary — the leader uses it
+   to identify which agent to wake. Include both name and ID for compaction recovery.
+
+   Duration by loop type:
+   - interval: loop.intervalMinutes * 60
+   - continuous: agent-type default (kairos: 600, thymos: 120, pragma: 300)
+   - condition: agent-type default
+
+4. **When timer fires, re-check conditions** (step 2 again — state may have
+   changed during the wait, e.g., delegation expired). If still valid, wake:
+   ```
+   SendMessage(
+     type: "message",
+     recipient: "{agentName}",
+     summary: "Wake cycle",
+     content: "{mission}\n\nAgent ID: {agentId}.
+     Check get_sub_agent_state for current state."
+   )
+   ```
+
+5. Return to step 1.
+
+**Multi-agent scheduling:**
+Each agent has its own independent `Bash("sleep", run_in_background: true)` timer.
+When agent A's timer fires, wake A; when B's fires, wake B. Agent messages
+arrive asynchronously — process each as received.
+
+**Context compaction recovery:**
+If leader context compacts and loses scheduling state:
+1. `list_sub_agents(status: "running")` → find active agents
+2. For each: `get_sub_agent_state(subAgentId)` → read loop config
+3. Resume scheduling from current state (timers restart)
+
+**Idle notifications:**
+Agent idle notifications are EXPECTED and NORMAL. The leader does NOT react to
+idle notifications — the background timer handles scheduling. Only react to agent
+SendMessage content. If an agent goes idle WITHOUT a preceding cycle report
+(e.g., hit context limit or errored mid-cycle), check `get_sub_agent_state`:
+if status is "running" and loop is active, schedule wake on normal timer;
+if status is terminal, proceed to cleanup. The agent retains its full context
+and will continue normally when woken.
 
 ### Step 11: Leader Enrichment Protocol
 
@@ -752,7 +807,7 @@ Agent Bias: Moderately bullish risk assets
 Budget: 15/15 USDC remaining | 20/20 calls | Gas: 1.9 MON | Expires: 22h
 ```
 
-**IMPORTANT:** Enrichment is read-only. The leader reads the journal and presents data. The leader does NOT send any message to the agent during enrichment. This is fully compatible with the hands-off rule.
+**IMPORTANT:** Enrichment is read-only. The leader reads the journal and presents data. The leader does NOT send any message to the agent during enrichment — the wake timer handles scheduling separately.
 
 ---
 
@@ -889,7 +944,6 @@ create_sub_agent(
   fundAmount: 1,
   loopType: "continuous",
   mission: "Trade perps on LeverUp. Budget: 30 MON + 15 USDC. Goal: profit overnight.",
-  maxIterations: 0
 )
 → Returns kairosAgentId
 ```
@@ -907,7 +961,6 @@ create_sub_agent(
   fundAmount: 1,
   loopType: "continuous",
   mission: "Trade memecoins on nad.fun. Budget: 20 MON. Goal: profit overnight.",
-  maxIterations: 0
 )
 → Returns thymosAgentId
 ```
@@ -1318,7 +1371,7 @@ When a sub-agent pauses due to low gas:
 6. `create_sub_agent(kairos, 10 MON, 10 USDC, 10 calls, 1 day)` → agentId: "xyz-123", status: "pending"
 7. `TeamCreate({ team_name: "pragma-1738900000" })` → team created
 8. `Task({ subagent_type: "pragma:kairos", team_name: "pragma-1738900000", name: "kairos-xyz123", mode: "bypassPermissions", prompt: "Monitor BTC..." })` → taskAgentId: "a32dec1"
-9. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1, teammateName: "kairos-xyz123")` → stores for TaskStop + TeammateIdle hook
+9. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1, teammateName: "kairos-xyz123")` → stores for TaskStop + leader wake
 10. Report: "Kairos agent monitoring BTC for breakout above $95k."
 
 **Agent starts:**

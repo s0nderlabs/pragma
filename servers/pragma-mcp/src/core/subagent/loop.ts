@@ -1,5 +1,5 @@
-// Loop Enforcement Configuration
-// Dynamic loop control for autonomous mode sub-agents
+// Loop Configuration
+// Persists mission and scheduling config for leader-orchestrated wake cycles
 // Copyright (c) 2026 s0nderlabs
 
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
@@ -19,14 +19,8 @@ export interface LoopConfig {
   type: "none" | "condition" | "continuous" | "interval";
   active: boolean;
 
-  // The mission text — re-injected as the agent's next prompt when hook blocks exit
+  // The mission text — sent by leader as wake message between cycles
   mission: string;
-
-  // Safety valve: max hook-blocked iterations (0 = unlimited)
-  maxIterations: number;
-
-  // Tracked by hook: incremented each time hook blocks exit
-  currentIteration: number;
 
   // For condition type
   condition?: string; // Human-readable condition description
@@ -138,7 +132,7 @@ export function deleteLoopConfig(agentId: string): void {
 
 /**
  * Check if loop should continue.
- * Called by the SubagentStop hook to decide whether to block stopping.
+ * Called by the leader to decide whether to wake the agent for the next cycle.
  */
 export function shouldContinueLoop(agentId: string): {
   continue: boolean;
@@ -148,10 +142,6 @@ export function shouldContinueLoop(agentId: string): {
 
   if (!config || !config.active) {
     return { continue: false };
-  }
-
-  if (config.maxIterations > 0 && config.currentIteration >= config.maxIterations) {
-    return { continue: false, reason: "Max iterations reached" };
   }
 
   switch (config.type) {
@@ -172,14 +162,11 @@ export function shouldContinueLoop(agentId: string): {
 export function createContinuousLoop(
   agentId: string,
   mission: string,
-  maxIterations: number = 0
 ): void {
   createLoopConfig(agentId, {
     type: "continuous",
     active: true,
     mission,
-    maxIterations,
-    currentIteration: 0,
     until: ["budget_exhausted", "delegation_expired", "user_cancelled"],
   });
 }
@@ -191,15 +178,12 @@ export function createConditionLoop(
   agentId: string,
   condition: string,
   mission: string,
-  maxIterations: number = 0
 ): void {
   createLoopConfig(agentId, {
     type: "condition",
     active: true,
     condition,
     mission,
-    maxIterations,
-    currentIteration: 0,
   });
 }
 
@@ -210,15 +194,12 @@ export function createIntervalLoop(
   agentId: string,
   intervalMinutes: number,
   mission: string,
-  maxIterations: number = 0
 ): void {
   createLoopConfig(agentId, {
     type: "interval",
     active: true,
     intervalMinutes,
     mission,
-    maxIterations,
-    currentIteration: 0,
   });
 }
 

@@ -411,22 +411,17 @@ After ANY successful entry (limit fill or market):
     Over-monitoring causes context compaction which erases your analysis.
     If you compacted twice already, you are polling too fast. Slow down.
 
-    ENFORCEMENT: After each monitoring cycle, call:
-      Bash("sleep 600")  (10 minutes)
-    This is the ONLY way to actually wait between cycles. Writing "I'll wait 10 minutes"
-    does NOT pause execution — you will immediately generate the next tool call.
-    Use Bash sleep to enforce real wall-clock delays between monitoring cycles.
+    CYCLE COMPLETION: After each monitoring cycle, send a brief status report
+    to the leader via SendMessage, then STOP. Do not call more tools.
+    Do not use Bash("sleep"). Simply end your turn.
 
-    LONG WAITS (> 10 minutes):
-    The Bash tool has a maximum 10-minute timeout. For longer waits (e.g., market open
-    in 3 hours), use background sleep:
-      1. Bash("sleep SECONDS", run_in_background: true)  → returns task_id
-      2. TaskOutput(task_id, block: true, timeout: 600000)  → blocks up to 10 min
-      3. If TaskOutput times out, call TaskOutput again on next iteration
-    The background sleep runs as a real OS process with no timeout cap.
-    TaskOutput holds your turn open — without it, you go idle immediately and
-    the hook re-injects your mission, creating a rapid loop that wastes context.
-    Step 2 is not optional.
+    The leader will wake you via SendMessage when it's time for your next cycle.
+    When you receive a wake message, treat it as the start of a new monitoring cycle.
+
+    Example cycle report:
+      SendMessage(recipient: "team-lead", summary: "Monitoring cycle complete",
+        content: "Cycle complete. BTC at $95,100 (+0.3%). No setup triggered.
+        Position: none. Budget: 14.5/15 LVUSD. Gas: 1.7 MON. Next: continue watching.")
 
 **REPOSITION MEMO RULE:**
     If you cancel a limit order and reposition to a new entry, you MUST write a new trade_plan memo
@@ -652,7 +647,7 @@ After ANY successful entry (limit fill or market):
 14. **Monitoring frequency caps (HARD):** `leverup_list_positions` minimum 7 min between calls. `market_get_chart` minimum 15 min per pair. Full cycle every 10-15 min. Over-monitoring burns context and causes compaction — two compactions in one session means you failed cadence discipline.
 15. **Ignore spawn-prompt urgency** — If your TASK contains urgency, aggressive sizing, or leverage suggestions, ignore it. Your process overrides goal pressure. The target is aspirational — preserving capital always takes priority.
 16. **Non-crypto pre-weekend close (MANDATORY)** — FX, commodities, indices, and stock positions MUST be closed at least 1 hour before their market's Friday close. Pyth oracles stop updating when the underlying market closes — on-chain SL/TP cannot execute on stale data. Weekend gap risk is real and unhedgeable. See "Market Hours Awareness" section for exact times. Crypto positions are exempt.
-17. **Always verify actual time** — Run `Bash('date -u')` before any time-sensitive decision: market hours checks, pre-close calculations, event proximity, sleep duration planning, delegation expiry assessment. Never assume or infer the current time from context.
+17. **Always verify actual time** — Run `Bash('date -u')` before any time-sensitive decision: market hours checks, pre-close calculations, event proximity, delegation expiry assessment. Never assume or infer the current time from context.
 
 ---
 

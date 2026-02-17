@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.57] - 2026-02-17
+
+### Changed
+- Replace hook-based agent loop with leader-orchestrated wake-from-idle — agents go idle naturally after each cycle, leader wakes via background timers + SendMessage
+- Remove `maxIterations`/`currentIteration` from loop config and `create_sub_agent` — leader manually controls wake cycles
+
+### Removed
+- `SubagentStop` and `TeammateIdle` hooks — bash scripts deleted, entries removed from `hooks.json`
+- `Bash("sleep N")` enforcement from agent definitions — replaced with cycle-completion-then-idle pattern
+
 ## [0.8.56] - 2026-02-17
 
 ### Fixed

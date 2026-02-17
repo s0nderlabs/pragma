@@ -39,7 +39,7 @@ const GetSubAgentStateSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Optional: Teammate name for TeammateIdle hook lookup. " +
+      "Optional: Teammate name for leader wake lookup. " +
         "Pass the 'name' parameter from Task spawn (e.g., 'kairos-abc123')."
     ),
   includeTrades: z
@@ -122,8 +122,6 @@ interface GetSubAgentStateResult {
       mission: string;
       condition?: string;
       intervalMinutes?: number;
-      currentIteration: number;
-      maxIterations: number;
     };
     recentTrades?: Array<{
       timestamp: string;
@@ -140,7 +138,7 @@ export function registerGetSubAgentState(server: McpServer): void {
   server.tool(
     "get_sub_agent_state",
     "Get detailed state for a specific sub-agent including budget, trades, errors, and loop config. " +
-      "Can store taskAgentId for resume and teammateName for TeammateIdle hook lookup. " +
+      "Can store taskAgentId for resume and teammateName for leader wake lookup. " +
       "Use report_agent_status to update agent status.",
     GetSubAgentStateSchema.shape,
     async (params): Promise<{ content: Array<{ type: "text"; text: string }> }> => {
@@ -406,8 +404,6 @@ async function getSubAgentStateHandler(
               mission: loopConfig.mission,
               condition: loopConfig.condition,
               intervalMinutes: loopConfig.intervalMinutes,
-              currentIteration: loopConfig.currentIteration ?? 0,
-              maxIterations: loopConfig.maxIterations ?? 0,
             }
           : undefined,
         recentTrades,

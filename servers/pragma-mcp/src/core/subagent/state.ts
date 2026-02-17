@@ -164,7 +164,7 @@ export interface SubAgentState {
   agentType: "kairos" | "thymos" | "pragma";
   taskId: string; // Claude Code Task ID (for tracking)
   taskAgentId?: string; // Claude Code Task agent ID (for resume after gas top-up)
-  teammateName?: string; // Teammate name for TeammateIdle hook lookup (e.g., "kairos-abc123")
+  teammateName?: string; // Teammate name for leader wake lookup (e.g., "kairos-abc123")
   status: "pending" | "running" | "paused" | "completed" | "failed" | "revoked";
 
   // Budget tracking (soft limits - stored as string for JSON serialization)

@@ -5,7 +5,7 @@
 [![macOS](https://img.shields.io/badge/macOS-13%2B-black?logo=apple&logoColor=white)](https://support.apple.com/macos)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-cc785c?logo=anthropic&logoColor=white)](https://code.claude.com/docs/en/plugins)
 [![Monad](https://img.shields.io/badge/Monad-live-836EF9)](https://monad.xyz)
-[![Version](https://img.shields.io/badge/version-0.8.56-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.57-green.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ![pragma demo](assets/hero.gif)
@@ -159,7 +159,7 @@ pragma works in Claude Desktop and Cowork through a [Desktop Extension](https://
 | Autonomous agents | Yes (persistent loops) | Partial (runs then exits) |
 | x402 and BYOK modes | Yes | Yes |
 
-**Autonomous agent limitation:** In Claude Code, hooks keep agents alive between monitoring cycles (SubagentStop, TeammateIdle). These hooks aren't available in Cowork — agents can spawn and trade, but they complete their turns and exit rather than looping indefinitely. For persistent autonomous trading, use Claude Code CLI.
+**Autonomous agent limitation:** In Claude Code, the leader orchestrates agent wake cycles via background timers and SendMessage. This coordination isn't available in Cowork — agents can spawn and trade, but they complete their turns and exit rather than looping indefinitely. For persistent autonomous trading, use Claude Code CLI.
 
 ### Install (Claude Desktop)
 
@@ -473,7 +473,7 @@ graph TD
 
 Sub-delegations can only **narrow** the root scope — an agent can't spend more than its budget or trade on contracts not in the root whitelist. Capital stays in your smart account; agent wallets only hold MON for gas.
 
-Agents write structured journal entries that persist through context compaction. A `SubagentStop` hook keeps agents alive between monitoring cycles, re-injecting their mission until budget is depleted, delegation expires, or max iterations are reached.
+Agents write structured journal entries that persist through context compaction. The leader orchestrates wake cycles via background timers and SendMessage, re-injecting the agent's mission until budget is depleted or delegation expires.
 
 #### How Agents Are Spawned
 

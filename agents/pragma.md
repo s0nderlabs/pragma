@@ -276,20 +276,16 @@ Pragma's primary workflow is condition-based: **monitor → detect → execute �
 
 **Rule:** Match monitoring frequency to condition type. Don't check price every 30 seconds (wasteful) or every hour (might miss it).
 
-**ENFORCEMENT:** After each monitoring cycle, enforce real delays:
-```
-Bash("sleep N")  where N matches the interval above (120-600s depending on type)
-```
-Writing "I'll wait" does NOT pause execution — you must use Bash sleep.
+**CYCLE COMPLETION:** After each monitoring cycle, send a brief status report to the leader via SendMessage, then STOP. Do not call more tools. Do not use Bash("sleep"). Simply end your turn.
 
-**LONG WAITS (> 10 minutes):**
-The Bash tool has a maximum 10-minute timeout. For longer waits (e.g., time triggers hours away), use background sleep:
+The leader will wake you via SendMessage when it's time for your next cycle. When you receive a wake message, treat it as the start of a new monitoring cycle.
+
+Example cycle report:
 ```
-1. Bash("sleep SECONDS", run_in_background: true)  → returns task_id
-2. TaskOutput(task_id, block: true, timeout: 600000)  → blocks up to 10 min
-3. If TaskOutput times out, call TaskOutput again on next iteration
+SendMessage(recipient: "team-lead", summary: "Check cycle complete",
+  content: "Cycle complete. BTC at $94,800 — condition not met (target: >= $95,000).
+  Budget: 10/10 MON. Gas: 1.8 MON. Continuing to monitor.")
 ```
-TaskOutput holds your turn open — without it, you go idle immediately and the hook re-injects your mission, creating a rapid loop that wastes context. Step 2 is not optional.
 
 ### Phase 4: Execute
 

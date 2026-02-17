@@ -242,17 +242,9 @@ const CreateSubAgentSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Natural language task re-injected as the agent's next prompt when the SubagentStop hook blocks exit. " +
+      "Natural language task sent by the leader as a wake message between cycles. " +
         "Must be actionable and self-contained. " +
         "Example: 'Monitor BTC/USD. Buy when price hits $95,000. Budget: 10 MON.'"
-    ),
-  maxIterations: z
-    .number()
-    .min(0)
-    .max(10000)
-    .default(0)
-    .describe(
-      "Safety valve: max loop iterations before forcing exit. 0 = unlimited. Default: 0"
     ),
 });
 
@@ -287,7 +279,6 @@ interface CreateSubAgentResult {
       mission?: string;
       condition?: string;
       intervalMinutes?: number;
-      maxIterations?: number;
     };
     keychainNote?: string;
   };
@@ -651,14 +642,13 @@ async function createSubAgentHandler(
 
         switch (params.loopType) {
           case "continuous":
-            createContinuousLoop(agentId, mission, params.maxIterations ?? 0);
+            createContinuousLoop(agentId, mission);
             break;
           case "condition":
             createConditionLoop(
               agentId,
               params.loopCondition || "condition not specified",
               mission,
-              params.maxIterations ?? 0
             );
             break;
           case "interval":
@@ -666,7 +656,6 @@ async function createSubAgentHandler(
               agentId,
               params.loopIntervalMinutes || 5,
               mission,
-              params.maxIterations ?? 0
             );
             break;
         }
@@ -771,7 +760,6 @@ async function createSubAgentHandler(
                 mission: params.mission,
                 condition: params.loopCondition,
                 intervalMinutes: params.loopIntervalMinutes,
-                maxIterations: params.maxIterations ?? 0,
               }
             : undefined,
           keychainNote:
