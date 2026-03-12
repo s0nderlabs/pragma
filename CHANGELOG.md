@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.60] - 2026-03-13
+
+### Added
+- Auto-register agent identity after first `fund_session_key` — new users get their ERC-8004 identity NFT automatically on first MON funding
+
+### Fixed
+- `fund_session_key` no longer reports negative funded amounts when gas exceeds transfer amount
+
 ## [0.8.59] - 2026-03-13
 
 ### Fixed

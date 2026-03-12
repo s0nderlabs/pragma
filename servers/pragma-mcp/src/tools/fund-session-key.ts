@@ -15,9 +15,12 @@ import {
 } from "viem";
 import {
   loadConfig,
+  saveConfig,
   getBundlerUrl,
   getRpcUrl,
 } from "../config/pragma-config.js";
+import { registerAgentInSetup, type SetupRegistrationResult } from "../core/identity/erc8004.js";
+import type { PragmaConfig } from "../types/index.js";
 import { buildViemChain, getChainConfig } from "../config/chains.js";
 import { createHybridDelegatorHandle } from "../core/account/hybridDelegator.js";
 import {
@@ -68,7 +71,38 @@ interface ToolResponse {
     newBalanceWei: string;
     txHash: string;
   };
+  identity?: {
+    agentId?: string;
+    registrationStatus: SetupRegistrationResult["status"];
+  };
   error?: string;
+}
+
+/**
+ * Best-effort ERC-8004 identity registration after MON funding.
+ * If agentId already in config, returns immediately (no RPC).
+ * Never throws — registration failure doesn't affect funding.
+ * Mutates config.wallet.agentId and persists on successful registration.
+ */
+async function maybeRegisterAgent(
+  config: PragmaConfig,
+  chainId: number,
+): Promise<{ agentId?: string; registrationStatus: SetupRegistrationResult["status"] }> {
+  if (config.wallet?.agentId) {
+    return { agentId: config.wallet.agentId, registrationStatus: "already_registered" };
+  }
+  try {
+    const result = await registerAgentInSetup(config, chainId);
+    if (result.tokenId) {
+      const agentId = result.tokenId.toString();
+      config.wallet!.agentId = agentId;
+      await saveConfig(config);
+      return { agentId, registrationStatus: result.status };
+    }
+    return { registrationStatus: result.status };
+  } catch {
+    return { registrationStatus: "failed" };
+  }
 }
 
 export function registerFundSessionKey(server: McpServer): void {
@@ -218,6 +252,9 @@ async function fundSessionKeyHandler(
       });
     }
 
+    // Best-effort identity registration after MON funding
+    const identity = await maybeRegisterAgent(config, chainId);
+
     return {
       success: true,
       message: `Session key funded with ${formatEther(executionResult.fundedAmount)} MON via ${fundingMethod}`,
@@ -230,6 +267,7 @@ async function fundSessionKeyHandler(
         newBalanceWei: executionResult.newBalance.toString(),
         txHash: executionResult.transactionHash || executionResult.userOpHash,
       },
+      identity,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
@@ -359,6 +397,9 @@ async function fundSessionKeyHeadless(
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const newBalance = await publicClient.getBalance({ address: sessionKeyAddress });
 
+    // Best-effort identity registration after MON funding
+    const identity = await maybeRegisterAgent(config!, chainId);
+
     return {
       success: true,
       message: `Session key funded with ${formatEther(fundingAmount)} MON via delegation (headless)`,
@@ -371,6 +412,7 @@ async function fundSessionKeyHeadless(
         newBalanceWei: newBalance.toString(),
         txHash: result.txHash || "0x",
       },
+      identity,
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

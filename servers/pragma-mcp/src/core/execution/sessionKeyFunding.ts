@@ -377,9 +377,6 @@ export async function fundSessionKeyViaDelegation(
     fundingAmount = SESSION_KEY_FUNDING_AMOUNT,
   } = params;
 
-  // Get balance before funding
-  const balanceBefore = await publicClient.getBalance({ address: sessionKeyAddress });
-
   // Get chain ID from handle
   const chainId = handle.chain.id;
 
@@ -453,7 +450,7 @@ export async function fundSessionKeyViaDelegation(
     userOpHash: "0x" as Hex,
     transactionHash: txHash,
     newBalance,
-    fundedAmount: newBalance - balanceBefore,
+    fundedAmount: fundingAmount,
   };
 }
 
@@ -583,9 +580,6 @@ export async function fundSessionKeyViaUserOp(
     throw new Error("Bundler URL required for UserOp path");
   }
 
-  // Get balance before funding
-  const balanceBefore = await publicClient.getBalance({ address: sessionKeyAddress });
-
   // Step 1: Build execute() calldata
   const execution = customExecution ?? {
     target: sessionKeyAddress,
@@ -656,7 +650,7 @@ export async function fundSessionKeyViaUserOp(
     userOpHash,
     transactionHash: receipt.transactionHash,
     newBalance,
-    fundedAmount: newBalance - balanceBefore,
+    fundedAmount: fundingAmount,
   };
 }
 
