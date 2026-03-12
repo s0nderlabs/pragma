@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.59] - 2026-03-13
+
+### Fixed
+- Prevent duplicate identity NFT minting — `balanceOf > 0` guard blocks re-registration when tokenId not found in scan window (use `force=true` to override)
+- Increase MAX_LOOKBACK from 10K to 100K blocks (~28 hours) for ERC-8004 Transfer event scanning
+
+### Changed
+- Replace hand-rolled `Bash("sleep N")` wake timers with native CronCreate scheduling in autonomous-mode — per-agent crons, compaction-proof, auto-expires after 3 days
+- Add CronDelete step to agent cleanup flow
+
 ## [0.8.58] - 2026-03-13
 
 ### Added

@@ -184,7 +184,7 @@ export async function getAgentRegistration(
   try {
     const currentBlock = await publicClient.getBlockNumber();
     const MAX_CHUNK = 100n;
-    const MAX_LOOKBACK = 10_000n; // ~2.8 hours on Monad (1s blocks)
+    const MAX_LOOKBACK = 100_000n; // ~28 hours on Monad (1s blocks)
     const earliestBlock = currentBlock > MAX_LOOKBACK ? currentBlock - MAX_LOOKBACK : 0n;
 
     let toBlock = currentBlock;
@@ -357,7 +357,7 @@ export async function registerAgentInSetup(
     // Check if already registered — pass known tokenId from config for fast ownerOf check
     const knownTokenId = config.wallet?.agentId ? BigInt(config.wallet.agentId) : undefined;
     const existing = await getAgentRegistration(publicClient, sessionAccount.address, knownTokenId);
-    if (existing.registered && existing.tokenId !== undefined) {
+    if (existing.registered) {
       return {
         tokenId: existing.tokenId,
         status: "already_registered",

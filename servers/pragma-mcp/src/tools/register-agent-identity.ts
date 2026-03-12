@@ -111,7 +111,20 @@ async function registerAgentIdentityHandler(
       knownTokenId,
     );
 
-    if (existing.registered && existing.tokenId !== undefined && !params.force) {
+    if (existing.registered && !params.force) {
+      // If registered but tokenId unknown (scan window too short), don't mint a duplicate
+      if (existing.tokenId === undefined) {
+        return {
+          success: true,
+          message: "Agent already registered but tokenId not found in recent blocks. Use force=true to re-register.",
+          registration: {
+            agentId: "unknown",
+            agentURI: buildAgentURI(sessionAccount.address, config.wallet!.smartAccountAddress as `0x${string}`),
+            sessionKeyAddress: sessionAccount.address,
+            explorerUrl: "",
+          },
+        };
+      }
       const agentURI = buildAgentURI(sessionAccount.address, config.wallet!.smartAccountAddress as `0x${string}`);
 
       // If registered but URI is empty/different, try to update it

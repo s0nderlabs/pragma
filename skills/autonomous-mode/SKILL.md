@@ -27,6 +27,9 @@ allowed-tools:
   - TeamCreate
   - TeamDelete
   - SendMessage
+  - CronCreate
+  - CronDelete
+  - CronList
 ---
 
 # Autonomous Mode
@@ -690,75 +693,101 @@ This is needed for:
 
 With team spawn, gas resume uses `SendMessage` instead of `Task({ resume })` — teammates stay alive and just need a message to wake up.
 
-### Step 10: Orchestrate Agent Wake Cycles
+**Cron scheduling note:** After Step 10 creates the CronCreate job, the leader tracks the
+returned `cronJobId` in its context. If context compacts and `cronJobId` is lost, use
+`CronList()` to recover active jobs — match by agentId in the prompt text.
 
-After the agent confirms it's running (sends "Running — starting initial scan"), the leader enters the scheduling loop.
+### Step 10: Schedule Agent Wake Cycles via CronCreate
 
-**Leader scheduling loop:**
+After the agent confirms it's running (sends "Running — starting initial scan"), the leader
+creates a recurring cron job to wake the agent on a schedule.
 
-1. **Wait for agent cycle-complete message**
-   The agent sends a cycle report via SendMessage and goes idle.
-   Report to user: "Agent is running. It will operate autonomously."
+**One-shot tasks (loopType="none"):** Skip this step entirely. No cron needed.
 
-2. **Read state and check termination conditions:**
-   ```
-   get_sub_agent_state(subAgentId)
-   ```
-   ALL must pass to continue (ANY fail → agent stays idle, proceed to cleanup):
-   - status is "running" (not completed/failed/revoked/paused)
-   - loop.active is true and loop.type is not "none"
-   - trades.executed < trades.maxAllowed
-   - expiresAt > current time (check via `date -u`)
+**Step 10a: Wait for agent startup confirmation**
 
-3. **Start background timer:**
-   ```
-   Bash(
-     command: "sleep {seconds}",
-     description: "Wake {agentName} ({agentId})",
-     run_in_background: true
-   )
-   ```
-   The `description` appears in the task notification summary — the leader uses it
-   to identify which agent to wake. Include both name and ID for compaction recovery.
+The agent sends its first cycle report via SendMessage and goes idle.
+Report to user: "Agent is running. It will operate autonomously."
 
-   Duration by loop type:
-   - interval: loop.intervalMinutes * 60
-   - continuous: agent-type default (kairos: 600, thymos: 120, pragma: 300)
-   - condition: agent-type default
+**Step 10b: Check termination conditions before scheduling:**
 
-4. **When timer fires, re-check conditions** (step 2 again — state may have
-   changed during the wait, e.g., delegation expired). If still valid, wake:
-   ```
-   SendMessage(
-     type: "message",
-     recipient: "{agentName}",
-     summary: "Wake cycle",
-     content: "{mission}\n\nAgent ID: {agentId}.
-     Check get_sub_agent_state for current state."
-   )
-   ```
+```
+get_sub_agent_state(subAgentId)
+```
 
-5. Return to step 1.
+ALL must pass to create the cron (ANY fail → skip cron, proceed to cleanup):
+- status is "running" (not completed/failed/revoked/paused)
+- loop.active is true and loop.type is not "none"
+- trades.executed < trades.maxAllowed
+- expiresAt > current time (check via `date -u`)
+
+**Step 10c: Create cron job:**
+
+Determine the interval (in minutes):
+- interval type: `loop.intervalMinutes`
+- continuous type: agent-type default (kairos: 10, thymos: 2, pragma: 5)
+- condition type: agent-type default (kairos: 10, thymos: 2, pragma: 5)
+
+```
+CronCreate({
+  cron: "*/{intervalMinutes} * * * *",
+  recurring: true,
+  prompt: "Wake check: {agentType} agent {agentId} (teammate: {teammateName}).
+get_sub_agent_state({agentId}) → check status, loop, trades, expiry.
+If running + active + not exhausted + not expired → SendMessage wake with mission: {mission}
+If paused + walletBalance > 0.1 MON → auto-resume: report_agent_status({agentId}, running), then SendMessage wake.
+If paused + low balance → notify user, keep cron running.
+If terminal (completed/failed/revoked) or exhausted/expired → CronDelete this job via CronList, start Agent Cleanup Flow."
+})
+```
+
+**IMPORTANT:** The cron prompt MUST include `agentId`, `teammateName`, and `mission` as
+literal values (not variable references). These are baked into the prompt string at creation
+time, making the cron self-contained and compaction-proof.
+
+**Step 10d: Store cronJobId**
+
+CronCreate returns `{ id: "abc123", humanSchedule: "every 10 minutes", recurring: true }`.
+The leader holds `cronJobId` in context for cleanup. No disk persistence needed — cron jobs
+are session-scoped (die when session ends).
+
+If the leader needs to delete the cron after compaction:
+```
+CronList() → find job whose prompt contains the agentId → CronDelete(id)
+```
 
 **Multi-agent scheduling:**
-Each agent has its own independent `Bash("sleep", run_in_background: true)` timer.
-When agent A's timer fires, wake A; when B's fires, wake B. Agent messages
-arrive asynchronously — process each as received.
+
+Each agent gets its own CronCreate with its own interval:
+```
+CronCreate({ cron: "*/10 * * * *", prompt: "Wake check: kairos agent xyz-123..." })  → cronIdKairos
+CronCreate({ cron: "*/2 * * * *",  prompt: "Wake check: thymos agent abc-456..." })  → cronIdThymos
+```
+
+Cron fires are independent — when kairos's cron fires, the leader checks and wakes kairos;
+when thymos's fires, it checks and wakes thymos. No cross-agent interference.
 
 **Context compaction recovery:**
-If leader context compacts and loses scheduling state:
-1. `list_sub_agents(status: "running")` → find active agents
-2. For each: `get_sub_agent_state(subAgentId)` → read loop config
-3. Resume scheduling from current state (timers restart)
+
+With CronCreate, recovery is automatic:
+1. Crons keep firing even after compaction — each prompt re-invokes the leader with full context
+2. The leader reads the prompt, calls `get_sub_agent_state`, and proceeds normally
+3. No manual timer reconstruction needed
+
+**3-day auto-expiry:**
+
+CronCreate jobs auto-expire after 3 days. Most agents run hours to days — well within the window.
+The delegation expiry (checked each cron fire) is the authoritative time boundary.
+If an agent somehow outlasts the cron, the leader can re-create it.
 
 **Idle notifications:**
+
 Agent idle notifications are EXPECTED and NORMAL. The leader does NOT react to
-idle notifications — the background timer handles scheduling. Only react to agent
+idle notifications — the cron handles scheduling. Only react to agent
 SendMessage content. If an agent goes idle WITHOUT a preceding cycle report
-(e.g., hit context limit or errored mid-cycle), check `get_sub_agent_state`:
-if status is "running" and loop is active, schedule wake on normal timer;
-if status is terminal, proceed to cleanup. The agent retains its full context
-and will continue normally when woken.
+(e.g., hit context limit or errored mid-cycle), the next cron fire checks
+`get_sub_agent_state`: if status is "running" and loop is active, it wakes normally;
+if status is terminal, it deletes the cron and proceeds to cleanup.
 
 ### Step 11: Leader Enrichment Protocol
 
@@ -1233,6 +1262,13 @@ When a sub-agent terminates (for any reason), Main Claude handles cleanup:
     SendMessage(type: "shutdown_request", recipient: agent-name)
     Wait for shutdown_response (approve)
 
+2c. Cancel the agent's cron job (if loopType != "none"):
+    If cronJobId is known (in leader context):
+      CronDelete(cronJobId)
+    Else:
+      CronList() → find job whose prompt contains subAgentId → CronDelete(id)
+    If no matching cron found, it already expired or was deleted — proceed.
+
 3. Kill the Task process (MUST do before revoke):
    TaskStop(taskId)
    → The taskId is from the original Task() call that spawned the agent
@@ -1372,7 +1408,9 @@ When a sub-agent pauses due to low gas:
 7. `TeamCreate({ team_name: "pragma-1738900000" })` → team created
 8. `Task({ subagent_type: "pragma:kairos", team_name: "pragma-1738900000", name: "kairos-xyz123", mode: "bypassPermissions", prompt: "Monitor BTC..." })` → taskAgentId: "a32dec1"
 9. `get_sub_agent_state(xyz-123, taskAgentId: a32dec1, teammateName: "kairos-xyz123")` → stores for TaskStop + leader wake
-10. Report: "Kairos agent monitoring BTC for breakout above $95k."
+10. Wait for agent startup → `get_sub_agent_state(xyz-123)` → conditions pass →
+    `CronCreate({ cron: "*/10 * * * *", recurring: true, prompt: "Wake check: kairos agent xyz-123 (teammate: kairos-xyz123). ..." })` → cronJobId: "cron-abc"
+11. Report: "Kairos agent monitoring BTC for breakout above $95k. Scheduled every 10 minutes."
 
 **Agent starts:**
 1. `report_agent_status("xyz-123", "running")` → pending → running
