@@ -187,3 +187,13 @@ export const LOW_USDC_BALANCE_WARNING = 50_000n; // 0.05 USDC
  * Recommended USDC funding amount (in base units)
  */
 export const RECOMMENDED_USDC_FUNDING = 1_000_000n; // 1 USDC
+
+// ============================================================================
+// ERC-8004 Identity Registry
+// ============================================================================
+
+/**
+ * ERC-8004 Identity Registry address (deployed via CREATE2 — same on all EVM chains)
+ * Manages agent identity NFTs (ERC-721) with agentURI metadata
+ */
+export const IDENTITY_REGISTRY_ADDRESS = "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" as Address;

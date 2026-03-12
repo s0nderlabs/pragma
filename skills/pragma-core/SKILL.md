@@ -69,6 +69,7 @@ allowed-tools:
   - mcp__pragma__get_agent_log
   - mcp__pragma__write_agent_memo
   - mcp__pragma__list_wallet_pool
+  - mcp__pragma__register_agent_identity
   - AskUserQuestion
   - Read
   - Task
@@ -288,6 +289,7 @@ Before executing multiple operations, calculate total gas needed:
 | Agent     | `get_agent_log`             | Paginated journal log (trades, reasoning, status). Supports tag filter |
 | Agent     | `write_agent_memo`          | Persist structured state to agent journal (zero delegation cost) |
 | Agent     | `list_wallet_pool`          | List wallet pool wallets and assignments                       |
+| Identity  | `register_agent_identity`   | Register agent on ERC-8004 Identity Registry (no Touch ID)     |
 
 ### Context-Optimized Operations (IMPORTANT)
 

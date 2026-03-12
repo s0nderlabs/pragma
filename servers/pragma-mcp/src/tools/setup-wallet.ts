@@ -6,6 +6,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
+import { registerAgentInSetup } from "../core/identity/erc8004.js";
 import {
   createPasskey,
   getPasskeyPublicKey,
@@ -55,6 +56,8 @@ interface SetupResult {
     signingMethod: string;
     chainId: number;
     chainName: string;
+    agentId?: string;
+    registrationStatus?: string;
   };
   error?: string;
 }
@@ -289,6 +292,21 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
 
     await saveConfig(config);
 
+    // ERC-8004 Identity Registration (best-effort, non-blocking)
+    let agentId: string | undefined;
+    let registrationStatus = "skipped";
+    try {
+      const regResult = await registerAgentInSetup(config, chainId);
+      registrationStatus = regResult.status;
+      if (regResult.tokenId) {
+        agentId = regResult.tokenId.toString();
+        config.wallet!.agentId = agentId;
+        await saveConfig(config);
+      }
+    } catch {
+      registrationStatus = "failed";
+    }
+
     return {
       success: true,
       message: `Wallet created on ${chainConfig.displayName}`,
@@ -299,6 +317,8 @@ async function setupWallet(params: z.infer<typeof SetupWalletSchema>): Promise<S
         signingMethod: "P-256 (Touch ID)",
         chainId,
         chainName: chainConfig.displayName,
+        agentId,
+        registrationStatus,
       },
     };
   } catch (error) {

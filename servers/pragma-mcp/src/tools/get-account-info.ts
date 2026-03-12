@@ -17,6 +17,7 @@ interface GetAccountInfoResult {
     smartAccountAddress: string;
     sessionKeyAddress: string;
     keyId: string;
+    agentId?: string;
   };
   network?: {
     chainId: number;
@@ -112,6 +113,7 @@ async function getAccountInfoHandler(): Promise<GetAccountInfoResult> {
         smartAccountAddress: config.wallet!.smartAccountAddress,
         sessionKeyAddress: config.wallet!.sessionKeyAddress,
         keyId: config.wallet!.keyId,
+        agentId: config.wallet!.agentId,
       },
       network: {
         chainId: config.network.chainId,

@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.58] - 2026-03-13
+
+### Added
+- `register_agent_identity` MCP tool — registers pragma agent on the ERC-8004 Identity Registry on Monad, minting an identity NFT to the session key with spec-compliant agentURI
+- ERC-8004 identity module (`core/identity/erc8004.ts`) — `buildAgentURI`, `getAgentRegistration` (paginated 100-block log scan for Monad RPC limits), `registerAgent`, `updateAgentURIOnChain`
+- Auto-registration during `setup_wallet` — best-effort identity registration after wallet creation
+- `agentId` field in wallet config and `get_account_info` response
+- Smart account linking via `?owner=` query param in agentURI — links session key identity to HybridDeleGator trading address
+
 ## [0.8.57] - 2026-02-17
 
 ### Changed

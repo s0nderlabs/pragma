@@ -67,6 +67,8 @@ import { registerRevokeRootDelegation } from "./revoke-root-delegation.js";
 import { registerListWalletPool } from "./list-wallet-pool.js";
 import { registerGetAgentLog } from "./get-agent-log.js";
 import { registerWriteAgentMemo } from "./write-agent-memo.js";
+// ERC-8004 Identity
+import { registerRegisterAgentIdentity } from "./register-agent-identity.js";
 
 export function registerTools(server: McpServer): void {
   registerHasWallet(server);
@@ -138,4 +140,6 @@ export function registerTools(server: McpServer): void {
   registerListWalletPool(server);
   registerGetAgentLog(server);
   registerWriteAgentMemo(server);
+  // ERC-8004 Identity
+  registerRegisterAgentIdentity(server);
 }

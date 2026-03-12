@@ -97,6 +97,7 @@ function migrateConfig(rawConfig: Record<string, unknown>): PragmaConfig {
         smartAccountAddress,
         sessionKeyAddress,
         keyId,
+        ...(wallet.agentId ? { agentId: wallet.agentId as string } : {}),
       };
     }
   }

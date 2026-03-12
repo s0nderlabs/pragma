@@ -17,6 +17,7 @@ export interface PragmaConfig {
     smartAccountAddress: Address;
     sessionKeyAddress: Address;
     keyId: string; // P-256 key ID for HybridDelegator
+    agentId?: string; // ERC-8004 token ID (decimal string)
   };
   // BYOK mode only: maps service types to adapter names
   // Arrays support fallback (try first, fall back to second on failure)
